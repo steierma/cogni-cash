@@ -1,0 +1,211 @@
+#!/usr/bin/env bash
+# scripts/setup-server.sh
+#
+# One-time setup script for a fresh Linux host (Debian/Ubuntu or Alpine).
+# Run as root on the target machine:
+#
+#   curl -fsSL <YOUR_REPO_URL>/raw/branch/main/scripts/setup-server.sh | bash
+#
+# What it does:
+#   1. Installs Docker Engine, Compose plugin, rsync, and make
+#   2. Creates a dedicated `deploy` user with Docker access
+#   3. Creates the deployment directory at /opt/cogni-cash
+#   4. Generates a random PostgreSQL password and writes a ready-to-use .env
+#   5. Prints the SSH private key to add as a Forgejo secret (DEPLOY_SSH_KEY)
+
+set -euo pipefail
+
+DEPLOY_USER="${DEPLOY_USER:-deploy}"
+DEPLOY_PATH="${DEPLOY_PATH:-/opt/cogni-cash}"
+
+# Resolve the repo root — works whether the script is run from within the
+# cloned repo or piped directly via curl | bash (in which case REPO_DIR is
+# empty and we fall back to DEPLOY_PATH).
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || echo "")"
+if [ -n "$SCRIPT_DIR" ] && [ -f "$SCRIPT_DIR/../docker-compose.yml" ]; then
+  REPO_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+else
+  REPO_DIR=""
+fi
+
+echo "=================================================="
+echo " Local AI Financial Manager — Server Setup"
+echo "=================================================="
+echo "  Deploy user : $DEPLOY_USER"
+echo "  Deploy path : $DEPLOY_PATH"
+echo ""
+
+# ── 1. Dependencies & Docker ──────────────────────────────────────────────────
+echo ">>> Installing dependencies and Docker..."
+if command -v apt-get &>/dev/null; then
+  export DEBIAN_FRONTEND=noninteractive
+  apt-get update -qq
+  apt-get install -y -qq ca-certificates curl gnupg lsb-release rsync make
+
+  if ! command -v docker &>/dev/null; then
+    install -m 0755 -d /etc/apt/keyrings
+    curl -fsSL "https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg" \
+      | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+    chmod a+r /etc/apt/keyrings/docker.gpg
+    echo \
+      "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] \
+      https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
+      $(lsb_release -cs) stable" \
+      > /etc/apt/sources.list.d/docker.list
+    apt-get update -qq
+    apt-get install -y -qq docker-ce docker-ce-cli containerd.io docker-compose-plugin
+  fi
+elif command -v apk &>/dev/null; then
+  apk add --no-cache rsync make docker docker-cli-compose openssl
+  rc-update add docker default
+  service docker start
+else
+  echo "❌ Unsupported package manager. Install Docker manually: https://docs.docker.com/engine/install/"
+  exit 1
+fi
+
+echo "✅ Dependencies and Docker installed ($(docker --version))"
+systemctl enable --now docker 2>/dev/null || true
+
+# ── 2. Deploy user ────────────────────────────────────────────────────────────
+if id "$DEPLOY_USER" &>/dev/null; then
+  echo "✅ User '$DEPLOY_USER' already exists"
+else
+  echo ">>> Creating user '$DEPLOY_USER'..."
+  useradd --system --create-home --shell /bin/bash "$DEPLOY_USER"
+  echo "✅ User '$DEPLOY_USER' created"
+fi
+
+usermod -aG docker "$DEPLOY_USER"
+echo "✅ '$DEPLOY_USER' added to docker group"
+
+# ── 3. SSH key for CI/CD ──────────────────────────────────────────────────────
+SSH_DIR="/home/$DEPLOY_USER/.ssh"
+KEY_FILE="$SSH_DIR/forgejo_deploy"
+
+install -m 700 -o "$DEPLOY_USER" -g "$DEPLOY_USER" -d "$SSH_DIR"
+
+if [ ! -f "$KEY_FILE" ]; then
+  echo ">>> Generating deploy SSH key pair..."
+  ssh-keygen -t ed25519 -C "forgejo-deploy@$(hostname)" -f "$KEY_FILE" -N ""
+  chown "$DEPLOY_USER:$DEPLOY_USER" "$KEY_FILE" "$KEY_FILE.pub"
+fi
+
+# Prevent duplicate entries on re-runs
+KEY_PUB=$(cat "$KEY_FILE.pub")
+if ! grep -qF "$KEY_PUB" "$SSH_DIR/authorized_keys" 2>/dev/null; then
+  echo "$KEY_PUB" >> "$SSH_DIR/authorized_keys"
+fi
+chmod 600 "$SSH_DIR/authorized_keys"
+chown "$DEPLOY_USER:$DEPLOY_USER" "$SSH_DIR/authorized_keys"
+echo "✅ SSH key configured"
+
+# ── 4. Deployment directory ───────────────────────────────────────────────────
+install -m 755 -o "$DEPLOY_USER" -g "$DEPLOY_USER" -d "$DEPLOY_PATH"
+echo "✅ Deploy directory created: $DEPLOY_PATH"
+
+# ── 5. Generate .env with random credentials ──────────────────────────────────
+
+# Primary target: the backend/ dir inside the cloned repo (if we can find it),
+# otherwise fall back to the deploy path.
+if [ -n "$REPO_DIR" ]; then
+  ENV_FILE="$REPO_DIR/backend/.env"
+else
+  ENV_FILE="$DEPLOY_PATH/backend/.env"
+fi
+
+generate_env() {
+  local target="$1"
+  echo ">>> Generating random credentials..."
+  DB_PASSWORD=$(openssl rand -base64 32 | tr -dc 'a-zA-Z0-9' | head -c 32)
+  JWT_SECRET=$(openssl rand -hex 32)
+  ADMIN_PASSWORD=$(openssl rand -base64 16 | tr -dc 'a-zA-Z0-9' | head -c 16)
+
+  install -m 755 -d "$(dirname "$target")"
+
+  cat > "$target" << EOF
+# =============================================================================
+# Local AI Financial Manager — Environment
+# Generated by setup-server.sh on $(date -u +"%Y-%m-%dT%H:%M:%SZ")
+# This file is NOT committed to git.
+# =============================================================================
+
+# ── Server ───────────────────────────────────────────────────────────────────
+SERVER_ADDR=:8080
+
+# ── Authentication ───────────────────────────────────────────────────────────
+JWT_SECRET=${JWT_SECRET}
+ADMIN_USERNAME=admin
+ADMIN_PASSWORD=${ADMIN_PASSWORD}
+
+# ── PostgreSQL ────────────────────────────────────────────────────────────────
+# DATABASE_HOST is "postgres" — the Docker Compose service name.
+DATABASE_HOST=postgres
+DATABASE_PORT=5432
+POSTGRES_DB=invoice_db
+POSTGRES_USER=invoice_manager
+POSTGRES_PASSWORD=${DB_PASSWORD}
+EOF
+
+  chmod 600 "$target"
+  echo "✅ backend/.env written → $target"
+  echo "   POSTGRES_PASSWORD generated"
+}
+
+if [ -f "$ENV_FILE" ]; then
+  echo "✅ $ENV_FILE already exists — skipping generation (delete it to regenerate)"
+else
+  generate_env "$ENV_FILE"
+
+  # If running from repo root, also pre-populate DEPLOY_PATH for future deploys
+  if [ -n "$REPO_DIR" ] && [ "$DEPLOY_PATH/backend/.env" != "$ENV_FILE" ]; then
+    install -m 755 -d "$DEPLOY_PATH/backend"
+    cp "$ENV_FILE" "$DEPLOY_PATH/backend/.env"
+    chown -R "$DEPLOY_USER:$DEPLOY_USER" "$DEPLOY_PATH/backend" 2>/dev/null || true
+    echo "✅ Also copied to $DEPLOY_PATH/backend/.env"
+  fi
+fi
+
+# Fix ownership so the deploy user can read the file
+chown "$DEPLOY_USER:$DEPLOY_USER" "$ENV_FILE" 2>/dev/null || true
+
+# ── 6. Summary ────────────────────────────────────────────────────────────────
+SERVER_IP=$(hostname -I | awk '{print $1}')
+
+echo ""
+echo "=================================================="
+echo " ✅ Setup complete!"
+echo "=================================================="
+echo ""
+echo "  Server IP   : $SERVER_IP"
+echo "  Deploy user : $DEPLOY_USER"
+echo "  Deploy path : $DEPLOY_PATH"
+echo "  Env file    : $ENV_FILE"
+echo ""
+echo "── Generated credentials (save these!) ─────────────"
+# Re-read from the generated .env so we always print what's actually on disk.
+if [ -f "$ENV_FILE" ]; then
+  PRINTED_ADMIN_USER=$(grep '^ADMIN_USERNAME=' "$ENV_FILE" | cut -d= -f2-)
+  PRINTED_ADMIN_PASS=$(grep '^ADMIN_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+  PRINTED_DB_PASS=$(grep '^POSTGRES_PASSWORD=' "$ENV_FILE" | cut -d= -f2-)
+  echo "  App login   : username=${PRINTED_ADMIN_USER}  password=${PRINTED_ADMIN_PASS}"
+  echo "  DB password : ${PRINTED_DB_PASS}"
+fi
+echo ""
+echo "── Forgejo CI/CD secrets ───────────────────────────"
+echo "  Add these in Forgejo → Settings → Secrets → Actions:"
+echo ""
+echo "  DEPLOY_HOST     = $SERVER_IP"
+echo "  DEPLOY_USER     = $DEPLOY_USER"
+echo "  DEPLOY_PATH     = $DEPLOY_PATH"
+echo ""
+echo "  DEPLOY_SSH_KEY  (copy the block below, including the dashes):"
+echo ""
+cat "$KEY_FILE"
+echo ""
+echo "────────────────────────────────────────────────────"
+echo "  Next steps:"
+echo "  1. Add the secrets above to Forgejo."
+echo "  2. Run:  cd $DEPLOY_PATH && docker compose up -d"
+echo "  3. Open: http://$SERVER_IP:3000"
+echo "=================================================="

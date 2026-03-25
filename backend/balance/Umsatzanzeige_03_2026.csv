@@ -1,0 +1,54 @@
+
+Umsatzanzeige;Datei erstellt am: 01.04.2026 08:00
+
+IBAN;DE89 3704 0044 0532 0130 00
+Kontoname;Girokonto
+Bank;ING
+Kunde;Erika Mustermann
+Zeitraum;01.03.2026 - 31.03.2026
+Saldo;1247,55;EUR
+
+Sortierung;Erstbuchungsdatum, absteigend
+Ihre Umsaetze im angegebenen Zeitraum
+
+Buchung;Wertstellungsdatum;Auftraggeber/Empfaenger;Buchungstext;Verwendungszweck;Saldo;Waehrung;Betrag;Waehrung
+14.03.2026;14.03.2026;Amazon Visa Kreditkartenabrechnung;Lastschrift;Abrechnung 25.11.2025-13.03.2026;1247,55;EUR;-2.500,00;EUR
+27.03.2026;27.03.2026;Muster Arbeitgeber GmbH;Gehalt/Rente;LOHN GEHALT 03/2026;3747,55;EUR;4.752,01;EUR
+25.03.2026;25.03.2026;REWE SAGT DANKE;Lastschrift;KAUFUMSATZ 24.03 REWE;-1004,46;EUR;-91,20;EUR
+24.03.2026;24.03.2026;Musterstadt Verkehrsbetriebe;Lastschrift;Monatskarte Maerz 2026;-913,26;EUR;-86,00;EUR
+23.03.2026;23.03.2026;Streaming Dienst GmbH;Lastschrift;Abo Maerz 2026;-827,26;EUR;-17,99;EUR
+22.03.2026;22.03.2026;Restaurant Zur Linde;Lastschrift;KAUFUMSATZ 21.03;-809,27;EUR;-38,50;EUR
+21.03.2026;21.03.2026;LIDL SAGT DANKE;Lastschrift;KAUFUMSATZ 20.03 LIDL;-770,77;EUR;-58,40;EUR
+20.03.2026;20.03.2026;Stadtwerke Musterstadt GmbH;Lastschrift;Strom Maerz 2026;-712,37;EUR;-110,00;EUR
+19.03.2026;19.03.2026;Online Versand GmbH;Lastschrift;Bestellung 2026-0015;-602,37;EUR;-28,99;EUR
+18.03.2026;18.03.2026;Apotheke am Marktplatz;Lastschrift;KAUFUMSATZ 18.03;-573,38;EUR;-22,80;EUR
+17.03.2026;17.03.2026;Musterbank Ruecklastschrift;Lastschrift;Darl.-Leistung Tilgung;-550,58;EUR;-167,70;EUR
+16.03.2026;16.03.2026;Musikschule Musterstadt e. V.;Lastschrift;Unterrichtsgebuehren Maerz 2026;-382,88;EUR;-69,00;EUR
+15.03.2026;15.03.2026;Krankenversicherung AG;Lastschrift;Krankenversicherung 03/2026;-313,88;EUR;-79,86;EUR
+13.03.2026;13.03.2026;Familienkasse Bundesagentur;Gutschrift;Kindergeld 03/2026;-234,02;EUR;259,00;EUR
+12.03.2026;12.03.2026;Wohnungsvermietung GmbH;Dauerauftrag;Kaltmiete Maerz 2026;-493,02;EUR;-950,00;EUR
+11.03.2026;11.03.2026;ALDI SUED;Lastschrift;KAUFUMSATZ 10.03 ALDI;456,98;EUR;-47,30;EUR
+10.03.2026;10.03.2026;DB Bahn GmbH;Ueberweisung;Ticket 10.03.2026;504,28;EUR;-34,90;EUR
+09.03.2026;09.03.2026;Tiernahrung Fachmarkt;Lastschrift;KAUFUMSATZ 08.03;539,18;EUR;-67,81;EUR
+08.03.2026;08.03.2026;Drogerie Muster;Lastschrift;KAUFUMSATZ 07.03;606,99;EUR;-19,80;EUR
+07.03.2026;07.03.2026;Energie Versorgung GmbH;Lastschrift;Gas Maerz 2026;626,79;EUR;-95,00;EUR
+06.03.2026;06.03.2026;Sportverein Muster e. V.;Lastschrift;Beitrag 03/2026;721,79;EUR;-37,00;EUR
+05.03.2026;05.03.2026;Kindergarten Musterstadt;Ueberweisung;Beitrag Maerz 2026;758,79;EUR;-200,00;EUR
+04.03.2026;04.03.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.010 Einkauf;958,79;EUR;-33,49;EUR
+03.03.2026;03.03.2026;Mobilfunk Anbieter GmbH;Lastschrift;Rechnung Februar 2026;992,28;EUR;-14,99;EUR
+03.03.2026;03.03.2026;Telekom Muster GmbH;Lastschrift;Festnetz 03/2026;1007,27;EUR;-74,95;EUR
+02.03.2026;02.03.2026;Biokiste Muster GmbH;Lastschrift;Rechnung 03/2026;1082,22;EUR;-48,06;EUR
+02.03.2026;02.03.2026;Gemuese Lieferservice;Lastschrift;Rechnung Nr. 465011;1130,28;EUR;-36,42;EUR
+02.03.2026;02.03.2026;Energie Solar GmbH;Lastschrift;INV01590000;1166,70;EUR;-52,00;EUR
+01.03.2026;01.03.2026;Mustermann M.;Ueberweisung;FMT 01.03.2026;1218,70;EUR;800,00;EUR
+01.03.2026;01.03.2026;Bausparkasse Muster AG;Lastschrift;Sparrate 03/2026;418,70;EUR;-50,00;EUR
+01.03.2026;01.03.2026;Ratenzahlung Bank;Lastschrift;Ratenzahlung 01/2026;468,70;EUR;-78,73;EUR
+01.03.2026;01.03.2026;Ratenzahlung Bank;Lastschrift;Ratenzahlung 02/2026;547,43;EUR;-36,95;EUR
+01.03.2026;01.03.2026;Grundschule Musterstadt;Ueberweisung;Beitrag Maerz;584,38;EUR;-30,00;EUR
+01.03.2026;01.03.2026;Mustermann M.;Dauerauftrag;Tierkonto;614,38;EUR;-115,00;EUR
+01.03.2026;01.03.2026;Supermarkt E-Center Muster;Lastschrift;KAUFUMSATZ 28.02;729,38;EUR;-41,20;EUR
+01.03.2026;01.03.2026;Musik Streaming GmbH;Lastschrift;Abo 03/2026;770,58;EUR;-13,00;EUR
+01.03.2026;01.03.2026;Rundfunkanstalt Beitragsservice;Lastschrift;Rundfunkbeitrag Maerz 2026;783,58;EUR;-18,36;EUR
+01.03.2026;01.03.2026;Krankenkasse Zusatz AG;Gutschrift;Erstattung Rechnung;801,94;EUR;30,00;EUR
+01.03.2026;01.03.2026;Finanzamt Musterstadt;Gutschrift;Erstattung USt;771,94;EUR;14,00;EUR
+01.03.2026;01.03.2026;Mustermann E.;Ueberweisung;Privatdarlehen Rueckzahlung;757,94;EUR;1.300,00;EUR

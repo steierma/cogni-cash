@@ -1,0 +1,268 @@
+import { useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTranslation } from 'react-i18next';
+import { Check, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { createCategory, deleteCategory, fetchCategories, updateCategory } from '../api/client';
+import type { Category } from '../api/types';
+
+const PALETTE = [
+    '#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#f59e0b',
+    '#22c55e', '#14b8a6', '#0ea5e9', '#3b82f6', '#6b7280',
+    '#ef4444', '#84cc16',
+];
+
+function ColorPicker({ value, onChange }: { value: string; onChange: (c: string) => void }) {
+    return (
+        <div className="flex items-center gap-2 flex-wrap">
+            {PALETTE.map((c) => (
+                <button
+                    key={c}
+                    type="button"
+                    onClick={() => onChange(c)}
+                    className={`w-6 h-6 rounded-full border-2 transition-transform hover:scale-110 ${
+                        value === c ? 'border-gray-900 dark:border-white scale-110' : 'border-transparent'
+                    }`}
+                    style={{ backgroundColor: c }}
+                />
+            ))}
+            <input
+                type="color"
+                value={value}
+                onChange={(e) => onChange(e.target.value)}
+                className="w-7 h-7 p-0 border-0 rounded cursor-pointer"
+                title="Custom color"
+            />
+        </div>
+    );
+}
+
+function CategoryRow({
+                         cat,
+                         onSaved,
+                         onDelete,
+                     }: {
+    cat: Category;
+    onSaved: (id: string, name: string, color: string) => void;
+    onDelete: (id: string) => void;
+}) {
+    const { t } = useTranslation();
+    const [isEditing, setIsEditing] = useState(false);
+    const [editName, setEditName] = useState(cat.name);
+    const [editColor, setEditColor] = useState(cat.color);
+
+    if (isEditing) {
+        return (
+            <tr className="bg-gray-50 dark:bg-gray-800/50">
+                <td colSpan={3} className="px-4 py-4">
+                    <div className="space-y-4">
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
+                            <input
+                                autoFocus
+                                type="text"
+                                value={editName}
+                                onChange={(e) => setEditName(e.target.value)}
+                                className="w-full md:w-1/2 px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{t('common.color')}</label>
+                            <ColorPicker value={editColor} onChange={setEditColor} />
+                        </div>
+                        <div className="flex items-center gap-2 pt-2">
+                            <button
+                                onClick={() => {
+                                    onSaved(cat.id, editName, editColor);
+                                    setIsEditing(false);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
+                            >
+                                <Check size={16} /> {t('common.save')}
+                            </button>
+                            <button
+                                onClick={() => {
+                                    setEditName(cat.name);
+                                    setEditColor(cat.color);
+                                    setIsEditing(false);
+                                }}
+                                className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors"
+                            >
+                                <X size={16} /> {t('common.cancel')}
+                            </button>
+                        </div>
+                    </div>
+                </td>
+            </tr>
+        );
+    }
+
+    return (
+        <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
+            <td className="px-4 py-4 whitespace-nowrap">
+                <div className="flex items-center gap-3">
+                    <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
+                    <span className="font-medium text-gray-900 dark:text-gray-100">{cat.name}</span>
+                </div>
+            </td>
+            <td className="px-4 py-4 whitespace-nowrap">
+                <span
+                    className="px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide"
+                    style={{ backgroundColor: `${cat.color}20`, color: cat.color }}
+                >
+                    {cat.name}
+                </span>
+            </td>
+            <td className="px-4 py-4 text-right whitespace-nowrap">
+                <button
+                    onClick={() => setIsEditing(true)}
+                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors mr-2"
+                    title={t('common.edit')}
+                >
+                    <Pencil size={16} />
+                </button>
+                <button
+                    onClick={() => onDelete(cat.id)}
+                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                    title={t('common.delete')}
+                >
+                    <Trash2 size={16} />
+                </button>
+            </td>
+        </tr>
+    );
+}
+
+export default function CategoriesPage() {
+    const { t } = useTranslation();
+    const qc = useQueryClient();
+    const [isCreating, setIsCreating] = useState(false);
+    const [newName, setNewName] = useState('');
+    const [newColor, setNewColor] = useState(PALETTE[0]);
+
+    const { data: categories = [], isLoading } = useQuery({
+        queryKey: ['categories'],
+        queryFn: fetchCategories,
+    });
+
+    const createMut = useMutation({
+        mutationFn: (c: { name: string; color: string }) => createCategory(c.name, c.color),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    });
+
+    const updateMut = useMutation({
+        mutationFn: (c: { id: string; name: string; color: string }) => updateCategory(c.id, c.name, c.color),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    });
+
+    const deleteMut = useMutation({
+        mutationFn: deleteCategory,
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    });
+
+    const handleCreate = () => {
+        if (!newName.trim()) return;
+        createMut.mutate({ name: newName.trim(), color: newColor });
+        setIsCreating(false);
+        setNewName('');
+        setNewColor(PALETTE[0]);
+    };
+
+    const sorted = [...categories].sort((a, b) => a.name.localeCompare(b.name));
+
+    return (
+        <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100">{t('categories.title')}</h1>
+                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('categories.subtitle')}</p>
+                </div>
+                {!isCreating && (
+                    <button
+                        onClick={() => setIsCreating(true)}
+                        className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
+                    >
+                        <Plus size={16} /> {t('categories.newCategory')}
+                    </button>
+                )}
+            </div>
+
+            {isCreating && (
+                <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">{t('categories.createCategory')}</h3>
+                    <div className="space-y-4 max-w-lg">
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
+                            <input
+                                autoFocus
+                                type="text"
+                                value={newName}
+                                onChange={(e) => setNewName(e.target.value)}
+                                placeholder={t('categories.namePlaceholder')}
+                                className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{t('common.color')}</label>
+                            <ColorPicker value={newColor} onChange={setNewColor} />
+                        </div>
+                        <div className="flex items-center gap-2 pt-2">
+                            <button
+                                onClick={handleCreate}
+                                disabled={!newName.trim() || createMut.isPending}
+                                className="flex items-center gap-1.5 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50"
+                            >
+                                <Check size={16} /> {t('common.create')}
+                            </button>
+                            <button
+                                onClick={() => setIsCreating(false)}
+                                className="flex items-center gap-1.5 px-4 py-2 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors"
+                            >
+                                <X size={16} /> {t('common.cancel')}
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {isLoading ? (
+                <div className="h-32 bg-gray-100 dark:bg-gray-800 rounded-2xl animate-pulse" />
+            ) : (
+                <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
+                    <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-800/50 text-sm">
+                        <thead className="bg-gray-50 dark:bg-gray-800/50 text-xs uppercase text-gray-400 dark:text-gray-500 tracking-wide">
+                        <tr>
+                            <th className="px-4 py-3 text-left">{t('common.name')}</th>
+                            <th className="px-4 py-3 text-left">{t('categories.badgePreview')}</th>
+                            <th className="px-4 py-3 text-right">{t('common.actions')}</th>
+                        </tr>
+                        </thead>
+                        <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
+                        {sorted.map((cat) => (
+                            <CategoryRow
+                                key={cat.id}
+                                cat={cat}
+                                onSaved={(id, name, color) => updateMut.mutate({ id, name, color })}
+                                onDelete={(id) => {
+                                    const targetCat = categories.find(c => c.id === id);
+                                    if (targetCat && confirm(t('categories.deleteConfirm', { name: targetCat.name }))) {
+                                        deleteMut.mutate(id);
+                                    }
+                                }}
+                            />
+                        ))}
+                        </tbody>
+                    </table>
+                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-400 dark:text-gray-500 text-right">
+                        {t('categories.count', { count: sorted.length })}
+                    </div>
+                </div>
+            )}
+
+            {(updateMut.isError || deleteMut.isError) && (
+                <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl text-red-700 dark:text-red-400 text-sm mt-4">
+                    {t('common.errorUpdateDb')}
+                </div>
+            )}
+        </div>
+    );
+}

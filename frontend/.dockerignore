@@ -1,0 +1,9 @@
+# ── Dependencies & build output (rebuilt inside the container) ────────────────
+node_modules/
+dist/
+
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+*.swp
+

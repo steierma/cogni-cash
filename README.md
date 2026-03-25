@@ -20,11 +20,7 @@ A self-hosted personal finance application that imports bank statements (PDF, CS
 
 ## Intro Video
 
-<p>
-  <video src="https://github.com/steierma/cogni-cash/blob/main/docs/cogni-cash-low.mp4" width="100%" controls autoplay loop muted>
-    Your browser does not support the video tag.
-  </video>
-</p>
+https://github.com/user-attachments/assets/44a99551-3589-4b79-b353-bb4d597fd291
 
 ## Architecture
 
@@ -35,7 +31,11 @@ The project follows **Strict Hexagonal (Ports and Adapters)** architecture. The 
 │                          Domain (Core)                         │
 │   Entities: Invoice, BankStatement, Transaction, Category,     │
 │             Payslip, User, Reconciliation, Setting             │
-│   Services: Categorization, BankStatement, Transaction,        │
+│   Services: Categorization, BankStatem
+
+Uploading cogni-cash-low.mp4…
+
+ent, Transaction,        │
 │             Payslip, Settings, Auth, User, Reconciliation      │
 │   Ports:    Repos (Invoice, BankStmt, Payslip, Category,       │
 │             User, Reconciliation, Settings), Parsers,          │

@@ -11,12 +11,12 @@ A self-hosted personal finance application that imports bank statements (PDF, CS
 - [Environment Variables](#environment-variables)
 - [System Configuration (Web UI)](#system-configuration-web-ui)
 - [Frontend Pages & Capabilities](#frontend-pages--capabilities)
-- [Internationalisation (i18n)](#internationalisation-i18n)
+- [Internationalization (i18n)](#internationalization-i18n)
 - [API Reference](#api-reference)
 - [Make Commands](#make-commands)
 - [Database](#database)
 
------
+---
 
 ## Intro Video
 
@@ -30,28 +30,31 @@ The project follows **Strict Hexagonal (Ports and Adapters)** architecture. The 
 ┌────────────────────────────────────────────────────────────────┐
 │                          Domain (Core)                         │
 │   Entities: Invoice, BankStatement, Transaction, Category,     │
-│             Payslip, User, Reconciliation, Setting             │
-│   Services: Categorization, BankStatem
-
-Uploading cogni-cash-low.mp4…
-
-ent, Transaction,        │
+│             Payslip, User, Reconciliation, Setting,            │
+│             ReconciliationPairSuggestion                       │
+│   Errors:   entity/errors.go (all sentinel errors centralised) │
+│   Services: Categorization, BankStatement, Transaction,        │
 │             Payslip, Settings, Auth, User, Reconciliation      │
 │   Ports:    Repos (Invoice, BankStmt, Payslip, Category,       │
 │             User, Reconciliation, Settings), Parsers,          │
-│             LLMClient, JobTracker                              │
+│             LLMClient, JobTracker, PayslipParser               │
+│   Use-Case Ports (Driving): AuthUseCase, UserUseCase,          │
+│             InvoiceCategorizationUseCase, BankStatementUseCase, │
+│             TransactionUseCase, ReconciliationUseCase,          │
+│             SettingsUseCase, PayslipUseCase                     │
 └────────────┬──────────────────────────────────────────────────┬┘
              │ implements                                       │ implements
    ┌─────────▼───────────┐                          ┌───────────▼────────────┐
    │   Input Adapters    │                          │   Output Adapters      │
    │  (Driving side)     │                          │  (Driven side)         │
    │  • REST API (chi)   │                          │  • PostgresRepo (pgx)  │
-   │  • Dir watcher      │                          │  • OllamaAdapter       │
-   │  • File upload      │                          │  • ING PDF/CSV Parser  │
-   │  • JSON cron        │                          │  • Amazon Visa Parser  │
-   │  • CLI tools        │                          │  • VW / CARIAD Parser  │
-   └─────────────────────┘                          │  • AI Fallback Parser  │
-                                                    └────────────────────────┘
+   │    depends on port  │                          │  • OllamaAdapter       │
+   │    interfaces only  │                          │  • ING PDF/CSV Parser  │
+   │  • Dir watcher      │                          │  • Amazon Visa Parser  │
+   │  • File upload      │                          │  • VW / CARIAD Parser  │
+   │  • JSON cron        │                          │  • AI Fallback Parser  │
+   │  • CLI tools        │                          └────────────────────────┘
+   └─────────────────────┘
    ┌─────────────────────┐
    │  Reverse Proxy      │
    │  • Caddy (HTTPS)    │
@@ -59,9 +62,9 @@ ent, Transaction,        │
    └─────────────────────┘
 ```
 
-All feature code is written **test-first (TDD)**. Domain logic is tested with mocks — no database or network connection needed to run the unit tests.
+All feature code is written **test-first (TDD)**. Domain logic is tested with mocks — no database or network connection needed to run the unit tests. Domain service test coverage is **81 %**.
 
------
+---
 
 ## Tech Stack
 
@@ -85,7 +88,7 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 | **Container runtime** | Docker + Compose                              |
 | **CI/CD** | Forgejo Actions → GHCR                        |
 
------
+---
 
 ## Project Structure
 
@@ -101,12 +104,12 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 │   │   └── resetpw/           # CLI tool to reset user passwords
 │   ├── internal/
 │   │   ├── domain/
-│   │   │   ├── entity/        # Invoice, BankStatement, Transaction, Category, Payslip, User, Reconciliation, Setting
+│   │   │   ├── entity/        # Invoice, BankStatement, Transaction, Category, Payslip, User, Reconciliation, Setting, ReconciliationPairSuggestion, errors.go
 │   │   │   ├── hash/          # Deterministic SHA-256 content hashing (idempotency keys)
-│   │   │   ├── port/          # Repository & client interfaces (ports)
+│   │   │   ├── port/          # Repository, parser & use-case interfaces (ports): repos, LLMClient, PayslipParser, JobTracker, use_cases.go (8 driving-side ports)
 │   │   │   └── service/       # Categorization, BankStatement, Transaction, Payslip, Auth, User, Reconciliation, Settings, JobManager
 │   │   └── adapter/
-│   │       ├── http/          # chi REST handler + JWT/RBAC middleware
+│   │       ├── http/          # chi REST handler + JWT/RBAC middleware (depends on port interfaces, not service structs)
 │   │       ├── ollama/        # LLMClient implementation (Ollama / Gemini)
 │   │       ├── parser/
 │   │       │   ├── bank_statement/  # ing/, ingcsv/, amazonvisa/, vw/, ai/
@@ -149,7 +152,7 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 └── Makefile
 ```
 
------
+---
 
 ## Getting Started
 
@@ -194,7 +197,7 @@ PAYSLIP_HOST_DIR=/tmp/payslips
 
 Drop a `payslips_import.json` + PDF files into that directory and the background cron imports them within one interval tick.
 
------
+---
 
 ## Environment Variables
 
@@ -205,18 +208,18 @@ All variables live in `backend/.env`. Base infrastructure variables are required
 | Variable               | Default                            | Description                                                            |
 |------------------------|------------------------------------|------------------------------------------------------------------------|
 | `SERVER_ADDR`          | `:8080`                            | HTTP listen address                                                    |
-| `JWT_SECRET`           | *(generated by `setup-server.sh`)* | Secret key used to sign JWTs — **change this in production**           |
+| `JWT_SECRET`           | *(generated by `setup-server.sh`)* | Secret key used to sign JWTs — **change this in production** |
 | `ADMIN_USERNAME`       | `admin`                            | Username for the initial admin web UI login                            |
 | `ADMIN_PASSWORD`       | *(generated by `setup-server.sh`)* | Password for the initial admin — seeded on first startup, rotated if changed |
 | `DOMAIN_NAME`          | `localhost`                        | Public domain for Caddy auto-HTTPS. Use `localhost` for local testing  |
-| `ALLOWED_ORIGINS`      | *(deny all)*                       | Comma-separated list of allowed CORS origins (e.g. `http://localhost:5173`) |
+| `ALLOWED_ORIGINS`      | *(deny all)* | Comma-separated list of allowed CORS origins (e.g. `http://localhost:5173`) |
 
 ### Database
 
 | Variable               | Default       | Description                                                    |
 |------------------------|---------------|----------------------------------------------------------------|
 | `POSTGRES_USER`        | —             | Database username                                              |
-| `POSTGRES_PASSWORD`    | —             | Database password — **required**                               |
+| `POSTGRES_PASSWORD`    | —             | Database password — **required** |
 | `POSTGRES_DB`          | —             | Database name                                                  |
 | `DATABASE_HOST`        | `localhost`   | DB hostname — use `postgres` inside Docker Compose             |
 | `DATABASE_PORT`        | `5432`        | DB port                                                        |
@@ -232,9 +235,9 @@ All variables live in `backend/.env`. Base infrastructure variables are required
 
 | Variable                   | Default              | Description                                                            |
 |----------------------------|----------------------|------------------------------------------------------------------------|
-| `IMPORT_DIR`               | *(empty)*            | Directory to watch for auto-importing bank statement files             |
+| `IMPORT_DIR`               | *(empty)* | Directory to watch for auto-importing bank statement files             |
 | `IMPORT_INTERVAL`          | `1h`                 | Polling interval for the directory watcher (Go duration)               |
-| `PAYSLIP_IMPORT_JSON_PATH` | *(empty)*            | Path to `payslips_import.json` manifest. Worker imports entries, deletes imported PDFs, keeps JSON. |
+| `PAYSLIP_IMPORT_JSON_PATH` | *(empty)* | Path to `payslips_import.json` manifest. Worker imports entries, deletes imported PDFs, keeps JSON. |
 | `PAYSLIP_IMPORT_INTERVAL`  | `1h`                 | Polling interval for the payslip JSON cron (Go duration)               |
 | `PAYSLIP_HOST_DIR`         | `./backend/payslips` | **Docker Compose only.** Host path bind-mounted to `/app/payslips`     |
 
@@ -248,7 +251,7 @@ All variables live in `backend/.env`. Base infrastructure variables are required
 | `SMTP_PASSWORD`  | —       | SMTP authentication password     |
 | `SMTP_FROM_EMAIL`| —       | Sender address for outgoing mail |
 
------
+---
 
 ## System Configuration (Web UI)
 
@@ -272,7 +275,7 @@ Instead of hardcoding functionality in `.env` files, the **Settings Page** (`/se
 * **Default Currency:** Used for analytics display.
 * **UI Language:** Select from English, German, Spanish, or French. Applied instantly and persisted to the database.
 
------
+---
 
 ## Frontend Pages & Capabilities
 
@@ -293,9 +296,9 @@ The React frontend has been built to provide deep analytics and efficient batch 
 | `/settings`        | **Settings** | Configure LLM parameters, edit system prompts, manage background auto-import/categorization intervals, change themes, **select UI language**, update passwords, and persist UI preferences. |
 | `/login`           | **Login** | JWT-based authentication. Redirects to Dashboard on success. |
 
------
+---
 
-## Internationalisation (i18n)
+## Internationalization (i18n)
 
 The frontend supports **four** display languages via **`i18next`** and **`react-i18next`**:
 
@@ -310,7 +313,7 @@ The active language is auto-detected from the browser on first visit and persist
 
 All pages and components use `useTranslation()` — zero hard-coded user-visible strings remain in the JSX.
 
------
+---
 
 ## API Reference
 
@@ -318,98 +321,98 @@ The backend exposes a RESTful API under the `/api/v1` namespace. All endpoints e
 
 ### Public Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check — returns `{"status": "ok"}` |
-| `POST` | `/api/v1/login` | Authenticate and receive a JWT |
+| Method | Path            | Description                                |
+|--------|-----------------|--------------------------------------------|
+| `GET`  | `/health`       | Health check — returns `{"status": "ok"}`  |
+| `POST` | `/api/v1/login` | Authenticate and receive a JWT             |
 
 ### Authenticated Endpoints
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/auth/me` | Get current user profile |
-| `POST` | `/api/v1/auth/change-password` | Change current user's password |
-| `GET` | `/api/v1/system/info` | System info (DB state, storage mode, version) |
+| Method | Path                             | Description                                   |
+|--------|----------------------------------|-----------------------------------------------|
+| `GET`  | `/api/v1/auth/me`                | Get current user profile                      |
+| `POST` | `/api/v1/auth/change-password`   | Change current user's password                |
+| `GET`  | `/api/v1/system/info`            | System info (DB state, storage mode, version) |
 
 ### Settings
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/settings/` | Get all settings |
-| `PATCH` | `/api/v1/settings/` | Update settings (key-value pairs) |
+| Method  | Path                | Description                         |
+|---------|---------------------|-------------------------------------|
+| `GET`   | `/api/v1/settings/` | Get all settings                    |
+| `PATCH` | `/api/v1/settings/` | Update settings (key-value pairs)   |
 
 ### Users (Admin Only)
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/users/` | List users (optional `?q=` search) |
-| `GET` | `/api/v1/users/{id}` | Get user by ID |
-| `POST` | `/api/v1/users/` | Create user |
-| `PUT` | `/api/v1/users/{id}` | Update user |
-| `DELETE` | `/api/v1/users/{id}` | Delete user |
+| Method   | Path                 | Description                        |
+|----------|----------------------|------------------------------------|
+| `GET`    | `/api/v1/users/`     | List users (optional `?q=` search) |
+| `GET`    | `/api/v1/users/{id}` | Get user by ID                     |
+| `POST`   | `/api/v1/users/`     | Create user                        |
+| `PUT`    | `/api/v1/users/{id}` | Update user                        |
+| `DELETE` | `/api/v1/users/{id}` | Delete user                        |
 
 ### Invoices
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/invoices/` | List all invoices |
-| `GET` | `/api/v1/invoices/{id}` | Get invoice by ID |
-| `POST` | `/api/v1/invoices/categorize` | Submit raw text for LLM categorization |
-| `DELETE` | `/api/v1/invoices/{id}` | Delete invoice |
+| Method   | Path                          | Description                            |
+|----------|-------------------------------|----------------------------------------|
+| `GET`    | `/api/v1/invoices/`           | List all invoices                      |
+| `GET`    | `/api/v1/invoices/{id}`       | Get invoice by ID                      |
+| `POST`   | `/api/v1/invoices/categorize` | Submit raw text for LLM categorization |
+| `DELETE` | `/api/v1/invoices/{id}`       | Delete invoice                         |
 
 ### Bank Statements
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/bank-statements/` | List all statement summaries |
-| `GET` | `/api/v1/bank-statements/{id}` | Get statement with transactions |
-| `GET` | `/api/v1/bank-statements/{id}/download` | Download original file |
-| `POST` | `/api/v1/bank-statements/import` | Import file(s) — multipart upload |
-| `DELETE` | `/api/v1/bank-statements/{id}` | Delete statement + cascade transactions |
+| Method   | Path                                    | Description                               |
+|----------|-----------------------------------------|-------------------------------------------|
+| `GET`    | `/api/v1/bank-statements/`              | List all statement summaries              |
+| `GET`    | `/api/v1/bank-statements/{id}`          | Get statement with transactions           |
+| `GET`    | `/api/v1/bank-statements/{id}/download` | Download original file                    |
+| `POST`   | `/api/v1/bank-statements/import`        | Import file(s) — multipart upload         |
+| `DELETE` | `/api/v1/bank-statements/{id}`          | Delete statement + cascade transactions   |
 
 ### Transactions
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/transactions/` | List transactions (filterable) |
-| `GET` | `/api/v1/transactions/analytics` | Aggregated analytics (KPIs, time series, top merchants) |
-| `PATCH` | `/api/v1/transactions/{hash}/category` | Update transaction category |
-| `POST` | `/api/v1/transactions/auto-categorize/start` | Start async batch categorization |
-| `GET` | `/api/v1/transactions/auto-categorize/status` | Poll job progress |
-| `POST` | `/api/v1/transactions/auto-categorize/cancel` | Cancel running job |
+| Method   | Path                                          | Description                                             |
+|----------|-----------------------------------------------|---------------------------------------------------------|
+| `GET`    | `/api/v1/transactions/`                       | List transactions (filterable)                          |
+| `GET`    | `/api/v1/transactions/analytics`              | Aggregated analytics (KPIs, time series, top merchants) |
+| `PATCH`  | `/api/v1/transactions/{hash}/category`        | Update transaction category                             |
+| `POST`   | `/api/v1/transactions/auto-categorize/start`  | Start async batch categorization                        |
+| `GET`    | `/api/v1/transactions/auto-categorize/status` | Poll job progress                                       |
+| `POST`   | `/api/v1/transactions/auto-categorize/cancel` | Cancel running job                                      |
 
 ### Categories
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/categories/` | List all categories |
-| `POST` | `/api/v1/categories/` | Create category |
-| `PUT` | `/api/v1/categories/{id}` | Update category |
-| `DELETE` | `/api/v1/categories/{id}` | Delete category |
+| Method   | Path                      | Description       |
+|----------|---------------------------|-------------------|
+| `GET`    | `/api/v1/categories/`     | List all categories |
+| `POST`   | `/api/v1/categories/`     | Create category   |
+| `PUT`    | `/api/v1/categories/{id}` | Update category   |
+| `DELETE` | `/api/v1/categories/{id}` | Delete category   |
 
 ### Reconciliations
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/reconciliations/suggestions` | Get matching transaction pairs |
-| `GET` | `/api/v1/reconciliations/` | List all reconciliations |
-| `POST` | `/api/v1/reconciliations/` | Create reconciliation link |
-| `DELETE` | `/api/v1/reconciliations/{id}` | Delete reconciliation link |
+| Method   | Path                                  | Description                    |
+|----------|---------------------------------------|--------------------------------|
+| `GET`    | `/api/v1/reconciliations/suggestions` | Get matching transaction pairs |
+| `GET`    | `/api/v1/reconciliations/`            | List all reconciliations       |
+| `POST`   | `/api/v1/reconciliations/`            | Create reconciliation link     |
+| `DELETE` | `/api/v1/reconciliations/{id}`        | Delete reconciliation link     |
 
 ### Payslips
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/payslips/` | List all payslips |
-| `GET` | `/api/v1/payslips/{id}` | Get payslip by ID |
-| `GET` | `/api/v1/payslips/{id}/download` | Download original PDF |
-| `POST` | `/api/v1/payslips/import` | Import single payslip (multipart) |
-| `POST` | `/api/v1/payslips/import/batch` | Batch import multiple payslips |
-| `PUT` | `/api/v1/payslips/{id}` | Update payslip (JSON or multipart) |
-| `PATCH` | `/api/v1/payslips/{id}` | Partial update payslip |
-| `DELETE` | `/api/v1/payslips/{id}` | Delete payslip |
+| Method   | Path                            | Description                         |
+|----------|---------------------------------|-------------------------------------|
+| `GET`    | `/api/v1/payslips/`             | List all payslips                   |
+| `GET`    | `/api/v1/payslips/{id}`         | Get payslip by ID                   |
+| `GET`    | `/api/v1/payslips/{id}/download`| Download original PDF               |
+| `POST`   | `/api/v1/payslips/import`       | Import single payslip (multipart)   |
+| `POST`   | `/api/v1/payslips/import/batch` | Batch import multiple payslips      |
+| `PUT`    | `/api/v1/payslips/{id}`         | Update payslip (JSON or multipart)  |
+| `PATCH`  | `/api/v1/payslips/{id}`         | Partial update payslip              |
+| `DELETE` | `/api/v1/payslips/{id}`         | Delete payslip                      |
 
------
+---
 
 ## Make Commands
 
@@ -460,7 +463,7 @@ make clean-all          # Remove binary + frontend dist + node_modules
 make nuke               # ⚠️ Stop containers + wipe volumes + remove images + clean artifacts
 ```
 
------
+---
 
 ## Database
 
@@ -470,7 +473,7 @@ Migrations are plain SQL files in `backend/migrations/`, applied in lexicographi
 |---|---|
 | `001_initial_schema.sql` | Consolidated schema: all tables (`users`, `categories`, `bank_statements`, `reconciliations`, `transactions`, `invoices`, `settings`, `payslips`, `payslip_bonuses`) with all columns, indexes, and constraints in their final state. |
 
------
+---
 
 ## Target Architecture & Roadmap
 
@@ -493,6 +496,5 @@ SMTP configuration variables (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSW
 ### 4. Resilient Backup Strategy (Proxmox + rclone)
 
 * [ ] Implement off-site encrypted backups of PostgreSQL dumps and the `payslips` directory to Google Drive via `rclone`.
-* [ ] Document local manual backup procedures and enforce manual Proxmox snapshots prior to major upgrades.
+* [ ] Document local manual backup procedures and enforce manual Proxmox snapshots prior to major upgrades (ensuring manual recovery with no automated rollbacks).
 * [ ] `make db-dump-remote` and `make db-restore-remote` are available for manual backup/restore operations.
-

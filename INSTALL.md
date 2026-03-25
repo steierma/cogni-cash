@@ -2,10 +2,10 @@
 
 ## Requirements
 
-| Scenario                        | What you need                             |
-|---------------------------------|-------------------------------------------|
-| **Docker deploy** (recommended) | Docker Engine 24+ with the Compose plugin 
-| **Local dev — full stack**      | Go 1.26+, Node.js 22+, PostgreSQL, Ollama 
+| Scenario                        | What you need                               |
+|---------------------------------|---------------------------------------------|
+| **Docker deploy** (recommended) | Docker Engine 24+ with the Compose plugin   |
+| **Local dev — full stack** | Go 1.26+, Node.js 22+, PostgreSQL, Ollama   |
 
 ---
 
@@ -15,12 +15,9 @@ The only thing required on the host is Docker. No Go, no Node.js, no manual data
 
 > **How the database is provisioned automatically**
 >
-> On the very first `docker compose up`, the `postgres:16-alpine` image reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, and
-`POSTGRES_DB` from your `.env` and automatically creates the user, sets the password, and creates the database — no
-> manual `CREATE USER` or `CREATE DATABASE` needed.
+> On the very first `docker compose up`, the `postgres:16-alpine` image reads `POSTGRES_USER`, `POSTGRES_PASSWORD`, and `POSTGRES_DB` from your `.env` and automatically creates the user, sets the password, and creates the database — no manual `CREATE USER` or `CREATE DATABASE` needed.
 >
-> The `migrate` container starts immediately after postgres is healthy and applies all versioned SQL files in
-`backend/migrations/` in order. By the time the backend starts, the schema is fully ready.
+> The `migrate` container starts immediately after postgres is healthy and applies all versioned SQL files in `backend/migrations/` in order. By the time the backend starts, the schema is fully ready.
 >
 > The full startup sequence is:
 > ```text
@@ -47,8 +44,7 @@ cp backend/.env.example backend/.env
 # Edit backend/.env — set the values below at minimum
 ```
 
-`backend/.env` is the **single source of truth** for all credentials — loaded by `docker compose` (via
-`env_file: backend/.env`) and by `make backend-run` / `make db-migrate`.
+`backend/.env` is the **single source of truth** for all credentials — loaded by `docker compose` (via `env_file: backend/.env`) and by `make backend-run` / `make db-migrate`.
 
 ```dotenv
 JWT_SECRET=<random-hex-string>             # openssl rand -hex 32
@@ -86,7 +82,7 @@ postgres (healthy) → migrate (exits 0) → backend (healthy) → frontend
 ### 5. Verify
 
 ```bash
-make ps                          # all containers should show "healthy"
+make ps                            # all containers should show "healthy"
 curl http://localhost:8080/health  # → {"status":"ok"}
 open http://localhost:3000         # frontend
 ```
@@ -94,9 +90,9 @@ open http://localhost:3000         # frontend
 ### Useful commands
 
 ```bash
-make logs      # tail logs for all containers
-make down      # stop everything (data volume is preserved)
-make restart   # restart all containers
+make logs                # tail logs for all containers
+make down                # stop everything (data volume is preserved)
+make restart             # restart all containers
 docker compose down -v   # stop + wipe the postgres volume (full reset)
 ```
 
@@ -113,8 +109,7 @@ cd cogni-cash
 
 ### 2. Run the setup script (once only)
 
-Run it **from inside the cloned repo** as root. It detects the repo directory and writes `backend/.env` directly there
-with a randomly generated password.
+Run it **from inside the cloned repo** as root. It detects the repo directory and writes `backend/.env` directly there with a randomly generated password.
 
 ```bash
 sudo bash scripts/setup-server.sh
@@ -133,8 +128,7 @@ You can override the Ollama URL before running:
 sudo OLLAMA_URL=http://YOUR_OLLAMA_HOST:11434 bash scripts/setup-server.sh
 ```
 
-Re-running the script is safe — it skips steps that are already done and **never overwrites an existing `backend/.env`
-**.
+Re-running the script is safe — it skips steps that are already done and **never overwrites an existing `backend/.env`**.
 
 ### 3. Add Forgejo secrets
 
@@ -164,7 +158,7 @@ The pipeline runs:
 ### Manual deploy (without CI)
 
 ```bash
-make deploy                                        # uses defaults in Makefile
+make deploy                                       # uses defaults in Makefile
 make deploy DEPLOY_HOST=x.x.x.x                   # override host
 ```
 
@@ -187,9 +181,7 @@ make backend-run
 make frontend-dev
 ```
 
-> **`make backend-run` automatically sets `DATABASE_HOST=localhost` and resolves
-> `PAYSLIP_IMPORT_JSON_PATH` to the local `backend/payslips/` directory**, so the
-> cron worker works the same way as in Docker without any extra configuration.
+> **`make backend-run` automatically sets `DATABASE_HOST=localhost` and resolves `PAYSLIP_IMPORT_JSON_PATH` to the local `backend/payslips/` directory**, so the cron worker works the same way as in Docker without any extra configuration.
 
 ### Payslip JSON bulk import (Docker & local)
 
@@ -214,24 +206,24 @@ See `backend/payslips/payslips_import.json` for a ready-to-use sample with three
 
 ## Environment variables
 
-All variables live in `.env` (project root). Docker Compose reads it automatically.
+All variables live in `backend/.env`. Docker Compose reads it automatically.
 
 | Variable                   | Default                          | Description                                                                |
 |----------------------------|----------------------------------|----------------------------------------------------------------------------|
-| `SERVER_ADDR`              | `:8080`                          | Port the backend listens on
-| `JWT_SECRET`               | *(generated by setup-server.sh)* | Secret key used to sign JWTs — **never use the default in production**
-| `ADMIN_USERNAME`           | `admin`                          | Username for the initial admin login
-| `ADMIN_PASSWORD`           | *(generated by setup-server.sh)* | Password for the initial admin login — seeded into the DB on every startup
-| `POSTGRES_DB`              | `invoice_db`                     | Database name
-| `POSTGRES_USER`            | `invoice_manager`                | Database user
-| `POSTGRES_PASSWORD`        | *(generated by setup-server.sh)* | Database password — **never hardcoded**
-| `DATABASE_HOST`            | `postgres`                       | DB hostname — `postgres` inside Docker, IP for local dev
-| `DATABASE_PORT`            | `5432`                           | DB port
-| `OLLAMA_URL`               | `http://localhost:11434`         | Ollama API base URL
-| `IMPORT_DIR`               | *(empty)*                        | Directory watched for auto-import. Leave empty to disable
-| `IMPORT_INTERVAL`          | `1h`                             | Re-scan interval (Go duration: `30m`, `1h`, …)
-| `PAYSLIP_IMPORT_JSON_PATH` | *(empty)*                        | Absolute path to a `payslips_import.json` manifest. Worker imports all entries, deletes each imported PDF, and keeps the JSON. Leave empty to disable.
-| `PAYSLIP_IMPORT_INTERVAL`  | `1h`                             | How often the worker checks for the JSON file (Go duration: `1m`, `1h`, …)
+| `SERVER_ADDR`              | `:8080`                          | Port the backend listens on                                                |
+| `JWT_SECRET`               | *(generated by setup-server.sh)* | Secret key used to sign JWTs — **never use the default in production** |
+| `ADMIN_USERNAME`           | `admin`                          | Username for the initial admin login                                       |
+| `ADMIN_PASSWORD`           | *(generated by setup-server.sh)* | Password for the initial admin login — seeded into the DB on every startup |
+| `POSTGRES_DB`              | `invoice_db`                     | Database name                                                              |
+| `POSTGRES_USER`            | `invoice_manager`                | Database user                                                              |
+| `POSTGRES_PASSWORD`        | *(generated by setup-server.sh)* | Database password — **never hardcoded** |
+| `DATABASE_HOST`            | `postgres`                       | DB hostname — `postgres` inside Docker, IP for local dev                   |
+| `DATABASE_PORT`            | `5432`                           | DB port                                                                    |
+| `OLLAMA_URL`               | `http://localhost:11434`         | Ollama API base URL                                                        |
+| `IMPORT_DIR`               | *(empty)* | Directory watched for auto-import. Leave empty to disable                  |
+| `IMPORT_INTERVAL`          | `1h`                             | Re-scan interval (Go duration: `30m`, `1h`, …)                             |
+| `PAYSLIP_IMPORT_JSON_PATH` | *(empty)* | Absolute path to a `payslips_import.json` manifest. Worker imports all entries, deletes each imported PDF, and keeps the JSON. Leave empty to disable. |
+| `PAYSLIP_IMPORT_INTERVAL`  | `1h`                             | How often the worker checks for the JSON file (Go duration: `1m`, `1h`, …) |
 
 ---
 

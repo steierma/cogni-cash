@@ -1,0 +1,78 @@
+package port
+
+import (
+	"cogni-cash/internal/domain/entity"
+	"context"
+
+	"github.com/google/uuid"
+)
+
+// --- Driving-side (use-case) ports ---
+// These interfaces define what the HTTP adapter (or any other driving adapter)
+// may call on the domain services. They ensure the adapter depends on
+// abstractions, not concrete service structs — the hallmark of hexagonal
+// architecture.
+
+// AuthUseCase covers authentication and credential management.
+type AuthUseCase interface {
+	Login(ctx context.Context, username, password string) (string, error)
+	ValidateToken(tokenString string) (string, error)
+	ChangePassword(ctx context.Context, userIDStr string, oldPassword, newPassword string) error
+	EnsureAdminUser(ctx context.Context, username, plainPassword string) error
+}
+
+// UserUseCase covers CRUD operations on user accounts.
+type UserUseCase interface {
+	ListUsers(ctx context.Context, search string) ([]entity.User, error)
+	GetUser(ctx context.Context, idStr string) (entity.User, error)
+	CreateUser(ctx context.Context, req entity.User, plainPassword string) (entity.User, error)
+	UpdateUser(ctx context.Context, idStr string, updates entity.User) (entity.User, error)
+	DeleteUser(ctx context.Context, idStr string) error
+}
+
+// InvoiceUseCase is the full driving-side port for invoice management.
+// It covers file import (with duplicate detection), raw-text categorization,
+// manual CRUD, and original-file download.
+type InvoiceUseCase interface {
+	ImportFromFile(ctx context.Context, filePath, fileName, mimeType string, fileBytes []byte, categoryID *uuid.UUID) (entity.Invoice, error)
+	CategorizeDocument(ctx context.Context, rawText string) (entity.Invoice, error)
+	GetAll(ctx context.Context) ([]entity.Invoice, error)
+	GetByID(ctx context.Context, id uuid.UUID) (entity.Invoice, error)
+	Update(ctx context.Context, invoice entity.Invoice) (entity.Invoice, error)
+	Delete(ctx context.Context, id uuid.UUID) error
+	GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error)
+}
+
+// BankStatementUseCase covers file import and deletion.
+type BankStatementUseCase interface {
+	ImportFromFile(ctx context.Context, filePath string, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error)
+	DeleteStatement(ctx context.Context, id uuid.UUID) error
+}
+
+// TransactionUseCase covers analytics and batch categorization.
+type TransactionUseCase interface {
+	GetTransactionAnalytics(ctx context.Context, filter entity.TransactionFilter) (entity.TransactionAnalytics, error)
+	StartAutoCategorizeAsync(ctx context.Context, batchSize int) error
+	GetJobStatus() JobState
+	CancelJob()
+}
+
+// ReconciliationUseCase covers reconciliation operations.
+type ReconciliationUseCase interface {
+	ReconcileStatements(ctx context.Context, settlementTxHash, targetTxHash string) (entity.Reconciliation, error)
+	SuggestReconciliations(ctx context.Context, matchWindowDays int) ([]entity.ReconciliationPairSuggestion, error)
+	DeleteReconciliation(ctx context.Context, id uuid.UUID) error
+}
+
+// SettingsUseCase covers application settings.
+type SettingsUseCase interface {
+	GetAll(ctx context.Context) (map[string]string, error)
+	UpdateMultiple(ctx context.Context, settings map[string]string) error
+}
+
+// PayslipUseCase covers payslip import, update, and deletion.
+type PayslipUseCase interface {
+	Import(ctx context.Context, filePath, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error)
+	Update(ctx context.Context, payslip *entity.Payslip) error
+	Delete(ctx context.Context, id string) error
+}

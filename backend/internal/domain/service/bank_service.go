@@ -39,6 +39,7 @@ func (s *BankService) GetInstitutions(ctx context.Context, countryCode string, i
 
 func (s *BankService) CreateConnection(ctx context.Context, userID uuid.UUID, institutionID string, country string, redirectURL string, isSandbox bool) (*entity.BankConnection, error) {
 	referenceID := uuid.New().String()
+	s.logger.Info("Initiating new bank connection", "institution_id", institutionID, "country", country, "user_id", userID)
 	conn, err := s.provider.CreateRequisition(ctx, institutionID, country, redirectURL, referenceID, isSandbox)
 	if err != nil {
 		return nil, err
@@ -56,10 +57,12 @@ func (s *BankService) CreateConnection(ctx context.Context, userID uuid.UUID, in
 		return nil, err
 	}
 
+	s.logger.Info("Bank connection initialized", "id", conn.ID, "requisition_id", conn.RequisitionID)
 	return conn, nil
 }
 
 func (s *BankService) FinishConnection(ctx context.Context, requisitionID string, code string) error {
+	s.logger.Info("Finishing bank connection", "requisition_id", requisitionID)
 	conn, err := s.repo.GetConnectionByRequisition(ctx, requisitionID)
 	if err != nil {
 		return err
@@ -81,6 +84,7 @@ func (s *BankService) FinishConnection(ctx context.Context, requisitionID string
 
 	// If sessionID changed (Enable Banking), update it in the database
 	if sessionID != requisitionID {
+		s.logger.Info("Updating session ID for connection", "old", requisitionID, "new", sessionID)
 		if err := s.repo.UpdateRequisitionID(ctx, conn.ID, sessionID); err != nil {
 			return fmt.Errorf("failed to update session id: %w", err)
 		}
@@ -105,6 +109,7 @@ func (s *BankService) FinishConnection(ctx context.Context, requisitionID string
 		if err != nil {
 			return err
 		}
+		s.logger.Info("Fetched accounts for connection", "count", len(accounts), "connection_id", conn.ID)
 		for i := range accounts {
 			accounts[i].ConnectionID = conn.ID
 		}
@@ -113,6 +118,7 @@ func (s *BankService) FinishConnection(ctx context.Context, requisitionID string
 		}
 	}
 
+	s.logger.Info("Bank connection finalized", "connection_id", conn.ID, "status", status)
 	return s.repo.UpdateConnectionStatus(ctx, conn.ID, status)
 }
 
@@ -133,10 +139,12 @@ func (s *BankService) GetConnections(ctx context.Context, userID uuid.UUID) ([]e
 }
 
 func (s *BankService) DeleteConnection(ctx context.Context, id uuid.UUID) error {
+	s.logger.Info("Deleting bank connection", "id", id)
 	return s.repo.DeleteConnection(ctx, id)
 }
 
 func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID) error {
+	s.logger.Info("Manually syncing account", "account_id", accountID)
 	acc, err := s.repo.GetAccountByID(ctx, accountID)
 	if err != nil {
 		return err
@@ -169,10 +177,12 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID) erro
 		return err
 	}
 
+	s.logger.Info("Sync completed for account", "account_id", acc.ID, "new_txns", len(txns), "new_balance", balance)
 	return s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now())
 }
 
 func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) error {
+	s.logger.Info("Scheduled sync for all accounts", "user_id", userID)
 	conns, err := s.repo.GetConnectionsByUserID(ctx, userID)
 	if err != nil {
 		return err
@@ -226,5 +236,6 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 }
 
 func (s *BankService) UpdateAccountType(ctx context.Context, accountID uuid.UUID, accType entity.StatementType) error {
+	s.logger.Info("Updating account type", "account_id", accountID, "type", accType)
 	return s.repo.UpdateAccountType(ctx, accountID, accType)
 }

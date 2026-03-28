@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
@@ -12,11 +13,18 @@ import (
 )
 
 type UserService struct {
-	repo port.UserRepository
+	repo   port.UserRepository
+	logger *slog.Logger
 }
 
-func NewUserService(repo port.UserRepository) *UserService {
-	return &UserService{repo: repo}
+func NewUserService(repo port.UserRepository, logger *slog.Logger) *UserService {
+	if logger == nil {
+		logger = slog.Default()
+	}
+	return &UserService{
+		repo:   repo,
+		logger: logger,
+	}
 }
 
 func (s *UserService) ListUsers(ctx context.Context, search string) ([]entity.User, error) {
@@ -53,6 +61,7 @@ func (s *UserService) CreateUser(ctx context.Context, req entity.User, plainPass
 		return entity.User{}, err // Let the HTTP layer handle unique constraint errors
 	}
 
+	s.logger.Info("New user created", "username", req.Username, "id", req.ID, "role", req.Role)
 	return req, nil
 }
 
@@ -79,6 +88,7 @@ func (s *UserService) UpdateUser(ctx context.Context, idStr string, updates enti
 		return entity.User{}, err
 	}
 
+	s.logger.Info("User profile updated", "id", id, "username", existingUser.Username)
 	return existingUser, nil
 }
 
@@ -87,5 +97,6 @@ func (s *UserService) DeleteUser(ctx context.Context, idStr string) error {
 	if err != nil {
 		return errors.New("invalid user ID")
 	}
+	s.logger.Info("Deleting user", "id", id)
 	return s.repo.Delete(ctx, id)
 }

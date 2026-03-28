@@ -125,6 +125,7 @@ func (s *PayslipService) Import(ctx context.Context, filePath, fileName, mimeTyp
 }
 
 func (s *PayslipService) Update(ctx context.Context, payslip *entity.Payslip) error {
+	s.logger.Info("Updating payslip", "id", payslip.ID)
 	if len(payslip.OriginalFileContent) > 0 {
 		hashFunc := sha256.New()
 		hashFunc.Write(payslip.OriginalFileContent)
@@ -143,6 +144,7 @@ func (s *PayslipService) Update(ctx context.Context, payslip *entity.Payslip) er
 }
 
 func (s *PayslipService) Delete(ctx context.Context, id string) error {
+	s.logger.Info("Deleting payslip", "id", id)
 	return s.repo.Delete(ctx, id)
 }
 

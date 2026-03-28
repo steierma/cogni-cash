@@ -19,9 +19,9 @@ These instructions are foundational mandates for Gemini CLI. They take absolute 
 - **In-Memory Mode:** Support `DB_TYPE=memory` for zero-dependency development. All repositories must have a thread-safe in-memory implementation with FIFO eviction policies to prevent memory leaks.
 - **Demo Gating:** Mock banking providers must only be active when `DEMO_MODE=true` is explicitly set.
 - **Migration Constraints:**
-    - **Idempotency:** All migration files must use `IF NOT EXISTS` or `ON CONFLICT` guards.
-    - **Raw SQL Execution:** Integration tests execute migrations as raw SQL. Do NOT use tool-specific annotations (e.g., `-- +goose Up`).
-    - **Single-Action Files:** Do not include "Down" migrations or conflicting changes in a single file.
+  - **Idempotency:** All migration files must use `IF NOT EXISTS` or `ON CONFLICT` guards.
+  - **Raw SQL Execution:** Integration tests execute migrations as raw SQL. Do NOT use tool-specific annotations (e.g., `-- +goose Up`).
+  - **Single-Action Files:** Do not include "Down" migrations or conflicting changes in a single file.
 - **Secrets:** Use `.env` files; never hardcode credentials.
 
 ## 4. Frontend i18n Coding Standard
@@ -43,7 +43,7 @@ These instructions are foundational mandates for Gemini CLI. They take absolute 
 
 ## 7. Operational Maintenance & Memory
 - **Mandatory Synchronization:** After every significant change or feature completion, you MUST:
-    1. Update **`MEMORY.md`** with the latest project state and completed tasks.
-    2. Sync **`README.md`** to reflect new features or roadmap progress.
-    3. Update **`docs/DATABASE_SCHEMA.md`** after any database migration.
-    4. Update **`backend/balance/dummy-data.sql`** after schema changes to maintain test data integrity.
+  1. Update **`MEMORY.md`** with the latest project state and completed tasks.
+  2. Sync **`README.md`** to reflect new features or roadmap progress.
+  3. Update **`docs/DATABASE_SCHEMA.md`** after any database migration.
+  4. Update **`backend/balance/dummy-data.sql`** after schema changes to maintain test data integrity.

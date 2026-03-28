@@ -59,6 +59,7 @@ func (s *BankStatementService) ImportFromDirectory(ctx context.Context, dirPath 
 		return 0, []error{ErrEmptyFilePath}
 	}
 
+	s.Logger.Info("Scanning directory for bank statements", "path", dirPath)
 	entries, err := os.ReadDir(dirPath)
 	if err != nil {
 		return 0, []error{fmt.Errorf("bank statement service: read dir %s: %w", dirPath, err)}
@@ -78,6 +79,7 @@ func (s *BankStatementService) ImportFromDirectory(ctx context.Context, dirPath 
 		}
 
 		fullPath := filepath.Join(dirPath, entry.Name())
+		s.Logger.Info("Auto-importing file from directory", "file", entry.Name())
 		_, err := s.ImportFromFile(ctx, fullPath, false, "")
 		if err != nil {
 			if errors.Is(err, ErrDuplicate) {
@@ -90,6 +92,7 @@ func (s *BankStatementService) ImportFromDirectory(ctx context.Context, dirPath 
 		importedCount++
 	}
 
+	s.Logger.Info("Directory import completed", "path", dirPath, "imported", importedCount, "errors", len(errs))
 	return importedCount, errs
 }
 
@@ -324,5 +327,6 @@ func (s *BankStatementService) DeleteStatement(ctx context.Context, id uuid.UUID
 	if s.repo == nil {
 		return errors.New("bank statement service: repository not configured")
 	}
+	s.Logger.Info("Deleting bank statement", "id", id)
 	return s.repo.Delete(ctx, id)
 }

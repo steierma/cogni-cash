@@ -132,7 +132,7 @@ func (s *InvoiceService) ImportFromFile(
 		return entity.Invoice{}, fmt.Errorf("invoice service: save: %w", err)
 	}
 
-	s.logger.Info("Invoice imported from file", "id", invoice.ID, "file", fileName)
+	s.logger.Info("Invoice imported successfully", "id", invoice.ID, "file", fileName, "category", invoice.CategoryID)
 	return invoice, nil
 }
 
@@ -173,6 +173,7 @@ func (s *InvoiceService) GetByID(ctx context.Context, id uuid.UUID) (entity.Invo
 
 // Update overwrites the mutable fields of an existing invoice.
 func (s *InvoiceService) Update(ctx context.Context, invoice entity.Invoice) (entity.Invoice, error) {
+	s.logger.Info("Updating invoice", "id", invoice.ID)
 	if err := s.invoiceRepo.Update(ctx, invoice); err != nil {
 		return entity.Invoice{}, fmt.Errorf("invoice service: update: %w", err)
 	}
@@ -181,6 +182,7 @@ func (s *InvoiceService) Update(ctx context.Context, invoice entity.Invoice) (en
 
 // Delete removes an invoice by ID.
 func (s *InvoiceService) Delete(ctx context.Context, id uuid.UUID) error {
+	s.logger.Info("Deleting invoice", "id", id)
 	return s.invoiceRepo.Delete(ctx, id)
 }
 

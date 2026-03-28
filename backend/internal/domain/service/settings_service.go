@@ -32,6 +32,7 @@ func (s *SettingsService) Get(ctx context.Context, key string) (string, error) {
 
 func (s *SettingsService) UpdateMultiple(ctx context.Context, settings map[string]string) error {
 	for key, value := range settings {
+		s.logger.Info("Updating setting", "key", key, "value_len", len(value))
 		if err := s.repo.Set(ctx, key, value); err != nil {
 			s.logger.Error("Failed to update setting", "key", key, "error", err)
 			return err

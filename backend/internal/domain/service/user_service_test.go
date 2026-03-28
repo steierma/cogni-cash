@@ -96,7 +96,7 @@ func TestUserService_ListUsers(t *testing.T) {
 	repo.addUser(entity.User{ID: uuid.New(), Username: "alice"})
 	repo.addUser(entity.User{ID: uuid.New(), Username: "bob"})
 
-	svc := service.NewUserService(repo)
+	svc := service.NewUserService(repo, nil)
 	users, err := svc.ListUsers(context.Background(), "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -111,7 +111,7 @@ func TestUserService_GetUser_Success(t *testing.T) {
 	userID := uuid.New()
 	repo.addUser(entity.User{ID: userID, Username: "alice"})
 
-	svc := service.NewUserService(repo)
+	svc := service.NewUserService(repo, nil)
 	user, err := svc.GetUser(context.Background(), userID.String())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -122,7 +122,7 @@ func TestUserService_GetUser_Success(t *testing.T) {
 }
 
 func TestUserService_GetUser_InvalidID(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 	_, err := svc.GetUser(context.Background(), "not-a-uuid")
 	if err == nil {
 		t.Error("expected error for invalid UUID")
@@ -130,7 +130,7 @@ func TestUserService_GetUser_InvalidID(t *testing.T) {
 }
 
 func TestUserService_GetUser_NotFound(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 	_, err := svc.GetUser(context.Background(), uuid.New().String())
 	if err == nil {
 		t.Error("expected error for non-existent user")
@@ -139,7 +139,7 @@ func TestUserService_GetUser_NotFound(t *testing.T) {
 
 func TestUserService_CreateUser_Success(t *testing.T) {
 	repo := newMockUserRepoForUserSvc()
-	svc := service.NewUserService(repo)
+	svc := service.NewUserService(repo, nil)
 
 	user, err := svc.CreateUser(context.Background(), entity.User{
 		Username: "newuser",
@@ -162,7 +162,7 @@ func TestUserService_CreateUser_Success(t *testing.T) {
 }
 
 func TestUserService_CreateUser_EmptyPassword(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 
 	_, err := svc.CreateUser(context.Background(), entity.User{Username: "test"}, "")
 	if err == nil {
@@ -171,7 +171,7 @@ func TestUserService_CreateUser_EmptyPassword(t *testing.T) {
 }
 
 func TestUserService_CreateUser_WithRole(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 
 	user, err := svc.CreateUser(context.Background(), entity.User{
 		Username: "admin",
@@ -196,7 +196,7 @@ func TestUserService_UpdateUser_Success(t *testing.T) {
 		Role:     "manager",
 	})
 
-	svc := service.NewUserService(repo)
+	svc := service.NewUserService(repo, nil)
 	updated, err := svc.UpdateUser(context.Background(), userID.String(), entity.User{
 		Username: "alice_updated",
 		Email:    "alice@new.com",
@@ -220,7 +220,7 @@ func TestUserService_UpdateUser_Success(t *testing.T) {
 }
 
 func TestUserService_UpdateUser_InvalidID(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 	_, err := svc.UpdateUser(context.Background(), "bad-id", entity.User{})
 	if err == nil {
 		t.Error("expected error for invalid UUID")
@@ -228,7 +228,7 @@ func TestUserService_UpdateUser_InvalidID(t *testing.T) {
 }
 
 func TestUserService_UpdateUser_NotFound(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 	_, err := svc.UpdateUser(context.Background(), uuid.New().String(), entity.User{Username: "x"})
 	if err == nil {
 		t.Error("expected error for non-existent user")
@@ -240,7 +240,7 @@ func TestUserService_DeleteUser_Success(t *testing.T) {
 	userID := uuid.New()
 	repo.addUser(entity.User{ID: userID, Username: "alice"})
 
-	svc := service.NewUserService(repo)
+	svc := service.NewUserService(repo, nil)
 	err := svc.DeleteUser(context.Background(), userID.String())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -254,7 +254,7 @@ func TestUserService_DeleteUser_Success(t *testing.T) {
 }
 
 func TestUserService_DeleteUser_InvalidID(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 	err := svc.DeleteUser(context.Background(), "not-a-uuid")
 	if err == nil {
 		t.Error("expected error for invalid UUID")
@@ -262,7 +262,7 @@ func TestUserService_DeleteUser_InvalidID(t *testing.T) {
 }
 
 func TestUserService_DeleteUser_NotFound(t *testing.T) {
-	svc := service.NewUserService(newMockUserRepoForUserSvc())
+	svc := service.NewUserService(newMockUserRepoForUserSvc(), nil)
 	err := svc.DeleteUser(context.Background(), uuid.New().String())
 	if err == nil {
 		t.Error("expected error for non-existent user")

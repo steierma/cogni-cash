@@ -288,7 +288,9 @@ Instead of hardcoding functionality in `.env` files, the **Settings Page** (`/se
 
 * **Auto-Import:** Define an absolute directory path for the backend to watch. The system will automatically import any recognized PDF, CSV, or XLS files found here at the designated polling interval (e.g., `1h`).
 * **Auto-Categorization:** Enable or disable background transaction processing. Configure the polling interval (e.g., `5m`) and control the LLM load by setting a **Batch Size** (the number of transactions sent to the LLM per prompt). Enhance accuracy by configuring **Learning Examples per Category** (the number of unique historical categorizations provided to the LLM for few-shot learning).
-* **Payslip JSON Import:** Drop a `payslips_import.json` manifest and the referenced PDF files into the payslip drop-zone directory (default `./backend/payslips`, configurable via `PAYSLIP_HOST_DIR`). The background cron worker picks up the JSON on the next tick, reads and stores the binary content of each PDF that is present on disk, imports every entry into the database (skipping duplicates), **deletes each successfully imported PDF**, and **keeps the JSON manifest** permanently so it can be extended with new entries at any time.
+* **Smart Bank Sync:** Automatically synchronizes all connected bank accounts every **second day**. To ensure reliable data fetching and simulate natural usage patterns, the execution time is **randomized** between **11:00 and 13:00**. The schedule is persistent across restarts.
+* **Payslip JSON Import:** Drop a `payslips_import.json` manifest and the referenced PDF files into the payslip drop-zone directory
+ (default `./backend/payslips`, configurable via `PAYSLIP_HOST_DIR`). The background cron worker picks up the JSON on the next tick, reads and stores the binary content of each PDF that is present on disk, imports every entry into the database (skipping duplicates), **deletes each successfully imported PDF**, and **keeps the JSON manifest** permanently so it can be extended with new entries at any time.
 
 ### 3\. Appearance & Language
 

@@ -108,6 +108,7 @@ func (s *ReconciliationService) SuggestReconciliations(ctx context.Context, matc
 		return nil, fmt.Errorf("find candidate txns: %w", err)
 	}
 
+	s.logger.Info("Searching for reconciliation suggestions", "candidate_count", len(allTxns))
 	var suggestions []entity.ReconciliationPairSuggestion
 	usedHashes := make(map[string]bool)
 

@@ -59,6 +59,7 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 		return "", err
 	}
 
+	s.logger.Info("User logged in successfully", "username", username, "user_id", user.ID)
 	return tokenString, nil
 }
 
@@ -85,6 +86,7 @@ func (s *AuthService) ValidateToken(tokenString string) (string, error) {
 		return "", errors.New("missing subject in token")
 	}
 
+	s.logger.Info("JWT token validated", "user_id", sub)
 	return sub, nil
 }
 

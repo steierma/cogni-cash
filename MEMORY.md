@@ -9,9 +9,14 @@ This file tracks persistent project state, maintenance requirements, and synchro
 - [x] **Settings Service Sync**: Added `Get` method to `SettingsUseCase` to support granular retrieval.
 - [x] **Transaction Review System**: Added `reviewed` field to transactions, "Unreviewed" default inbox, and "Review All" batch actions.
 - [x] **AI Few-Shot Learning**: Enhanced auto-categorization by providing historical examples to the LLM (configurable via settings).
+- [x] **Smart Bank Sync**: Implemented a randomized background worker that synchronizes bank accounts every 2 days between 08:00 and 20:00.
 - [x] **Security Audit**: Verified SQL injection safety across the entire PostgreSQL repository layer.
 
 ## 2. Technical Debt & Roadmap
+- **Smart Bank Sync (Phase 15)**: ✅
+  - [x] Background worker with randomized schedule (8:00 - 20:00).
+  - [x] Persistent scheduling via `bank_sync_next_run` setting.
+  - [x] Error handling and audit logging.
 - **AI Few-Shot Learning (Phase 14)**: ✅
   - [x] Implement `GetCategorizationExamples` in repositories.
   - [x] Update `TransactionCategorizer` to support `{{EXAMPLES}}` placeholder.

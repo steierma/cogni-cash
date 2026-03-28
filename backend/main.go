@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"math/rand"
 	"net/http"
 	"os"
 	"os/signal"
@@ -130,7 +131,7 @@ func main() {
 		logger.Error("Failed to seed default admin user", "error", err)
 	}
 
-	userSvc := service.NewUserService(userRepo)
+	userSvc := service.NewUserService(userRepo, logger)
 	llmClient := llmadapter.NewAdapter(settingsRepo, logger)
 	settingsSvc := service.NewSettingsService(settingsRepo, logger)
 
@@ -259,6 +260,63 @@ func main() {
 		}
 	}()
 
+	go func() {
+		logger.Info("Background worker: Smart Bank Sync started")
+		for {
+			enabledStr, _ := settingsRepo.Get(appCtx, "bank_sync_enabled")
+			if enabledStr != "true" {
+				select {
+				case <-appCtx.Done():
+					return
+				case <-time.After(1 * time.Hour):
+					continue
+				}
+			}
+
+			nextSyncStr, _ := settingsRepo.Get(appCtx, "bank_sync_next_run")
+			var nextSync time.Time
+			if nextSyncStr != "" {
+				nextSync, _ = time.Parse(time.RFC3339, nextSyncStr)
+			}
+
+			now := time.Now()
+			if nextSync.IsZero() || now.After(nextSync) {
+				logger.Info("Starting scheduled smart bank sync for all users")
+				users, err := userRepo.FindAll(appCtx, "")
+				if err != nil {
+					logger.Error("Smart bank sync: failed to fetch users", "error", err)
+				} else {
+					for _, u := range users {
+						if err := bankSvc.SyncAllAccounts(appCtx, u.ID); err != nil {
+							logger.Error("Smart bank sync: failed for user", "user_id", u.ID, "error", err)
+						}
+					}
+				}
+
+				// Schedule next run: random time between 8:00 and 20:00, 1 day from now
+				daysToAdd := 1
+				nextDate := now.AddDate(0, 0, daysToAdd)
+
+				// Random hour between 11 and 13 (exclusive of 11, so up to 12:59)
+				randomHour := 11 + rand.Intn(2)
+				randomMinute := rand.Intn(60)
+
+				nextSync = time.Date(nextDate.Year(), nextDate.Month(), nextDate.Day(), randomHour, randomMinute, 0, 0, now.Location())
+
+				_ = settingsRepo.Set(appCtx, "bank_sync_next_run", nextSync.Format(time.RFC3339))
+				logger.Info("Smart bank sync finished. Next sync scheduled.", "at", nextSync.Format(time.RFC3339))
+			}
+
+			// Check every hour if it's time to sync
+			select {
+			case <-appCtx.Done():
+				logger.Info("Background worker: Smart Bank Sync shutting down")
+				return
+			case <-time.After(1 * time.Hour):
+			}
+		}
+	}()
+
 	// --- HTTP Handler Setup ---
 	handler := httpAdapter.NewHandler(authSvc, invoiceSvc, bankStatementSvc, settingsSvc, bankSvc, logger, storageMode, dbHost, dbPinger)
 
@@ -332,14 +390,15 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, lo
 		"auto_categorization_interval":   "5m",
 		"auto_categorization_batch_size": "10",
 		"auto_categorization_examples_per_category": "20",
-		"payslip_import_json_path":       envOrDefault("PAYSLIP_IMPORT_JSON_PATH", ""),
-		"payslip_import_interval":        envOrDefault("PAYSLIP_IMPORT_INTERVAL", "1h"),
-		"bank_provider":                  envOrDefault("BANK_PROVIDER", "enablebanking"),
-		"bank_sync_enabled":              "true",
-		"bank_sync_interval":             "1h",
-		"gocardless_secret_id":           envOrDefault("GOCARDLESS_SECRET_ID", ""),
-		"gocardless_secret_key":          envOrDefault("GOCARDLESS_SECRET_KEY", ""),
-		"enablebanking_app_id":           envOrDefault("ENABLEBANKING_APP_ID", ""),
+		"payslip_import_json_path":                  envOrDefault("PAYSLIP_IMPORT_JSON_PATH", ""),
+		"payslip_import_interval":                   envOrDefault("PAYSLIP_IMPORT_INTERVAL", "1h"),
+		"bank_provider":                             envOrDefault("BANK_PROVIDER", "enablebanking"),
+		"bank_sync_enabled":                         "true",
+		"bank_sync_interval":                        "1h",
+		"bank_sync_next_run":                        "",
+		"gocardless_secret_id":                      envOrDefault("GOCARDLESS_SECRET_ID", ""),
+		"gocardless_secret_key":                     envOrDefault("GOCARDLESS_SECRET_KEY", ""),
+		"enablebanking_app_id":                      envOrDefault("ENABLEBANKING_APP_ID", ""),
 	}
 
 	envOverrideKeys := map[string]string{

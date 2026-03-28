@@ -1,0 +1,128 @@
+# =============================================================================
+# Local AI Financial Manager — Docker Compose (Public / Production)
+# =============================================================================
+
+services:
+
+  # ── PostgreSQL ─────────────────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    pull_policy: if_not_present
+    container_name: cogni-cash-db
+    restart: unless-stopped
+    env_file: backend/.env
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
+    networks:
+      - app-net
+
+  # ── Database Migrations (one-shot) ─────────────────────────────────────────
+  migrate:
+    image: ghcr.io/steierma/cogni-cash-backend:${TAG:-latest}
+    pull_policy: always
+    container_name: cogni-cash-migrate
+    entrypoint: ["/app/cogni-cash-migrate"]
+    env_file: backend/.env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: on-failure
+    networks:
+      - app-net
+
+  # ── Backend ────────────────────────────────────────────────────────────────
+  backend:
+    image: ghcr.io/steierma/cogni-cash-backend:${TAG:-latest}
+    pull_policy: always
+    container_name: cogni-cash-backend
+    restart: unless-stopped
+    env_file: backend/.env
+    environment:
+      DATABASE_HOST: postgres
+      DATABASE_PORT: 5432
+      PAYSLIP_IMPORT_JSON_PATH: /app/payslips/payslips_import.json
+      # NEU: Dem Backend sagen, wo es den Key im Container findet
+      ENABLEBANKING_PRIVATE_KEY_PATH: /app/enable-banking.pem
+    volumes:
+      - ${PAYSLIP_HOST_DIR:-./backend/payslips}:/app/payslips
+      # NEU: Mounte die lokale enable-banking.pem in den Container (Read-Only)
+      - ./enable-banking.pem:/app/enable-banking.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/cogni-cash-healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+    networks:
+      - app-net
+
+  # ── Frontend ───────────────────────────────────────────────────────────────
+  frontend:
+    image: ghcr.io/steierma/cogni-cash-frontend:${TAG:-latest}
+    pull_policy: always
+    container_name: cogni-cash-frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app-net
+
+  # ── Caddy (Reverse Proxy & HTTPS) ──────────────────────────────────────────
+  caddy:
+    image: caddy:2-alpine
+    container_name: cogni-cash-caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - app-net
+
+  # ── Adminer ────────────────────────────────────────────────────────────────
+  adminer:
+    image: adminer:latest
+    pull_policy: if_not_present
+    container_name: cogni-cash-adminer
+    restart: unless-stopped
+    ports:
+      - "8081:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app-net
+
+# ── Volumes ────────────────────────────────────────────────────────────────
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+# ── Networks ───────────────────────────────────────────────────────────────
+networks:
+  app-net:
+    driver: bridge

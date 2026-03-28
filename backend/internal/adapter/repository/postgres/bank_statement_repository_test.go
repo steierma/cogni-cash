@@ -1,0 +1,334 @@
+package postgres
+
+import (
+	"context"
+	"errors"
+	_ "io"
+
+	"cogni-cash/internal/domain/entity"
+	"cogni-cash/internal/domain/service"
+	_ "log/slog"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+)
+
+func TestBankStatementRepository_SaveAndFindByID(t *testing.T) {
+	ctx := context.Background()
+	clearTables(ctx, t) // Instant cleanup!
+
+	repo := NewBankStatementRepository(globalPool, setupLogger())
+
+	var catID uuid.UUID
+	_, err := globalPool.Exec(ctx, "INSERT INTO categories (id, name, color) VALUES ($1, 'Sonstige Ausgaben', '#000000')", catID)
+	if err != nil {
+		t.Fatalf("failed to fetch category ID: %v", err)
+	}
+
+	stmtDate := time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC)
+	stmt := entity.BankStatement{
+		AccountHolder: "Jane Doe",
+		StatementDate: stmtDate,
+		ContentHash:   "stmt_hash_1",
+		StatementType: entity.StatementType("giro"),
+		Transactions: []entity.Transaction{
+			{
+				Description:        "Rewe",
+				Amount:             -45.50,
+				ExchangeRate:       1.0,
+				AmountBaseCurrency: -45.50,
+				BookingDate:        stmtDate,
+				ValutaDate:         stmtDate,
+				Type:               "debit",
+				CategoryID:         &catID,
+				ContentHash:        "tx_hash_1",
+			},
+		},
+	}
+
+	err = repo.Save(ctx, stmt)
+	if err != nil {
+		t.Fatalf("expected no error on save, got: %v", err)
+	}
+
+	// Safely lookup ID without assuming length of FindAll matches 1 globally
+	var savedID uuid.UUID
+	err = globalPool.QueryRow(ctx, "SELECT id FROM bank_statements WHERE content_hash = 'stmt_hash_1'").Scan(&savedID)
+	if err != nil {
+		t.Fatalf("failed to fetch saved statement id: %v", err)
+	}
+
+	found, err := repo.FindByID(ctx, savedID)
+	if err != nil {
+		t.Fatalf("expected to find statement, got error: %v", err)
+	}
+	if found.AccountHolder != "Jane Doe" {
+		t.Errorf("expected AccountHolder Jane Doe, got %s", found.AccountHolder)
+	}
+	if len(found.Transactions) != 1 {
+		t.Fatalf("expected 1 transaction loaded, got %d", len(found.Transactions))
+	}
+	if found.Transactions[0].CategoryID == nil || *found.Transactions[0].CategoryID != catID {
+		t.Errorf("expected transaction CategoryID to be %v, got %v", catID, found.Transactions[0].CategoryID)
+	}
+
+	err = repo.Save(ctx, entity.BankStatement{ContentHash: "stmt_hash_1"})
+	if !errors.Is(err, service.ErrDuplicate) {
+		t.Errorf("expected service.ErrDuplicate, got: %v", err)
+	}
+}
+
+func TestBankStatementRepository_FindSummaries(t *testing.T) {
+	ctx := context.Background()
+	clearTables(ctx, t) // Instant cleanup!
+
+	repo := NewBankStatementRepository(globalPool, setupLogger())
+
+	// Use far-future date to safely isolate test
+	repo.Save(ctx, entity.BankStatement{
+		ContentHash:   "summary_stmt_1",
+		StatementType: entity.StatementType("giro"),
+		StatementDate: time.Date(2098, 2, 28, 0, 0, 0, 0, time.UTC),
+		NewBalance:    1500.00,
+		Transactions: []entity.Transaction{
+			{BookingDate: time.Date(2098, 2, 1, 0, 0, 0, 0, time.UTC), ValutaDate: time.Date(2098, 2, 1, 0, 0, 0, 0, time.UTC), Amount: -500.00, ExchangeRate: 1.0, AmountBaseCurrency: -500.00, Type: "debit", ContentHash: "tx_feb_1_2098"},
+			{BookingDate: time.Date(2098, 2, 15, 0, 0, 0, 0, time.UTC), ValutaDate: time.Date(2098, 2, 15, 0, 0, 0, 0, time.UTC), Amount: -100.00, ExchangeRate: 1.0, AmountBaseCurrency: -100.00, Type: "debit", ContentHash: "tx_feb_2_2098"},
+		},
+	})
+
+	summaries, err := repo.FindSummaries(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	var target *entity.BankStatementSummary
+	for _, s := range summaries {
+		if s.PeriodLabel == "Feb 2098" && s.NewBalance == 1500.00 {
+			target = &s
+			break
+		}
+	}
+
+	if target == nil {
+		t.Fatalf("expected to find isolated summary for Feb 2098")
+	}
+	if target.TransactionCount != 2 {
+		t.Errorf("expected 2 transactions, got %d", target.TransactionCount)
+	}
+}
+
+func TestBankStatementRepository_FindTransactionsAndReconciliationFilter(t *testing.T) {
+	ctx := context.Background()
+	clearTables(ctx, t) // Instant cleanup!
+
+	repo := NewBankStatementRepository(globalPool, setupLogger())
+
+	// Use 2099 to isolate from other tests that use 2026!
+	baseDate := time.Date(2099, 3, 1, 0, 0, 0, 0, time.UTC)
+
+	_ = repo.Save(ctx, entity.BankStatement{
+		ContentHash:   "giro_stmt_2099",
+		StatementType: entity.StatementType("giro"),
+		Transactions: []entity.Transaction{
+			{Description: "Salary", Amount: 4000.0, ExchangeRate: 1.0, AmountBaseCurrency: 4000.0, ContentHash: "tx_salary_2099", BookingDate: baseDate, ValutaDate: baseDate, Type: "credit"},
+			{Description: "Rent", Amount: -1000.0, ExchangeRate: 1.0, AmountBaseCurrency: -1000.0, ContentHash: "tx_rent_2099", BookingDate: baseDate.Add(24 * time.Hour), ValutaDate: baseDate.Add(24 * time.Hour), Type: "debit"},
+		},
+	})
+
+	_ = repo.Save(ctx, entity.BankStatement{
+		ContentHash:   "cc_stmt_2099",
+		StatementType: entity.StatementType("credit_card"),
+		Transactions: []entity.Transaction{
+			{Description: "CC Payment Income", Amount: 500.0, ExchangeRate: 1.0, AmountBaseCurrency: 500.0, ContentHash: "tx_cc_in_2099", BookingDate: baseDate.Add(48 * time.Hour), ValutaDate: baseDate.Add(48 * time.Hour), Type: "credit"},
+			{Description: "Amazon", Amount: -50.0, ExchangeRate: 1.0, AmountBaseCurrency: -50.0, ContentHash: "tx_cc_out_2099", BookingDate: baseDate.Add(72 * time.Hour), ValutaDate: baseDate.Add(72 * time.Hour), Type: "debit"},
+		},
+	})
+
+	falseVal := false
+	trueVal := true
+	fromDate := baseDate.Add(-1 * time.Hour)
+	toDate := baseDate.Add(100 * time.Hour)
+
+	tests := []struct {
+		name          string
+		filter        entity.TransactionFilter
+		expectedCount int
+	}{
+		{"All Unreconciled", entity.TransactionFilter{FromDate: &fromDate, ToDate: &toDate, IsReconciled: &falseVal}, 4},
+		{"All Reconciled", entity.TransactionFilter{FromDate: &fromDate, ToDate: &toDate, IsReconciled: &trueVal}, 0},
+		{"Filter by Type Debit", entity.TransactionFilter{FromDate: &fromDate, ToDate: &toDate, Type: "debit"}, 2},
+		{"Filter by Type Credit", entity.TransactionFilter{FromDate: &fromDate, ToDate: &toDate, Type: "credit"}, 2},
+		{"Search Description ILIKE", entity.TransactionFilter{FromDate: &fromDate, ToDate: &toDate, Search: "amazon"}, 1},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			txns, err := repo.FindTransactions(ctx, tt.filter)
+			if err != nil {
+				t.Fatalf("unexpected error: %v", err)
+			}
+			if len(txns) != tt.expectedCount {
+				t.Errorf("expected %d transactions, got %d", tt.expectedCount, len(txns))
+			}
+		})
+	}
+}
+
+func TestBankStatementRepository_Mutations(t *testing.T) {
+	ctx := context.Background()
+	clearTables(ctx, t) // Instant cleanup!
+
+	repo := NewBankStatementRepository(globalPool, setupLogger())
+
+	catID := uuid.New()
+	_, err := globalPool.Exec(ctx, "INSERT INTO categories (id, name, color) VALUES ($1, 'Einkommen', '#000000')", catID)
+	if err != nil {
+		t.Fatalf("failed to insert category: %v", err)
+	}
+
+	targetHash := "tx_mutate_1"
+	stmtDate := time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC)
+	stmt := entity.BankStatement{
+		ContentHash:   "stmt_mutate_1",
+		StatementType: entity.StatementType("giro"),
+		Transactions: []entity.Transaction{
+			{Description: "Hardware Store", Amount: -100.0, ExchangeRate: 1.0, AmountBaseCurrency: -100.0, ContentHash: targetHash, IsReconciled: false, BookingDate: stmtDate, ValutaDate: stmtDate, Type: "debit"},
+		},
+	}
+	_ = repo.Save(ctx, stmt)
+
+	t.Run("UpdateTransactionCategory", func(t *testing.T) {
+		err := repo.UpdateTransactionCategory(ctx, targetHash, &catID)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		var fetchedCatID *uuid.UUID
+		err = globalPool.QueryRow(ctx, "SELECT category_id FROM transactions WHERE content_hash = $1", targetHash).Scan(&fetchedCatID)
+		if err != nil {
+			t.Fatalf("failed to query transaction: %v", err)
+		}
+		if fetchedCatID == nil || *fetchedCatID != catID {
+			t.Errorf("expected category_id to be %v, got %v", catID, fetchedCatID)
+		}
+	})
+
+	t.Run("ClearTransactionCategory", func(t *testing.T) {
+		err := repo.UpdateTransactionCategory(ctx, targetHash, nil)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		var categoryID *uuid.UUID
+		err = globalPool.QueryRow(ctx, "SELECT category_id FROM transactions WHERE content_hash = $1", targetHash).Scan(&categoryID)
+		if err != nil {
+			t.Fatalf("failed to query transaction: %v", err)
+		}
+		if categoryID != nil {
+			t.Errorf("expected category_id to be NULL, got %v", categoryID)
+		}
+	})
+
+	t.Run("MarkTransactionReconciled", func(t *testing.T) {
+		recID := uuid.New()
+
+		// 1. Nur EINEN sauberen Insert für das neue 1:1 Mapping ausführen.
+		// Wir nutzen einen fiktiven Settlement-Hash und den echten targetHash
+		// der "Hardware Store"-Transaktion aus dem äußeren Test-Setup.
+		_, err = globalPool.Exec(ctx, `
+		INSERT INTO reconciliations (id, settlement_transaction_hash, target_transaction_hash, amount) 
+		VALUES ($1, 'dummy_settlement_hash_for_test', $2, 100.00)`,
+			recID, targetHash,
+		)
+		if err != nil {
+			t.Fatalf("failed to insert dummy reconciliation: %v", err)
+		}
+
+		// 2. Methode aufrufen
+		err = repo.MarkTransactionReconciled(ctx, targetHash, recID)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		// 3. Validieren
+		trueVal := true
+		txns, err := repo.FindTransactions(ctx, entity.TransactionFilter{
+			IsReconciled: &trueVal,
+			Search:       "Hardware Store",
+		})
+		if err != nil || len(txns) != 1 {
+			t.Fatalf("failed to fetch reconciled transactions, got %d", len(txns))
+		}
+
+		if !txns[0].IsReconciled {
+			t.Error("expected transaction to be marked as reconciled")
+		}
+		if txns[0].ReconciliationID == nil || *txns[0].ReconciliationID != recID {
+			t.Error("expected reconciliation ID to be assigned")
+		}
+	})
+}
+
+
+func TestBankStatementRepository_Delete(t *testing.T) {
+	ctx := context.Background()
+	clearTables(ctx, t) // Instant cleanup!
+
+	repo := NewBankStatementRepository(globalPool, setupLogger())
+
+	stmtDate := time.Date(2026, 3, 16, 0, 0, 0, 0, time.UTC)
+	stmt := entity.BankStatement{
+		AccountHolder: "To Be Deleted",
+		StatementDate: stmtDate,
+		ContentHash:   "stmt_hash_delete_test",
+		StatementType: entity.StatementType("giro"),
+		Transactions: []entity.Transaction{
+			{
+				Description:        "Delete Me",
+				Amount:             -10.00,
+				ExchangeRate:       1.0,
+				AmountBaseCurrency: -10.00,
+				BookingDate:        stmtDate,
+				ValutaDate:         stmtDate,
+				Type:               "debit",
+				ContentHash:        "tx_hash_delete_test",
+			},
+		},
+	}
+
+	err := repo.Save(ctx, stmt)
+	if err != nil {
+		t.Fatalf("expected no error on save, got: %v", err)
+	}
+
+	var savedID uuid.UUID
+	err = globalPool.QueryRow(ctx, "SELECT id FROM bank_statements WHERE content_hash = 'stmt_hash_delete_test'").Scan(&savedID)
+	if err != nil {
+		t.Fatalf("failed to fetch statement id: %v", err)
+	}
+
+	err = repo.Delete(ctx, savedID)
+	if err != nil {
+		t.Errorf("expected no error on delete, got: %v", err)
+	}
+
+	_, err = repo.FindByID(ctx, savedID)
+	if err == nil {
+		t.Error("expected error when finding deleted statement, got nil")
+	}
+
+	var count int
+	err = globalPool.QueryRow(ctx, "SELECT count(*) FROM transactions WHERE content_hash = 'tx_hash_delete_test'").Scan(&count)
+	if err != nil {
+		t.Fatalf("failed to query transactions count: %v", err)
+	}
+	if count != 0 {
+		t.Error("expected transactions to be cascading deleted, but found them in db")
+	}
+
+	err = repo.Delete(ctx, uuid.New())
+	if err == nil {
+		t.Error("expected error when deleting non-existent statement, got nil")
+	}
+}

@@ -16,9 +16,11 @@ import PayslipsPage from './pages/PayslipsPage';
 import LoginPage from './pages/LoginPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import UsersPage from './pages/UsersPage';
+import ForgotPasswordPage from './pages/ForgotPasswordPage';
+import ResetPasswordPage from './pages/ResetPasswordPage';
 
 const isAuthenticated = () => {
-    return !!localStorage.getItem('auth_token');
+    return document.cookie.split(';').some((item) => item.trim().startsWith('cogni_cash_logged_in=true'));
 };
 
 function ProtectedRoutes() {
@@ -50,6 +52,8 @@ export default function App() {
         <BrowserRouter>
             <Routes>
                 <Route path="/login" element={<LoginPage />} />
+                <Route path="/forgot-password" element={<ForgotPasswordPage />} />
+                <Route path="/reset-password" element={<ResetPasswordPage />} />
 
                 {/* All routes inside here will have the Sidebar and Theme applied */}
                 <Route element={<ProtectedRoutes />}>

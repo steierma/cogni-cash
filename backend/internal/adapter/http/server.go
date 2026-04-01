@@ -23,48 +23,6 @@ type Server struct {
 func NewServer(addr string, handler *Handler) *Server {
 	r := chi.NewRouter()
 
-	// CORS — origins are read from ALLOWED_ORIGINS (comma-separated).
-	//
-	// ⚠ go-chi/cors treats an *empty* AllowedOrigins slice as "allow all".
-	//   We therefore default to a deny-all sentinel ("null") so that when
-	//   ALLOWED_ORIGINS is unset the backend blocks all cross-origin requests.
-	//   Set ALLOWED_ORIGINS=http://localhost:3000 (or comma-separated list)
-	//   in backend/.env to allow your frontend origin.
-	allowedOrigins := []string{"null"} // deny-all default
-	if raw := os.Getenv("ALLOWED_ORIGINS"); raw != "" {
-		parsed := []string{}
-		for _, o := range strings.Split(raw, ",") {
-			if trimmed := strings.TrimSpace(o); trimmed != "" {
-				parsed = append(parsed, trimmed)
-			}
-		}
-		if len(parsed) > 0 {
-			allowedOrigins = parsed
-		}
-	}
-	r.Use(cors.Handler(cors.Options{
-		AllowedOrigins:   allowedOrigins,
-		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-Id"},
-		ExposedHeaders:   []string{"Link"},
-		AllowCredentials: true,
-		MaxAge:           300,
-	}))
-
-	// Security headers — applied to every response from the backend.
-	// (The Nginx reverse-proxy adds the same headers for the SPA, but the
-	// backend also exposes :8080 directly in development, so we harden here
-	// too.)
-	r.Use(func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			w.Header().Set("X-Content-Type-Options", "nosniff")
-			w.Header().Set("X-Frame-Options", "SAMEORIGIN")
-			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
-			w.Header().Set("X-XSS-Protection", "0") // modern browsers ignore this; CSP is the real guard
-			next.ServeHTTP(w, r)
-		})
-	})
-
 	// Standard middleware
 	r.Use(middleware.RequestID)
 	r.Use(middleware.RealIP)
@@ -72,8 +30,63 @@ func NewServer(addr string, handler *Handler) *Server {
 	r.Use(middleware.Recoverer)
 	r.Use(middleware.Timeout(60 * time.Second))
 
-	handler.RegisterRoutes(r)
+	// CORS Configuration
+	allowedOrigins := []string{}
+	allowCredentials := true
+	var allowOriginFunc func(r *http.Request, origin string) bool
 
+	// Default development policy: allow localhost and local network ranges with reflection
+	allowOriginFunc = func(r *http.Request, origin string) bool {
+		if strings.HasPrefix(origin, "http://localhost:") ||
+			strings.HasPrefix(origin, "http://127.0.0.1:") ||
+			strings.HasPrefix(origin, "http://192.168.") ||
+			strings.HasPrefix(origin, "http://10.") ||
+			strings.HasPrefix(origin, "http://172.") {
+			return true
+		}
+		return false
+	}
+
+	if raw := os.Getenv("ALLOWED_ORIGINS"); raw != "" {
+		if raw == "*" {
+			// In development, reflect the origin to allow credentials (Authorization header)
+			allowOriginFunc = func(r *http.Request, origin string) bool {
+				return true
+			}
+			handler.Logger.Warn("CORS: Wildcard origin enabled via reflection. This should only be used in development.")
+		} else {
+			for _, o := range strings.Split(raw, ",") {
+				if trimmed := strings.TrimSpace(o); trimmed != "" {
+					allowedOrigins = append(allowedOrigins, trimmed)
+				}
+			}
+			// If specific origins are provided, we disable the dynamic localhost matching
+			allowOriginFunc = nil
+		}
+	}
+
+	r.Use(cors.Handler(cors.Options{
+		AllowedOrigins:   allowedOrigins,
+		AllowOriginFunc:  allowOriginFunc,
+		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-Id"},
+		ExposedHeaders:   []string{"Link"},
+		AllowCredentials: allowCredentials,
+		MaxAge:           300,
+	}))
+
+	// Security headers
+	r.Use(func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("X-Content-Type-Options", "nosniff")
+			w.Header().Set("X-Frame-Options", "SAMEORIGIN")
+			w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+			w.Header().Set("X-XSS-Protection", "0")
+			next.ServeHTTP(w, r)
+		})
+	})
+
+	handler.RegisterRoutes(r)
 	return &Server{
 		httpServer: &http.Server{
 			Addr:         addr,

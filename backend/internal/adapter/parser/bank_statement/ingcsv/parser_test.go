@@ -8,6 +8,8 @@ import (
 	"runtime"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"cogni-cash/internal/adapter/parser/bank_statement/ingcsv"
 )
 
@@ -25,7 +27,7 @@ func csvPath() string {
 func TestINGCSVParser_ParseRealCSV(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := ingcsv.NewParser(logger)
-	stmt, err := p.Parse(context.Background(), csvPath())
+	stmt, err := p.Parse(context.Background(), uuid.Nil, csvPath())
 	if err != nil {
 		t.Fatalf("unexpected parse error: %v", err)
 	}

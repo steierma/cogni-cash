@@ -36,6 +36,7 @@ func NewReconciliationService(txRepo port.BankStatementRepository, recRepo port.
 
 func (s *ReconciliationService) ReconcileStatements(
 	ctx context.Context,
+	userID uuid.UUID,
 	settlementTxHash string,
 	targetTxHash string,
 ) (entity.Reconciliation, error) {
@@ -44,7 +45,7 @@ func (s *ReconciliationService) ReconcileStatements(
 	}
 
 	f := false
-	txns, err := s.transactionRepo.SearchTransactions(ctx, entity.TransactionFilter{IsReconciled: &f})
+	txns, err := s.transactionRepo.SearchTransactions(ctx, entity.TransactionFilter{UserID: userID, IsReconciled: &f})
 	if err != nil {
 		return entity.Reconciliation{}, fmt.Errorf("reconciliation service: resolve transactions: %w", err)
 	}
@@ -76,6 +77,7 @@ func (s *ReconciliationService) ReconcileStatements(
 
 	rec := entity.Reconciliation{
 		ID:                        uuid.New(),
+		UserID:                    userID,
 		SettlementTransactionHash: settlementTxHash,
 		TargetTransactionHash:     targetTxHash,
 		Amount:                    math.Abs(settlementTx.Amount),
@@ -91,24 +93,26 @@ func (s *ReconciliationService) ReconcileStatements(
 		"reconciliation_id", saved.ID,
 		"settlement_tx_hash", settlementTxHash,
 		"target_tx_hash", targetTxHash,
+		"user_id", userID,
 	)
 	return saved, nil
 }
 
-func (s *ReconciliationService) SuggestReconciliations(ctx context.Context, matchWindowDays int) ([]entity.ReconciliationPairSuggestion, error) {
+func (s *ReconciliationService) SuggestReconciliations(ctx context.Context, userID uuid.UUID, matchWindowDays int) ([]entity.ReconciliationPairSuggestion, error) {
 	if matchWindowDays <= 0 {
 		matchWindowDays = 7
 	}
 
 	f := false
 	allTxns, err := s.transactionRepo.FindTransactions(ctx, entity.TransactionFilter{
+		UserID:       userID,
 		IsReconciled: &f,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("find candidate txns: %w", err)
 	}
 
-	s.logger.Info("Searching for reconciliation suggestions", "candidate_count", len(allTxns))
+	s.logger.Info("Searching for reconciliation suggestions", "candidate_count", len(allTxns), "user_id", userID)
 	var suggestions []entity.ReconciliationPairSuggestion
 	usedHashes := make(map[string]bool)
 
@@ -166,16 +170,16 @@ func (s *ReconciliationService) SuggestReconciliations(ctx context.Context, matc
 	return suggestions, nil
 }
 
-func (s *ReconciliationService) DeleteReconciliation(ctx context.Context, id uuid.UUID) error {
+func (s *ReconciliationService) DeleteReconciliation(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	if s.reconciliationRepo == nil {
 		return errors.New("reconciliation service: repository not configured")
 	}
 
-	err := s.reconciliationRepo.Delete(ctx, id)
+	err := s.reconciliationRepo.Delete(ctx, id, userID)
 	if err != nil {
 		return fmt.Errorf("reconciliation service: delete reconciliation: %w", err)
 	}
 
-	s.logger.Info("1:1 Reconciliation deleted", "reconciliation_id", id)
+	s.logger.Info("1:1 Reconciliation deleted", "reconciliation_id", id, "user_id", userID)
 	return nil
 }

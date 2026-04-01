@@ -58,3 +58,6 @@ var ErrSameAccount = errors.New("source and target must be from different accoun
 // ErrInvalidCredentials is returned on failed authentication.
 var ErrInvalidCredentials = errors.New("invalid username or password")
 
+// ErrResetTokenInvalid is returned when a password reset token is missing, expired, or incorrect.
+var ErrResetTokenInvalid = errors.New("invalid or expired reset token")
+

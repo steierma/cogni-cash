@@ -42,6 +42,10 @@ export interface Transaction {
     booking_date: string;
     valuta_date: string;
     description: string;
+    counterparty_name?: string;
+    counterparty_iban?: string;
+    bank_transaction_code?: string;
+    mandate_reference?: string;
     amount: number;
     currency: string;
     type: 'credit' | 'debit';
@@ -53,7 +57,7 @@ export interface Transaction {
     reviewed: boolean;
     statement_type: 'giro' | 'credit_card' | 'extra_account';
     bank_statement_id?: string | null;
-    location?: string; // <-- Made optional as not all transactions have an extracted location
+    location?: string;
 }
 
 export interface BankStatement {
@@ -123,6 +127,7 @@ export interface TimeSeriesPoint {
     date: string;
     income: number;
     expense: number;
+    category_amounts: Record<string, number>;
 }
 
 export interface MerchantTotal {
@@ -185,6 +190,7 @@ export interface Payslip {
     period_month_num: number;
     period_year: number;
     employee_name: string;
+    employer_name: string;
     tax_class: string;
     tax_id: string;
     gross_pay: number;
@@ -202,7 +208,7 @@ export type ConnectionStatus = 'initialized' | 'linked' | 'expired' | 'failed';
 export interface BankConnection {
     id: string;
     user_id: string;
-    provider: string; // 'gocardless' or 'enablebanking'
+    provider: string; // 'enablebanking'
     institution_id: string;
     institution_name: string;
     requisition_id: string;

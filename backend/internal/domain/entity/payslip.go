@@ -1,11 +1,16 @@
 package entity
 
-import "time"
+import (
+	"time"
+
+	"github.com/google/uuid"
+)
 
 // Payslip represents a parsed monthly salary statement (generalized for international use).
 type Payslip struct {
-	ID         string `json:"id"`
-	SourceFile string `json:"source_file,omitempty"`
+	ID         string    `json:"id"`
+	UserID     uuid.UUID `json:"user_id"`
+	SourceFile string    `json:"source_file,omitempty"`
 
 	OriginalFileName    string `json:"original_file_name,omitempty"`
 	OriginalFileMime    string `json:"original_file_mime,omitempty"`
@@ -16,6 +21,7 @@ type Payslip struct {
 	PeriodMonthNum int    `json:"period_month_num"`
 	PeriodYear     int    `json:"period_year"`
 	EmployeeName   string `json:"employee_name"`
+	EmployerName   string `json:"employer_name"`
 	TaxClass       string `json:"tax_class,omitempty"`
 	TaxID          string `json:"tax_id,omitempty"`
 

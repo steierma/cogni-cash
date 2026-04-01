@@ -1,4 +1,4 @@
-import axios, {type AxiosResponse, type InternalAxiosRequestConfig} from 'axios';
+import axios, {type AxiosResponse} from 'axios';
 import type {
     BankConnection,
     BankInstitution,
@@ -17,23 +17,17 @@ import type {
     User
 } from './types';
 
-const api = axios.create({baseURL: '/api/v1'});
+const api = axios.create({
+    baseURL: '/api/v1',
+    withCredentials: true
+});
 
 // ── Authentication Interceptors ───────────────────────────────────────────────
-
-api.interceptors.request.use((config: InternalAxiosRequestConfig) => {
-    const token = localStorage.getItem('auth_token');
-    if (token) {
-        config.headers.Authorization = `Bearer ${token}`;
-    }
-    return config;
-});
 
 api.interceptors.response.use(
     (response: AxiosResponse) => response,
     (error: unknown) => {
         if (axios.isAxiosError(error) && error.response?.status === 401) {
-            localStorage.removeItem('auth_token');
             if (window.location.pathname !== '/login') {
                 window.location.href = '/login';
             }
@@ -53,16 +47,31 @@ export const fetchSettings = (): Promise<Record<string, string>> =>
 export const updateSettings = (settings: Record<string, string>): Promise<void> =>
     api.patch('/settings/', settings).then(() => undefined);
 
+export const sendTestEmail = (to: string): Promise<void> =>
+    api.post('/settings/test-email', {to}).then(() => undefined);
+
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export const login = (username: string, password: string): Promise<{ token: string }> =>
     api.post<{ token: string }>('/login', {username, password}).then((r: AxiosResponse<{ token: string }>) => r.data);
+
+export const logout = (): Promise<void> =>
+    api.post('/logout').then(() => undefined);
 
 export const changePassword = (oldPassword: string, newPassword: string): Promise<void> =>
     api.post('/auth/change-password', {
         old_password: oldPassword,
         new_password: newPassword
     }).then(() => undefined);
+
+export const requestPasswordReset = (email: string): Promise<{ message: string }> =>
+    api.post('/auth/forgot-password', {email}).then(r => r.data);
+
+export const validateResetToken = (token: string): Promise<{ valid: boolean }> =>
+    api.get('/auth/reset-password/validate', {params: {token}}).then(r => r.data);
+
+export const confirmPasswordReset = (token: string, newPassword: string): Promise<{ message: string }> =>
+    api.post('/auth/reset-password/confirm', {token, new_password: newPassword}).then(r => r.data);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 

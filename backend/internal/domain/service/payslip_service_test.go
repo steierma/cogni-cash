@@ -8,9 +8,13 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/uuid"
+
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/service"
 )
+
+var payslipDummyUserID = uuid.New()
 
 // --- Mocks ---
 
@@ -29,25 +33,25 @@ func (m *mockPayslipRepoForPayslipSvc) Save(_ context.Context, p *entity.Payslip
 	return nil
 }
 
-func (m *mockPayslipRepoForPayslipSvc) ExistsByHash(_ context.Context, _ string) (bool, error) {
+func (m *mockPayslipRepoForPayslipSvc) ExistsByHash(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
 	return m.exists, nil
 }
 
-func (m *mockPayslipRepoForPayslipSvc) ExistsByOriginalFileName(_ context.Context, _ string) (bool, error) {
+func (m *mockPayslipRepoForPayslipSvc) ExistsByOriginalFileName(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
 	return false, nil
 }
 
 func (m *mockPayslipRepoForPayslipSvc) Update(_ context.Context, p *entity.Payslip) error {
 	return m.err
 }
-func (m *mockPayslipRepoForPayslipSvc) Delete(_ context.Context, _ string) error { return m.err }
-func (m *mockPayslipRepoForPayslipSvc) FindAll(_ context.Context) ([]entity.Payslip, error) {
+func (m *mockPayslipRepoForPayslipSvc) Delete(_ context.Context, _ string, _ uuid.UUID) error { return m.err }
+func (m *mockPayslipRepoForPayslipSvc) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Payslip, error) {
 	return nil, nil
 }
-func (m *mockPayslipRepoForPayslipSvc) FindByID(_ context.Context, _ string) (entity.Payslip, error) {
+func (m *mockPayslipRepoForPayslipSvc) FindByID(_ context.Context, _ string, _ uuid.UUID) (entity.Payslip, error) {
 	return entity.Payslip{}, nil
 }
-func (m *mockPayslipRepoForPayslipSvc) GetOriginalFile(_ context.Context, _ string) ([]byte, string, string, error) {
+func (m *mockPayslipRepoForPayslipSvc) GetOriginalFile(_ context.Context, _ string, _ uuid.UUID) ([]byte, string, string, error) {
 	return nil, "", "", nil
 }
 
@@ -57,7 +61,7 @@ type mockPayslipParserForPayslipSvc struct {
 	called  bool
 }
 
-func (m *mockPayslipParserForPayslipSvc) Parse(_ context.Context, _ string) (entity.Payslip, error) {
+func (m *mockPayslipParserForPayslipSvc) Parse(_ context.Context, _ uuid.UUID, _ string) (entity.Payslip, error) {
 	m.called = true
 	return m.payslip, m.err
 }
@@ -78,7 +82,7 @@ func TestPayslipService_Import(t *testing.T) {
 
 		svc := service.NewPayslipService(repo, staticParser, aiParser, nopLogger())
 
-		res, err := svc.Import(context.Background(), "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, false)
+		res, err := svc.Import(context.Background(), payslipDummyUserID, "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, false)
 
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
@@ -113,7 +117,7 @@ func TestPayslipService_Import(t *testing.T) {
 
 		svc := service.NewPayslipService(repo, staticParser, aiParser, nopLogger())
 
-		res, err := svc.Import(context.Background(), "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, false)
+		res, err := svc.Import(context.Background(), payslipDummyUserID, "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, false)
 
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
@@ -145,7 +149,7 @@ func TestPayslipService_Import(t *testing.T) {
 
 		svc := service.NewPayslipService(repo, staticParser, aiParser, nopLogger())
 
-		res, err := svc.Import(context.Background(), "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, true)
+		res, err := svc.Import(context.Background(), payslipDummyUserID, "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, true)
 
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
@@ -180,7 +184,7 @@ func TestPayslipService_Import(t *testing.T) {
 			PeriodMonthNum: 4,
 		}
 
-		res, err := svc.Import(context.Background(), "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), overrides, false)
+		res, err := svc.Import(context.Background(), payslipDummyUserID, "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), overrides, false)
 
 		if err != nil {
 			t.Fatalf("Expected no error, got %v", err)
@@ -200,7 +204,7 @@ func TestPayslipService_Import(t *testing.T) {
 
 		svc := service.NewPayslipService(repo, staticParser, aiParser, nopLogger())
 
-		_, err := svc.Import(context.Background(), "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, false)
+		_, err := svc.Import(context.Background(), payslipDummyUserID, "test.pdf", "test.pdf", "application/pdf", []byte("valid-data"), nil, false)
 
 		if err == nil {
 			t.Fatal("Expected error when both parsers fail, got nil")
@@ -211,7 +215,7 @@ func TestPayslipService_Import(t *testing.T) {
 		repo := &mockPayslipRepoForPayslipSvc{exists: true}
 		svc := service.NewPayslipService(repo, &mockPayslipParserForPayslipSvc{}, &mockPayslipParserForPayslipSvc{}, nopLogger())
 
-		_, err := svc.Import(context.Background(), "test.pdf", "test.pdf", "application/pdf", []byte("duplicate-data"), nil, false)
+		_, err := svc.Import(context.Background(), payslipDummyUserID, "test.pdf", "test.pdf", "application/pdf", []byte("duplicate-data"), nil, false)
 
 		if err == nil {
 			t.Fatal("Expected error for duplicate hash, got nil")
@@ -227,6 +231,7 @@ func TestPayslipService_Update_Success(t *testing.T) {
 
 	err := svc.Update(context.Background(), &entity.Payslip{
 		ID:             "existing-id",
+		UserID:         payslipDummyUserID,
 		PeriodMonthNum: 3,
 		GrossPay:       5000,
 	})
@@ -241,6 +246,7 @@ func TestPayslipService_Update_WithNewFile_DuplicateHash(t *testing.T) {
 
 	err := svc.Update(context.Background(), &entity.Payslip{
 		ID:                  "existing-id",
+		UserID:              payslipDummyUserID,
 		OriginalFileContent: []byte("file-content"),
 	})
 	if !errors.Is(err, service.ErrPayslipDuplicate) {
@@ -254,7 +260,7 @@ func TestPayslipService_Delete_Success(t *testing.T) {
 	repo := &mockPayslipRepoForPayslipSvc{}
 	svc := service.NewPayslipService(repo, nil, nil, nopLogger())
 
-	err := svc.Delete(context.Background(), "some-id")
+	err := svc.Delete(context.Background(), "some-id", payslipDummyUserID)
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -264,7 +270,7 @@ func TestPayslipService_Delete_RepoError(t *testing.T) {
 	repo := &mockPayslipRepoForPayslipSvc{err: errors.New("db error")}
 	svc := service.NewPayslipService(repo, nil, nil, nopLogger())
 
-	err := svc.Delete(context.Background(), "some-id")
+	err := svc.Delete(context.Background(), "some-id", payslipDummyUserID)
 	if err == nil {
 		t.Error("expected error when repo returns error")
 	}
@@ -290,7 +296,7 @@ func TestPayslipService_ImportFromJSONFile(t *testing.T) {
 
 	t.Run("Non-existent file is a no-op", func(t *testing.T) {
 		svc := service.NewPayslipService(&mockPayslipRepoForPayslipSvc{}, &mockPayslipParserForPayslipSvc{}, &mockPayslipParserForPayslipSvc{}, nopLogger())
-		imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, "/does/not/exist.json")
+		imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, payslipDummyUserID, "/does/not/exist.json")
 		if fatalErr != nil {
 			t.Fatalf("unexpected fatal error: %v", fatalErr)
 		}
@@ -327,7 +333,7 @@ func TestPayslipService_ImportFromJSONFile(t *testing.T) {
 		repo := &mockPayslipRepoForPayslipSvc{}
 		svc := service.NewPayslipService(repo, &mockPayslipParserForPayslipSvc{}, &mockPayslipParserForPayslipSvc{}, nopLogger())
 
-		imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, jsonPath)
+		imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, payslipDummyUserID, jsonPath)
 
 		if fatalErr != nil {
 			t.Fatalf("unexpected fatal error: %v", fatalErr)
@@ -365,7 +371,7 @@ func TestPayslipService_ImportFromJSONFile(t *testing.T) {
 		repo := &mockPayslipRepoWithFileNameCheckForPayslipSvc{alreadyExists: true}
 		svc := service.NewPayslipService(repo, &mockPayslipParserForPayslipSvc{}, &mockPayslipParserForPayslipSvc{}, nopLogger())
 
-		imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, path)
+		imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, payslipDummyUserID, path)
 
 		if fatalErr != nil {
 			t.Fatalf("unexpected fatal error: %v", fatalErr)
@@ -391,7 +397,7 @@ func TestPayslipService_ImportFromJSONFile(t *testing.T) {
 		path := writeJSONFile(t, entries)
 		svc := service.NewPayslipService(&mockPayslipRepoForPayslipSvc{}, &mockPayslipParserForPayslipSvc{}, &mockPayslipParserForPayslipSvc{}, nopLogger())
 
-		_, _, errs, fatalErr := svc.ImportFromJSONFile(ctx, path)
+		_, _, errs, fatalErr := svc.ImportFromJSONFile(ctx, payslipDummyUserID, path)
 
 		if fatalErr != nil {
 			t.Fatalf("unexpected fatal error: %v", fatalErr)
@@ -410,6 +416,6 @@ type mockPayslipRepoWithFileNameCheckForPayslipSvc struct {
 	alreadyExists bool
 }
 
-func (m *mockPayslipRepoWithFileNameCheckForPayslipSvc) ExistsByOriginalFileName(_ context.Context, _ string) (bool, error) {
+func (m *mockPayslipRepoWithFileNameCheckForPayslipSvc) ExistsByOriginalFileName(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
 	return m.alreadyExists, nil
 }

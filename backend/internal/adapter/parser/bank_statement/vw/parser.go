@@ -12,6 +12,7 @@ import (
 
 	"cogni-cash/internal/domain/entity"
 
+	"github.com/google/uuid"
 	"github.com/ledongthuc/pdf"
 )
 
@@ -23,7 +24,7 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-func (p *Parser) Parse(ctx context.Context, filePath string) (entity.BankStatement, error) {
+func (p *Parser) Parse(ctx context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
 	rawText, err := extractPDFText(filePath)
 	if err != nil {
 		return entity.BankStatement{}, fmt.Errorf("vw parser: failed to read pdf: %w", err)

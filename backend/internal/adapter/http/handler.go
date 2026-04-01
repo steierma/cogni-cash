@@ -9,6 +9,7 @@ import (
 	"cogni-cash/internal/domain/port"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 type contextKey string
@@ -25,6 +26,7 @@ type Handler struct {
 	payslipSvc         port.PayslipUseCase
 	bankSvc            port.BankUseCase
 	userSvc            port.UserUseCase
+	notificationSvc    port.NotificationUseCase
 	payslipRepo        port.PayslipRepository
 	bankStmtRepo       port.BankStatementRepository
 	categoryRepo       port.CategoryRepository
@@ -33,6 +35,27 @@ type Handler struct {
 	storageMode        string
 	dbHost             string
 	dbPinger           func(context.Context) error
+}
+
+func (h *Handler) getUserID(ctx context.Context) uuid.UUID {
+	val := ctx.Value(userIDKey)
+	if val == nil {
+		return uuid.Nil
+	}
+
+	if id, ok := val.(uuid.UUID); ok {
+		return id
+	}
+
+	if idStr, ok := val.(string); ok {
+		id, err := uuid.Parse(idStr)
+		if err != nil {
+			return uuid.Nil
+		}
+		return id
+	}
+
+	return uuid.Nil
 }
 
 func NewHandler(
@@ -107,9 +130,18 @@ func (h *Handler) WithPayslipRepository(repo port.PayslipRepository) *Handler {
 	return h
 }
 
+func (h *Handler) WithNotificationService(svc port.NotificationUseCase) *Handler {
+	h.notificationSvc = svc
+	return h
+}
+
 func (h *Handler) RegisterRoutes(r chi.Router) {
 	r.Get("/health", h.healthCheck)
 	r.Post("/api/v1/login", h.login)
+	r.Post("/api/v1/logout", h.logout)
+	r.Post("/api/v1/auth/forgot-password", h.forgotPassword)
+	r.Get("/api/v1/auth/reset-password/validate", h.validateResetToken)
+	r.Post("/api/v1/auth/reset-password/confirm", h.confirmPasswordReset)
 
 	r.Group(func(r chi.Router) {
 		r.Use(h.authMiddleware)
@@ -119,10 +151,6 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Get("/auth/me", h.getMe) // MUST BE OUTSIDE ADMIN MIDDLEWARE
 
 			r.Get("/system/info", h.getSystemInfo)
-			r.Route("/settings", func(r chi.Router) {
-				r.Get("/", h.getSettings)
-				r.Patch("/", h.updateSettings)
-			})
 
 			r.Route("/users", func(r chi.Router) {
 				r.Use(h.adminMiddleware) // ONLY ADMINS CAN ACCESS THESE
@@ -131,6 +159,15 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Post("/", h.createUser)
 				r.Put("/{id}", h.updateUser)
 				r.Delete("/{id}", h.deleteUser)
+			})
+
+			r.Group(func(r chi.Router) {
+				r.Use(h.adminMiddleware)
+				r.Route("/settings", func(r chi.Router) {
+					r.Get("/", h.getSettings)
+					r.Patch("/", h.updateSettings)
+					r.Post("/test-email", h.sendTestEmail)
+				})
 			})
 
 			r.Route("/invoices", func(r chi.Router) {

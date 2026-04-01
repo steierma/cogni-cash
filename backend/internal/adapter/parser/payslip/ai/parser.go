@@ -9,12 +9,14 @@ import (
 	"strings"
 
 	"cogni-cash/internal/domain/entity"
+
+	"github.com/google/uuid"
 )
 
 // LLMPayslipParser defines the method we expect the LLM adapter to fulfill.
 type LLMPayslipParser interface {
 	// Refactored to accept the raw file data and a MIME type
-	ParsePayslipDocument(ctx context.Context, mimeType string, data []byte) (entity.Payslip, error)
+	ParsePayslipDocument(ctx context.Context, userID uuid.UUID, mimeType string, data []byte) (entity.Payslip, error)
 }
 
 // PayslipParser implements port.PayslipParser using an LLM.
@@ -30,7 +32,7 @@ func NewPayslipParser(llm LLMPayslipParser, logger *slog.Logger) *PayslipParser 
 	}
 }
 
-func (p *PayslipParser) Parse(ctx context.Context, filePath string) (entity.Payslip, error) {
+func (p *PayslipParser) Parse(ctx context.Context, userID uuid.UUID, filePath string) (entity.Payslip, error) {
 	// 1. Read the raw bytes of the file directly
 	data, err := os.ReadFile(filePath)
 	if err != nil {
@@ -57,7 +59,7 @@ func (p *PayslipParser) Parse(ctx context.Context, filePath string) (entity.Pays
 	)
 
 	// 3. Pass the blob data to the LLM adapter
-	payslip, err := p.llm.ParsePayslipDocument(ctx, mimeType, data)
+	payslip, err := p.llm.ParsePayslipDocument(ctx, userID, mimeType, data)
 	if err != nil {
 		return entity.Payslip{}, err
 	}

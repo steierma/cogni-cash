@@ -18,7 +18,8 @@ func (h *Handler) listBankInstitutions(w http.ResponseWriter, r *http.Request) {
 
 	isSandbox := r.URL.Query().Get("sandbox") == "true"
 
-	insts, err := h.bankSvc.GetInstitutions(r.Context(), country, isSandbox)
+	userID := h.getUserID(r.Context())
+	insts, err := h.bankSvc.GetInstitutions(r.Context(), userID, country, isSandbox)
 	if err != nil {
 		h.Logger.Error("failed to list institutions", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to fetch bank list")
@@ -30,10 +31,11 @@ func (h *Handler) listBankInstitutions(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) createBankConnection(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		InstitutionID string `json:"institution_id"`
-		Country       string `json:"country"`
-		RedirectURL   string `json:"redirect_url"`
-		Sandbox       bool   `json:"sandbox"`
+		InstitutionID   string `json:"institution_id"`
+		InstitutionName string `json:"institution_name"`
+		Country         string `json:"country"`
+		RedirectURL     string `json:"redirect_url"`
+		Sandbox         bool   `json:"sandbox"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -41,7 +43,7 @@ func (h *Handler) createBankConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
-	conn, err := h.bankSvc.CreateConnection(r.Context(), userID, req.InstitutionID, req.Country, req.RedirectURL, req.Sandbox)
+	conn, err := h.bankSvc.CreateConnection(r.Context(), userID, req.InstitutionID, req.InstitutionName, req.Country, req.RedirectURL, req.Sandbox)
 	if err != nil {
 		h.Logger.Error("failed to create bank connection", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to initiate bank link")
@@ -61,7 +63,8 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.bankSvc.FinishConnection(r.Context(), req.RequisitionID, req.Code); err != nil {
+	userID := h.getUserID(r.Context())
+	if err := h.bankSvc.FinishConnection(r.Context(), userID, req.RequisitionID, req.Code); err != nil {
 		h.Logger.Error("failed to finish bank connection", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to complete bank link")
 		return
@@ -90,7 +93,8 @@ func (h *Handler) deleteBankConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.bankSvc.DeleteConnection(r.Context(), id); err != nil {
+	userID := h.getUserID(r.Context())
+	if err := h.bankSvc.DeleteConnection(r.Context(), id, userID); err != nil {
 		h.Logger.Error("failed to delete bank connection", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete connection")
 		return
@@ -128,32 +132,12 @@ func (h *Handler) updateBankAccountType(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	if err := h.bankSvc.UpdateAccountType(r.Context(), id, entity.StatementType(req.AccountType)); err != nil {
+	userID := h.getUserID(r.Context())
+	if err := h.bankSvc.UpdateAccountType(r.Context(), id, entity.StatementType(req.AccountType), userID); err != nil {
 		h.Logger.Error("failed to update account type", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to update account type")
 		return
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
-}
-
-func (h *Handler) getUserID(ctx context.Context) uuid.UUID {
-	val := ctx.Value(userIDKey)
-	if val == nil {
-		return uuid.Nil
-	}
-
-	if id, ok := val.(uuid.UUID); ok {
-		return id
-	}
-
-	if idStr, ok := val.(string); ok {
-		id, err := uuid.Parse(idStr)
-		if err != nil {
-			return uuid.Nil
-		}
-		return id
-	}
-
-	return uuid.Nil
 }

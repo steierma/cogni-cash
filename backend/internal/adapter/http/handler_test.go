@@ -14,6 +14,7 @@ import (
 
 	apphttp "cogni-cash/internal/adapter/http"
 	"cogni-cash/internal/domain/entity"
+	"cogni-cash/internal/domain/port"
 	"cogni-cash/internal/domain/service"
 
 	"github.com/go-chi/chi/v5"
@@ -43,6 +44,13 @@ func (m *mockUserRepo) FindByID(_ context.Context, id uuid.UUID) (entity.User, e
 		return m.user, nil
 	}
 	return entity.User{}, errors.New("user not found")
+}
+
+func (m *mockUserRepo) GetAdminID(_ context.Context) (uuid.UUID, error) {
+	if m.user.Role == "admin" || m.user.Username == "admin" {
+		return m.user.ID, nil
+	}
+	return uuid.Nil, errors.New("admin not found")
 }
 
 func (m *mockUserRepo) FindAll(_ context.Context, _ string) ([]entity.User, error) {
@@ -94,7 +102,7 @@ func setupTestAuth(t *testing.T) (*service.AuthService, string) {
 	}
 
 	repo := &mockUserRepo{user: user}
-	authSvc := service.NewAuthService(repo, "test-secret-key", setupLogger())
+	authSvc := service.NewAuthService(repo, nil, nil, nil, "test-secret-key", setupLogger())
 
 	token, err := authSvc.Login(context.Background(), "testadmin", "password")
 	if err != nil {
@@ -114,16 +122,23 @@ func (m *mockCategoryRepo) Save(_ context.Context, cat entity.Category) (entity.
 	m.categories = append(m.categories, cat)
 	return cat, nil
 }
+
 func (m *mockCategoryRepo) Update(_ context.Context, cat entity.Category) (entity.Category, error) {
 	return cat, nil
 }
-func (m *mockCategoryRepo) FindByID(_ context.Context, _ uuid.UUID) (entity.Category, error) {
+
+// FIX: Added userID parameter
+func (m *mockCategoryRepo) FindByID(_ context.Context, _ uuid.UUID, _ uuid.UUID) (entity.Category, error) {
 	return entity.Category{}, nil
 }
-func (m *mockCategoryRepo) FindAll(_ context.Context) ([]entity.Category, error) {
+
+// FIX: Added userID parameter
+func (m *mockCategoryRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Category, error) {
 	return m.categories, nil
 }
-func (m *mockCategoryRepo) Delete(_ context.Context, _ uuid.UUID) error {
+
+// FIX: Added userID parameter
+func (m *mockCategoryRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
@@ -138,35 +153,39 @@ func (m *mockBankStmtRepo) FindTransactions(_ context.Context, _ entity.Transact
 func (m *mockBankStmtRepo) Save(_ context.Context, stmt entity.BankStatement) error {
 	return nil
 }
-func (m *mockBankStmtRepo) FindByID(_ context.Context, id uuid.UUID) (entity.BankStatement, error) {
+func (m *mockBankStmtRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.BankStatement, error) {
 	// Return a stub to avoid "not found" errors in the service layer when finishing reconciliations
 	return entity.BankStatement{ID: id}, nil
 }
-func (m *mockBankStmtRepo) FindAll(_ context.Context) ([]entity.BankStatement, error) {
+func (m *mockBankStmtRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.BankStatement, error) {
 	return nil, nil
 }
-func (m *mockBankStmtRepo) FindSummaries(_ context.Context) ([]entity.BankStatementSummary, error) {
+func (m *mockBankStmtRepo) FindSummaries(_ context.Context, _ uuid.UUID) ([]entity.BankStatementSummary, error) {
 	return nil, nil
 }
 func (m *mockBankStmtRepo) SearchTransactions(_ context.Context, f entity.TransactionFilter) ([]entity.Transaction, error) {
 	return nil, nil
 }
-func (m *mockBankStmtRepo) GetCategorizationExamples(_ context.Context, _ int) ([]entity.CategorizationExample, error) {
+func (m *mockBankStmtRepo) GetCategorizationExamples(_ context.Context, _ uuid.UUID, _ int) ([]entity.CategorizationExample, error) {
 	return nil, nil
 }
-func (m *mockBankStmtRepo) UpdateTransactionCategory(_ context.Context, hash string, categoryID *uuid.UUID) error {
+func (m *mockBankStmtRepo) UpdateTransactionCategory(_ context.Context, hash string, categoryID *uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
-func (m *mockBankStmtRepo) MarkTransactionReconciled(_ context.Context, _ string, _ uuid.UUID) error {
+func (m *mockBankStmtRepo) MarkTransactionReconciled(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
-func (m *mockBankStmtRepo) MarkTransactionReviewed(_ context.Context, _ string) error {
+func (m *mockBankStmtRepo) MarkTransactionReviewed(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }
 
-func (m *mockBankStmtRepo) Delete(_ context.Context, _ uuid.UUID) error {
+func (m *mockBankStmtRepo) LinkTransactionToStatement(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockBankStmtRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
@@ -174,6 +193,67 @@ func (m *mockBankStmtRepo) Delete(_ context.Context, _ uuid.UUID) error {
 func (m *mockBankStmtRepo) CreateTransactions(_ context.Context, txns []entity.Transaction) error {
 	m.txns = append(m.txns, txns...)
 	return nil
+}
+
+// setupTestUser creates a real AuthService with a mock repo for a specific user role
+func setupTestUser(t *testing.T, username, role string) (*service.AuthService, string) {
+	hash, _ := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.MinCost)
+	user := entity.User{
+		ID:           uuid.New(),
+		Username:     username,
+		PasswordHash: string(hash),
+		Role:         role,
+	}
+	repo := &mockUserRepo{user: user}
+	authSvc := service.NewAuthService(repo, nil, nil, nil, "test-secret-key", setupLogger())
+	token, _ := authSvc.Login(context.Background(), username, "password")
+	return authSvc, token
+}
+
+func TestSettingsAccessControl(t *testing.T) {
+	adminAuth, adminToken := setupTestUser(t, "admin", "admin")
+	managerAuth, managerToken := setupTestUser(t, "manager", "manager")
+
+	dummyPinger := func(ctx context.Context) error { return nil }
+
+	// Helper to run request
+	runReq := func(authSvc *service.AuthService, token string) int {
+		// Use a local mock that implements GetAll to avoid nil dereference
+		handler := apphttp.NewHandler(authSvc, nil, nil, &realMockSettingsSvc{}, nil, setupLogger(), "memory", "localhost", dummyPinger)
+		// We need to inject the user service so adminMiddleware can fetch the user to check the role
+		// In the test, authSvc and userSvc can use the same repo/logic
+		userSvc := service.NewUserService(authSvc.GetRepo_ForTest().(port.UserRepository), setupLogger())
+		handler.WithUserService(userSvc)
+
+		r := chi.NewRouter()
+		handler.RegisterRoutes(r)
+
+		req := httptest.NewRequest(http.MethodGet, "/api/v1/settings/", nil)
+		req.Header.Set("Authorization", "Bearer "+token)
+		rr := httptest.NewRecorder()
+		r.ServeHTTP(rr, req)
+		return rr.Code
+	}
+
+	// 1. Admin should succeed (or get 200 via our no-op mock)
+	adminCode := runReq(adminAuth, adminToken)
+	if adminCode == http.StatusUnauthorized || adminCode == http.StatusForbidden {
+		t.Errorf("expected admin to bypass middleware, got %d", adminCode)
+	}
+
+	// 2. Manager should be forbidden
+	managerCode := runReq(managerAuth, managerToken)
+	if managerCode != http.StatusUnauthorized && managerCode != http.StatusForbidden {
+		t.Errorf("expected manager to be blocked, got %d", managerCode)
+	}
+}
+
+type realMockSettingsSvc struct {
+	port.SettingsUseCase
+}
+
+func (m *realMockSettingsSvc) GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
+	return map[string]string{}, nil
 }
 
 func TestHealthCheck(t *testing.T) {
@@ -390,18 +470,20 @@ func (m *mockPayslipRepo) Save(_ context.Context, p *entity.Payslip) error {
 	m.payslips[p.ID] = *p
 	return nil
 }
-func (m *mockPayslipRepo) ExistsByHash(_ context.Context, _ string) (bool, error) { return false, nil }
-func (m *mockPayslipRepo) ExistsByOriginalFileName(_ context.Context, _ string) (bool, error) {
+func (m *mockPayslipRepo) ExistsByHash(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
 	return false, nil
 }
-func (m *mockPayslipRepo) FindAll(_ context.Context) ([]entity.Payslip, error) {
+func (m *mockPayslipRepo) ExistsByOriginalFileName(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
+	return false, nil
+}
+func (m *mockPayslipRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Payslip, error) {
 	result := make([]entity.Payslip, 0, len(m.payslips))
 	for _, p := range m.payslips {
 		result = append(result, p)
 	}
 	return result, nil
 }
-func (m *mockPayslipRepo) FindByID(_ context.Context, id string) (entity.Payslip, error) {
+func (m *mockPayslipRepo) FindByID(_ context.Context, id string, _ uuid.UUID) (entity.Payslip, error) {
 	p, ok := m.payslips[id]
 	if !ok {
 		return entity.Payslip{}, errors.New("payslip not found")
@@ -415,11 +497,11 @@ func (m *mockPayslipRepo) Update(_ context.Context, p *entity.Payslip) error {
 	m.payslips[p.ID] = *p
 	return nil
 }
-func (m *mockPayslipRepo) Delete(_ context.Context, id string) error {
+func (m *mockPayslipRepo) Delete(_ context.Context, id string, _ uuid.UUID) error {
 	delete(m.payslips, id)
 	return nil
 }
-func (m *mockPayslipRepo) GetOriginalFile(_ context.Context, _ string) ([]byte, string, string, error) {
+func (m *mockPayslipRepo) GetOriginalFile(_ context.Context, _ string, _ uuid.UUID) ([]byte, string, string, error) {
 	return []byte("pdf"), "application/pdf", "test.pdf", nil
 }
 

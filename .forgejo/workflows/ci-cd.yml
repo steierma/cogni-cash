@@ -21,12 +21,112 @@ jobs:
           go-version: '1.26'
           cache-dependency-path: backend/go.sum
 
-      - name: Run tests
+      - name: Run tests and check coverage
         working-directory: backend
         shell: sh
-        run: go test ./... -v -count=1
+        run: |
+          go test ./... -v -count=1 -coverprofile=coverage.out
+          
+          # Exclude non-logic files (entities, ports, cmd/, migrations/, main.go) from coverage calculation
+          grep -vE 'internal/domain/entity|internal/domain/port|cmd/|migrations/|main\.go' coverage.out > coverage_filtered.out
+          
+          TOTAL_COVERAGE=$(go tool cover -func=coverage_filtered.out | grep total | awk '{print $3}' | sed 's/%//')
+          echo "Total coverage (excluding non-logic files): $TOTAL_COVERAGE%"
+          if [ "$(echo "$TOTAL_COVERAGE < 35" | awk '{print ($1 < 35)}')" -eq 1 ]; then
+            echo "❌ Total coverage is below the temporarily enforced 35% threshold! Target is 75%."
+            exit 1
+          fi
+          echo "✅ Total coverage requirement met."
 
-  # ── 2. Build & Push Docker images ──────────────────────────────────────────
+          SERVICE_COVERAGE=$(go test ./internal/domain/service/... -cover | awk '{print $5}' | sed 's/%//')
+          if [ -n "$SERVICE_COVERAGE" ]; then
+            echo "Service layer coverage: $SERVICE_COVERAGE%"
+            if [ "$(echo "$SERVICE_COVERAGE < 65" | awk '{print ($1 < 65)}')" -eq 1 ]; then
+              echo "❌ Service layer coverage dropped below the enforced 65% threshold!"
+              exit 1
+            fi
+            echo "✅ Service layer coverage requirement met."
+          else
+            echo "⚠️ Service layer coverage could not be determined."
+          fi
+
+  #  # ── 2. Build Mobile (Android) ──────────────────────────────────────────────
+  #  build-android:
+  #    name: Build Android APK
+  #    runs-on: ubuntu-latest
+  #    continue-on-error: true
+  #    needs: test
+  #    if: github.event_name == 'push'
+  #    steps:
+  #      - name: Checkout
+  #        uses: actions/checkout@v4.1.1
+  #
+  #      - name: Set up Java
+  #        uses: actions/setup-java@v3
+  #        with:
+  #          distribution: 'zulu'
+  #          java-version: '17'
+  #
+  #      - name: Set up Flutter
+  #        uses: subosito/flutter-action@v2
+  #        with:
+  #          flutter-version: '3.41.6'
+  #          channel: 'stable'
+  #
+  #      - name: Get Mobile Dependencies
+  #        working-directory: mobile
+  #        run: flutter pub get
+  #
+  #      - name: Build APK
+  #        working-directory: mobile
+  #        run: |
+  #          flutter build apk --release \
+  #            --dart-define=BACKEND_URL=${{ secrets.PROD_BACKEND_URL }}
+  #
+  #      - name: Upload APK Artifact
+  #        uses: actions/upload-artifact@v3
+  #        with:
+  #          name: cogni-cash-android
+  #          path: mobile/build/app/outputs/flutter-apk/app-release.apk
+  #
+  #  # ── 3. Build Mobile (iOS) ──────────────────────────────────────────────────
+  #  build-ios:
+  #    name: Build iOS App
+  #    runs-on: macos # <--- Targets your new macOS runner
+  #    continue-on-error: true
+  #    needs: test
+  #    if: github.event_name == 'push'
+  #    steps:
+  #      - name: Checkout
+  #        uses: actions/checkout@v4.1.1
+  #
+  #      - name: Set up Flutter
+  #        uses: subosito/flutter-action@v2
+  #        with:
+  #          flutter-version: '3.41.6'
+  #          channel: 'stable'
+  #
+  #      - name: Get Mobile Dependencies
+  #        working-directory: mobile
+  #        run: flutter pub get
+  #
+  #      - name: Install CocoaPods
+  #        working-directory: mobile/ios
+  #        run: pod install
+  #
+  #      - name: Build iOS (No Codesign)
+  #        working-directory: mobile
+  #        run: |
+  #          flutter build ios --release --no-codesign \
+  #            --dart-define=BACKEND_URL=${{ secrets.PROD_BACKEND_URL }}
+  #
+  #      - name: Upload iOS Build
+  #        uses: actions/upload-artifact@v3
+  #        with:
+  #          name: cogni-cash-ios
+  #          path: mobile/build/ios/iphoneos/Runner.app
+
+  # ── 4. Build & Push Docker images ──────────────────────────────────────────
   build:
     name: Build & Push Images
     runs-on: docker
@@ -44,7 +144,9 @@ jobs:
       - name: Cache Docker layers
         uses: actions/cache@v3
         with:
-          path: /tmp/.buildx-cache
+          path: |
+            /tmp/.buildx-cache-backend
+            /tmp/.buildx-cache-frontend
           key: ${{ runner.os }}-buildx-${{ github.sha }}
           restore-keys: |
             ${{ runner.os }}-buildx-
@@ -63,8 +165,8 @@ jobs:
           file: ./backend/Dockerfile
           push: true
           tags: ghcr.io/steierma/cogni-cash-backend:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-from: type=local,src=/tmp/.buildx-cache-backend
+          cache-to: type=local,dest=/tmp/.buildx-cache-backend-new,mode=max
 
       - name: Build and push frontend image
         uses: docker/build-push-action@v5.0.0
@@ -73,16 +175,18 @@ jobs:
           file: ./frontend/Dockerfile
           push: true
           tags: ghcr.io/steierma/cogni-cash-frontend:latest
-          cache-from: type=local,src=/tmp/.buildx-cache
-          cache-to: type=local,dest=/tmp/.buildx-cache-new,mode=max
+          cache-from: type=local,src=/tmp/.buildx-cache-frontend
+          cache-to: type=local,dest=/tmp/.buildx-cache-frontend-new,mode=max
 
       - name: Move cache
         shell: sh
         run: |
-          rm -rf /tmp/.buildx-cache
-          mv /tmp/.buildx-cache-new /tmp/.buildx-cache
+          rm -rf /tmp/.buildx-cache-backend
+          rm -rf /tmp/.buildx-cache-frontend
+          mv /tmp/.buildx-cache-backend-new /tmp/.buildx-cache-backend
+          mv /tmp/.buildx-cache-frontend-new /tmp/.buildx-cache-frontend
 
-  # ── 3. Deploy ──────────────────────────────────────────────────────────────
+  # ── 5. Deploy ──────────────────────────────────────────────────────────────
   deploy:
     name: Deploy to Proxmox
     runs-on: docker
@@ -106,21 +210,15 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Rsync project files
+      - name: Targeted Sync of Configuration
         shell: sh
         run: |
-          rsync -az --delete \
+          # We only need docker-compose.yml on the server.
+          # Everything else (backend, frontend, migrations) is inside the Docker images.
+          # Files like .env, docker-compose.override.yml, and keys are already on the server.
+          rsync -avz \
             -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
-            --exclude='.git' \
-            --exclude='.env' \
-            --exclude='docker-compose.override.yml' \
-            --exclude='enable-banking.pem' \
-            --exclude='backend/balance/diba_history' \
-            --exclude='backend/balance/bulk_import' \
-            --exclude='backend/bin' \
-            --exclude='frontend/node_modules' \
-            --exclude='frontend/dist' \
-            ./ \
+            docker-compose.yml \
             "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/"
 
       - name: Pull images & start stack
@@ -134,12 +232,17 @@ jobs:
           
             echo ">>> Pulling latest images from GHCR..."
             cd "${{ secrets.DEPLOY_PATH }}"
+          
+            # Use docker compose pull to update images without affecting existing config files
             docker compose pull
           
             echo ">>> Starting stack..."
+            # Note: We assume .env and docker-compose.override.yml are already present on the server.
+            # If backend/.env is missing but root .env exists, we link/copy it for the postgres service.
             if [ ! -f backend/.env ] && [ -f .env ]; then
+              mkdir -p backend
               cp .env backend/.env
-              echo "✅ Copied root .env to backend/.env"
+              echo "✅ Ensured backend/.env for postgres service"
             fi
           
             docker compose up -d --remove-orphans

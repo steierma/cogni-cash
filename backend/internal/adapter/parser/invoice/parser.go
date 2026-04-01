@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/google/uuid"
 	"github.com/ledongthuc/pdf"
 )
 
@@ -22,7 +23,7 @@ func NewParser() *Parser { return &Parser{} }
 
 // Extract reads the file at filePath and returns its plain-text content.
 // mimeType is used as a hint; the file extension takes precedence.
-func (p *Parser) Extract(_ context.Context, filePath, _ string) (string, error) {
+func (p *Parser) Extract(_ context.Context, _ uuid.UUID, filePath, _ string) (string, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	switch ext {
 	case ".pdf":
@@ -61,4 +62,3 @@ func extractPDF(filePath string) (string, error) {
 	}
 	return strings.TrimSpace(buf.String()), nil
 }
-

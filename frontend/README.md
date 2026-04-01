@@ -1,73 +1,42 @@
-# React + TypeScript + Vite
+#  Web Dashboard
 
-This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
+The administrative and analytical web interface for , built with React 19, TypeScript, and Tailwind CSS v4.
 
-Currently, two official plugins are available:
+## 🎨 Design System
 
-- [@vitejs/plugin-react](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react) uses [Babel](https://babeljs.io/) (or [oxc](https://oxc.rs) when used in [rolldown-vite](https://vite.dev/guide/rolldown)) for Fast Refresh
-- [@vitejs/plugin-react-swc](https://github.com/vitejs/vite-plugin-react/blob/main/packages/plugin-react-swc) uses [SWC](https://swc.rs/) for Fast Refresh
+- **Primary Color:** Indigo (`#6366f1`)
+- **Visuals:** Recharts 3 for interactive charts.
+- **Icons:** Lucide React.
+- **Theming:** Full light/dark mode support.
 
-## React Compiler
+## 🚀 Key Features
 
-The React Compiler is not enabled on this template because of its impact on dev & build performances. To add it, see [this documentation](https://react.dev/learn/react-compiler/installation).
+- **Dynamic Analytics:** Monthly cash flow, category breakdowns, and merchant trends.
+- **Transaction Inbox:** "Unreviewed Only" view for managing newly synchronized bank data.
+- **Document Management:** Drag-and-drop support for bank statements, invoices, and payslips.
+- **AI Categorization:** One-click batch categorization using local LLMs.
+- **Reconciliation Wizard:** Smart matching of internal transfers between accounts.
+- **Bank Integration:** Interactive OAuth flow for linking live bank feeds.
+- **Multilingual:** Support for English, German, Spanish, and French.
 
-## Expanding the ESLint configuration
+## 🛠️ Development
 
-If you are developing a production application, we recommend updating the configuration to enable type-aware lint rules:
+### Prerequisites
+- Node.js 22+
+- Running  Backend
 
-```js
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-
-      // Remove tseslint.configs.recommended and replace with this
-      tseslint.configs.recommendedTypeChecked,
-      // Alternatively, use this for stricter rules
-      tseslint.configs.strictTypeChecked,
-      // Optionally, add this for stylistic rules
-      tseslint.configs.stylisticTypeChecked,
-
-      // Other configs...
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
+### Running Locally
+```bash
+npm install
+npm run dev
 ```
+The frontend will be available at `http://localhost:5173`.
 
-You can also install [eslint-plugin-react-x](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-x) and [eslint-plugin-react-dom](https://github.com/Rel1cx/eslint-react/tree/main/packages/plugins/eslint-plugin-react-dom) for React-specific lint rules:
+### Environment Variables
+- `VITE_API_URL`: Override the default API endpoint (default: same host as frontend).
 
-```js
-// eslint.config.js
-import reactX from 'eslint-plugin-react-x'
-import reactDom from 'eslint-plugin-react-dom'
+## 🌍 Internationalization (i18n)
 
-export default defineConfig([
-  globalIgnores(['dist']),
-  {
-    files: ['**/*.{ts,tsx}'],
-    extends: [
-      // Other configs...
-      // Enable lint rules for React
-      reactX.configs['recommended-typescript'],
-      // Enable lint rules for React DOM
-      reactDom.configs.recommended,
-    ],
-    languageOptions: {
-      parserOptions: {
-        project: ['./tsconfig.node.json', './tsconfig.app.json'],
-        tsconfigRootDir: import.meta.dirname,
-      },
-      // other options...
-    },
-  },
-])
-```
+Translations are managed in `src/i18n/locales/`. 
+- **MANDATORY:** Always add new keys to all 4 supported languages.
+- **English** is the source of truth.

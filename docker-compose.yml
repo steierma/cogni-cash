@@ -53,11 +53,11 @@ services:
       DATABASE_PORT: 5432
       PAYSLIP_IMPORT_JSON_PATH: /app/payslips/payslips_import.json
       # NEU: Dem Backend sagen, wo es den Key im Container findet
-      ENABLEBANKING_PRIVATE_KEY_PATH: /app/enable-banking.pem
+      ENABLEBANKING_PRIVATE_KEY_PATH: /app/enable-banking-prod.pem
     volumes:
       - ${PAYSLIP_HOST_DIR:-./backend/payslips}:/app/payslips
       # NEU: Mounte die lokale enable-banking.pem in den Container (Read-Only)
-      - ./enable-banking.pem:/app/enable-banking.pem:ro
+      - ./enable-banking-prod.pem:/app/enable-banking-prod.pem:ro
     depends_on:
       postgres:
         condition: service_healthy

@@ -34,9 +34,16 @@ type updateInvoiceRequest struct {
 
 // GET /api/v1/invoices/
 func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
-	invoices, err := h.invoiceSvc.GetAll(r.Context())
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
+	invoices, err := h.invoiceSvc.GetAll(r.Context(), userID)
 	if err != nil {
-		h.Logger.Error("Failed to list invoices", "error", err)
+		h.Logger.Error("Failed to list invoices", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -48,12 +55,19 @@ func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/invoices/{id}
 func (h *Handler) getInvoice(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id, err := parseUUID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid invoice id")
 		return
 	}
-	invoice, err := h.invoiceSvc.GetByID(r.Context(), id)
+	invoice, err := h.invoiceSvc.GetByID(r.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, entity.ErrInvoiceNotFound) {
 			writeError(w, http.StatusNotFound, "invoice not found")
@@ -67,6 +81,13 @@ func (h *Handler) getInvoice(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/v1/invoices/import   (multipart/form-data, field "file")
 func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	const maxUpload = 32 << 20 // 32 MB
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
 	if err := r.ParseMultipartForm(maxUpload); err != nil {
@@ -103,13 +124,13 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 		categoryID = &parsed
 	}
 
-	invoice, err := h.invoiceSvc.ImportFromFile(r.Context(), "", header.Filename, mimeType, fileBytes, categoryID)
+	invoice, err := h.invoiceSvc.ImportFromFile(r.Context(), userID, "", header.Filename, mimeType, fileBytes, categoryID)
 	if err != nil {
 		if errors.Is(err, entity.ErrInvoiceDuplicate) {
 			writeError(w, http.StatusConflict, "invoice already imported (duplicate)")
 			return
 		}
-		h.Logger.Error("Failed to import invoice", "error", err)
+		h.Logger.Error("Failed to import invoice", "error", err, "user_id", userID)
 		writeError(w, http.StatusUnprocessableEntity, fmt.Sprintf("import failed: %s", err.Error()))
 		return
 	}
@@ -118,6 +139,13 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 
 // PUT /api/v1/invoices/{id}
 func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id, err := parseUUID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid invoice id")
@@ -130,8 +158,8 @@ func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Fetch current record to preserve immutable fields
-	existing, err := h.invoiceSvc.GetByID(r.Context(), id)
+	// Fetch current record to preserve immutable fields and verify ownership
+	existing, err := h.invoiceSvc.GetByID(r.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, entity.ErrInvoiceNotFound) {
 			writeError(w, http.StatusNotFound, "invoice not found")
@@ -176,12 +204,19 @@ func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/v1/invoices/{id}
 func (h *Handler) deleteInvoice(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id, err := parseUUID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid invoice id")
 		return
 	}
-	if err := h.invoiceSvc.Delete(r.Context(), id); err != nil {
+	if err := h.invoiceSvc.Delete(r.Context(), id, userID); err != nil {
 		if errors.Is(err, entity.ErrInvoiceNotFound) {
 			writeError(w, http.StatusNotFound, "invoice not found")
 			return
@@ -194,12 +229,19 @@ func (h *Handler) deleteInvoice(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/invoices/{id}/download
 func (h *Handler) downloadInvoiceFile(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id, err := parseUUID(r, "id")
 	if err != nil {
 		writeError(w, http.StatusBadRequest, "invalid invoice id")
 		return
 	}
-	content, mimeType, fileName, err := h.invoiceSvc.GetOriginalFile(r.Context(), id)
+	content, mimeType, fileName, err := h.invoiceSvc.GetOriginalFile(r.Context(), id, userID)
 	if err != nil {
 		if errors.Is(err, entity.ErrInvoiceNotFound) {
 			writeError(w, http.StatusNotFound, "invoice not found")

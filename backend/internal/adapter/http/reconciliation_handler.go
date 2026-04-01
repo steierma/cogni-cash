@@ -23,6 +23,13 @@ func (h *Handler) getReconciliationSuggestions(w http.ResponseWriter, r *http.Re
 		return
 	}
 
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	matchWindowDays := 7
 	windowQuery := r.URL.Query().Get("window")
 	if windowQuery != "" {
@@ -31,11 +38,15 @@ func (h *Handler) getReconciliationSuggestions(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	suggestions, err := h.reconciliationSvc.SuggestReconciliations(r.Context(), matchWindowDays)
+	suggestions, err := h.reconciliationSvc.SuggestReconciliations(r.Context(), userID, matchWindowDays)
 	if err != nil {
-		h.Logger.Error("Failed to get reconciliation suggestions", "error", err)
+		h.Logger.Error("Failed to get reconciliation suggestions", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to get suggestions")
 		return
+	}
+
+	if suggestions == nil {
+		suggestions = []entity.ReconciliationPairSuggestion{}
 	}
 
 	writeJSON(w, http.StatusOK, suggestions)
@@ -47,6 +58,13 @@ func (h *Handler) createReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	var req createReconciliationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -57,7 +75,7 @@ func (h *Handler) createReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	rec, err := h.reconciliationSvc.ReconcileStatements(r.Context(), req.SettlementTxHash, req.TargetTxHash)
+	rec, err := h.reconciliationSvc.ReconcileStatements(r.Context(), userID, req.SettlementTxHash, req.TargetTxHash)
 	if err != nil {
 		if errors.Is(err, entity.ErrTransactionNotFound) {
 			writeError(w, http.StatusNotFound, "transaction not found")
@@ -76,13 +94,25 @@ func (h *Handler) createReconciliation(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listReconciliations(w http.ResponseWriter, r *http.Request) {
 	if h.reconciliationRepo == nil {
-		writeJSON(w, http.StatusOK, []any{})
+		writeJSON(w, http.StatusOK, []entity.Reconciliation{})
 		return
 	}
-	recs, err := h.reconciliationRepo.FindAll(r.Context())
+
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
+	recs, err := h.reconciliationRepo.FindAll(r.Context(), userID)
 	if err != nil {
+		h.Logger.Error("Failed to list reconciliations", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to list reconciliations")
 		return
+	}
+	if recs == nil {
+		recs = []entity.Reconciliation{}
 	}
 	writeJSON(w, http.StatusOK, recs)
 }
@@ -93,6 +123,13 @@ func (h *Handler) deleteReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	idParam := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idParam)
 	if err != nil {
@@ -100,8 +137,8 @@ func (h *Handler) deleteReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.reconciliationSvc.DeleteReconciliation(r.Context(), id); err != nil {
-		h.Logger.Error("Failed to delete reconciliation", "error", err)
+	if err := h.reconciliationSvc.DeleteReconciliation(r.Context(), id, userID); err != nil {
+		h.Logger.Error("Failed to delete reconciliation", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "failed to delete reconciliation")
 		return
 	}

@@ -43,6 +43,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"golang.org/x/text/encoding/charmap"
 	"golang.org/x/text/transform"
 
@@ -62,7 +63,7 @@ type Parser struct {
 func NewParser(logger *slog.Logger) *Parser { return &Parser{Logger: logger} }
 
 // Parse opens the ISO-8859-1 CSV at filePath and returns a BankStatement.
-func (p *Parser) Parse(_ context.Context, filePath string) (entity.BankStatement, error) {
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
 	p.Logger.Info("Parsing ING CSV", "filePath", filePath)
 	f, err := os.Open(filePath)
 	if err != nil {
@@ -226,14 +227,16 @@ func parseRow(row []string) (entity.Transaction, error) {
 	}
 
 	return entity.Transaction{
-		BookingDate: bookingDate,
-		ValutaDate:  valutaDate,
-		Description: description,
-		Amount:      amount,
-		Currency:    currency,
-		Type:        txType,
-		Reference:   reference, // Verwendungszweck
-		CategoryID:  nil,       // Auto-categorizer will catch this since we migrated to UUID mappings
+		BookingDate:         bookingDate,
+		ValutaDate:          valutaDate,
+		Description:         description,
+		CounterpartyName:    counterparty,
+		BankTransactionCode: bookingType,
+		Amount:              amount,
+		Currency:            currency,
+		Type:                txType,
+		Reference:           reference, // Verwendungszweck
+		CategoryID:          nil,       // Auto-categorizer will catch this since we migrated to UUID mappings
 	}, nil
 }
 

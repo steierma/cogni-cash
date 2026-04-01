@@ -51,6 +51,18 @@ func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (entity.Use
 	return user, nil
 }
 
+func (r *UserRepository) GetAdminID(ctx context.Context) (uuid.UUID, error) {
+	var id uuid.UUID
+	err := r.pool.QueryRow(ctx, "SELECT id FROM users WHERE username = 'admin'").Scan(&id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return uuid.Nil, errors.New("admin user not found")
+		}
+		return uuid.Nil, err
+	}
+	return id, nil
+}
+
 func (r *UserRepository) FindAll(ctx context.Context, search string) ([]entity.User, error) {
 	var rows pgx.Rows
 	var err error

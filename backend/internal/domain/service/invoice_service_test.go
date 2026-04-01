@@ -21,7 +21,7 @@ type mockLLMClient struct {
 	err    error
 }
 
-func (m *mockLLMClient) Categorize(_ context.Context, _ port.CategorizationRequest) (port.CategorizationResult, error) {
+func (m *mockLLMClient) Categorize(_ context.Context, _ uuid.UUID, _ port.CategorizationRequest) (port.CategorizationResult, error) {
 	return m.result, m.err
 }
 
@@ -32,7 +32,7 @@ type mockInvoiceParser struct {
 	err  error
 }
 
-func (m *mockInvoiceParser) Extract(_ context.Context, _, _ string) (string, error) {
+func (m *mockInvoiceParser) Extract(_ context.Context, _ uuid.UUID, _, _ string) (string, error) {
 	return m.text, m.err
 }
 
@@ -64,7 +64,7 @@ func (m *mockInvoiceRepo) Update(_ context.Context, inv entity.Invoice) error {
 	return entity.ErrInvoiceNotFound
 }
 
-func (m *mockInvoiceRepo) FindByID(_ context.Context, id uuid.UUID) (entity.Invoice, error) {
+func (m *mockInvoiceRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.Invoice, error) {
 	for _, inv := range m.saved {
 		if inv.ID == id {
 			return inv, nil
@@ -73,11 +73,11 @@ func (m *mockInvoiceRepo) FindByID(_ context.Context, id uuid.UUID) (entity.Invo
 	return entity.Invoice{}, entity.ErrInvoiceNotFound
 }
 
-func (m *mockInvoiceRepo) FindAll(_ context.Context) ([]entity.Invoice, error) {
+func (m *mockInvoiceRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Invoice, error) {
 	return m.saved, m.err
 }
 
-func (m *mockInvoiceRepo) Delete(_ context.Context, id uuid.UUID) error {
+func (m *mockInvoiceRepo) Delete(_ context.Context, id uuid.UUID, _ uuid.UUID) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -90,7 +90,7 @@ func (m *mockInvoiceRepo) Delete(_ context.Context, id uuid.UUID) error {
 	return entity.ErrInvoiceNotFound
 }
 
-func (m *mockInvoiceRepo) ExistsByContentHash(_ context.Context, hash string) (bool, error) {
+func (m *mockInvoiceRepo) ExistsByContentHash(_ context.Context, hash string, _ uuid.UUID) (bool, error) {
 	for _, inv := range m.saved {
 		if inv.ContentHash == hash {
 			return true, nil
@@ -99,7 +99,7 @@ func (m *mockInvoiceRepo) ExistsByContentHash(_ context.Context, hash string) (b
 	return false, nil
 }
 
-func (m *mockInvoiceRepo) GetOriginalFile(_ context.Context, id uuid.UUID) ([]byte, string, string, error) {
+func (m *mockInvoiceRepo) GetOriginalFile(_ context.Context, id uuid.UUID, _ uuid.UUID) ([]byte, string, string, error) {
 	for _, inv := range m.saved {
 		if inv.ID == id {
 			return inv.OriginalFileContent, inv.OriginalFileMime, inv.OriginalFileName, nil
@@ -107,6 +107,27 @@ func (m *mockInvoiceRepo) GetOriginalFile(_ context.Context, id uuid.UUID) ([]by
 	}
 	return nil, "", "", entity.ErrInvoiceNotFound
 }
+
+// ── Mock Category Repository ───────────────────────────────────────────────────
+
+type mockCatRepo struct {
+	cats []entity.Category
+}
+
+func (m *mockCatRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Category, error) {
+	return m.cats, nil
+}
+func (m *mockCatRepo) Save(_ context.Context, cat entity.Category) (entity.Category, error) { return cat, nil }
+func (m *mockCatRepo) Update(_ context.Context, cat entity.Category) (entity.Category, error) { return cat, nil }
+func (m *mockCatRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.Category, error) {
+	for _, c := range m.cats {
+		if c.ID == id {
+			return c, nil
+		}
+	}
+	return entity.Category{}, errors.New("not found")
+}
+func (m *mockCatRepo) Delete(_ context.Context, id uuid.UUID, _ uuid.UUID) error { return nil }
 
 // ── Test helpers ─────────────────────────────────────────────────────────────
 
@@ -116,9 +137,12 @@ var defaultCategories = []entity.Category{
 	{ID: uuid.New(), Name: "Travel"},
 }
 
+var dummyUserID = uuid.New()
+
 func newTestInvoiceSvc(llm port.LLMClient, repo *mockInvoiceRepo) *service.InvoiceService {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
-	return service.NewInvoiceService(repo, &mockInvoiceParser{text: "extracted text"}, llm, defaultCategories, logger)
+	catRepo := &mockCatRepo{cats: defaultCategories}
+	return service.NewInvoiceService(repo, catRepo, &mockInvoiceParser{text: "extracted text"}, llm, logger)
 }
 
 // ── CategorizeDocument tests ─────────────────────────────────────────────────
@@ -136,7 +160,7 @@ func TestCategorizeDocument_HappyPath(t *testing.T) {
 	repo := &mockInvoiceRepo{}
 	svc := newTestInvoiceSvc(llm, repo)
 
-	inv, err := svc.CategorizeDocument(context.Background(), "Invoice for annual software license – €99.99")
+	inv, err := svc.CategorizeDocument(context.Background(), dummyUserID, "Invoice for annual software license – €99.99")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -160,7 +184,7 @@ func TestCategorizeDocument_HappyPath(t *testing.T) {
 func TestCategorizeDocument_EmptyRawText_ReturnsError(t *testing.T) {
 	svc := newTestInvoiceSvc(&mockLLMClient{}, &mockInvoiceRepo{})
 
-	_, err := svc.CategorizeDocument(context.Background(), "")
+	_, err := svc.CategorizeDocument(context.Background(), dummyUserID, "")
 	if !errors.Is(err, service.ErrEmptyRawText) {
 		t.Errorf("expected ErrEmptyRawText, got %v", err)
 	}
@@ -170,7 +194,7 @@ func TestCategorizeDocument_LLMError_PropagatesError(t *testing.T) {
 	llmErr := errors.New("llm unavailable")
 	svc := newTestInvoiceSvc(&mockLLMClient{err: llmErr}, &mockInvoiceRepo{})
 
-	_, err := svc.CategorizeDocument(context.Background(), "some invoice text")
+	_, err := svc.CategorizeDocument(context.Background(), dummyUserID, "some invoice text")
 	if !errors.Is(err, llmErr) {
 		t.Errorf("expected llm error to propagate, got %v", err)
 	}
@@ -179,7 +203,7 @@ func TestCategorizeDocument_LLMError_PropagatesError(t *testing.T) {
 func TestCategorizeDocument_UncategorizedFallback(t *testing.T) {
 	svc := newTestInvoiceSvc(&mockLLMClient{result: port.CategorizationResult{}}, &mockInvoiceRepo{})
 
-	inv, err := svc.CategorizeDocument(context.Background(), "some invoice text")
+	inv, err := svc.CategorizeDocument(context.Background(), dummyUserID, "some invoice text")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -196,7 +220,7 @@ func TestCategorizeDocument_RepositoryError_PropagatesError(t *testing.T) {
 	repo := &mockInvoiceRepo{err: repoErr}
 	svc := newTestInvoiceSvc(llm, repo)
 
-	_, err := svc.CategorizeDocument(context.Background(), "some invoice text")
+	_, err := svc.CategorizeDocument(context.Background(), dummyUserID, "some invoice text")
 	if !errors.Is(err, repoErr) {
 		t.Errorf("expected repo error to propagate, got %v", err)
 	}
@@ -215,11 +239,10 @@ func TestImportFromFile_HappyPath(t *testing.T) {
 		},
 	}
 	repo := &mockInvoiceRepo{}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	svc := service.NewInvoiceService(repo, &mockInvoiceParser{text: "invoice text"}, llm, defaultCategories, logger)
+	svc := newTestInvoiceSvc(llm, repo)
 
 	fileBytes := []byte("fake pdf content")
-	inv, err := svc.ImportFromFile(context.Background(), "", "invoice.pdf", "application/pdf", fileBytes, nil)
+	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "invoice.pdf", "application/pdf", fileBytes, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -242,17 +265,16 @@ func TestImportFromFile_DuplicateHash_ReturnsError(t *testing.T) {
 	fileBytes := []byte("same pdf content")
 	repo := &mockInvoiceRepo{
 		saved: []entity.Invoice{
-			{ID: uuid.New(), ContentHash: "badbadbadbad"}, // hash won't match below
+			{ID: uuid.New(), UserID: dummyUserID, ContentHash: "badbadbadbad"}, // hash won't match below
 		},
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	svc := service.NewInvoiceService(repo, &mockInvoiceParser{text: "text"}, &mockLLMClient{}, defaultCategories, logger)
+	svc := newTestInvoiceSvc(&mockLLMClient{}, repo)
 
 	// Import once to get the real hash stored
-	_, _ = svc.ImportFromFile(context.Background(), "", "a.pdf", "application/pdf", fileBytes, nil)
+	_, _ = svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "a.pdf", "application/pdf", fileBytes, nil)
 
 	// Try to import the exact same bytes again
-	_, err := svc.ImportFromFile(context.Background(), "", "a.pdf", "application/pdf", fileBytes, nil)
+	_, err := svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "a.pdf", "application/pdf", fileBytes, nil)
 	if !errors.Is(err, service.ErrInvoiceDuplicate) {
 		t.Errorf("expected ErrInvoiceDuplicate on second import, got %v", err)
 	}
@@ -263,11 +285,10 @@ func TestImportFromFile_CallerCategoryOverridesLLM(t *testing.T) {
 		result: port.CategorizationResult{CategoryName: "Software", VendorName: "v", Amount: 1, Currency: "EUR"},
 	}
 	repo := &mockInvoiceRepo{}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, nil))
-	svc := service.NewInvoiceService(repo, &mockInvoiceParser{text: "text"}, llm, defaultCategories, logger)
+	svc := newTestInvoiceSvc(llm, repo)
 
 	overrideCatID := uuid.New()
-	inv, err := svc.ImportFromFile(context.Background(), "", "inv.pdf", "application/pdf", []byte("pdf"), &overrideCatID)
+	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "inv.pdf", "application/pdf", []byte("pdf"), &overrideCatID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -284,7 +305,7 @@ func TestUpdate_ChangesVendorAndAmount(t *testing.T) {
 		result: port.CategorizationResult{VendorName: "OldCo", Amount: 10, Currency: "EUR"},
 	}, repo)
 
-	inv, _ := svc.CategorizeDocument(context.Background(), "text")
+	inv, _ := svc.CategorizeDocument(context.Background(), dummyUserID, "text")
 
 	inv.Vendor.Name = "NewCo"
 	inv.Amount = 99.0
@@ -304,7 +325,7 @@ func TestUpdate_NotFound_ReturnsError(t *testing.T) {
 	repo := &mockInvoiceRepo{}
 	svc := newTestInvoiceSvc(&mockLLMClient{}, repo)
 
-	_, err := svc.Update(context.Background(), entity.Invoice{ID: uuid.New()})
+	_, err := svc.Update(context.Background(), entity.Invoice{ID: uuid.New(), UserID: dummyUserID})
 	if !errors.Is(err, entity.ErrInvoiceNotFound) {
 		t.Errorf("expected ErrInvoiceNotFound, got %v", err)
 	}
@@ -316,9 +337,9 @@ func TestDelete_RemovesInvoice(t *testing.T) {
 		result: port.CategorizationResult{VendorName: "v", Amount: 1, Currency: "EUR"},
 	}, repo)
 
-	inv, _ := svc.CategorizeDocument(context.Background(), "text")
+	inv, _ := svc.CategorizeDocument(context.Background(), dummyUserID, "text")
 
-	if err := svc.Delete(context.Background(), inv.ID); err != nil {
+	if err := svc.Delete(context.Background(), inv.ID, dummyUserID); err != nil {
 		t.Fatalf("unexpected delete error: %v", err)
 	}
 	if len(repo.saved) != 0 {
@@ -329,7 +350,7 @@ func TestDelete_RemovesInvoice(t *testing.T) {
 func TestDelete_NotFound_ReturnsError(t *testing.T) {
 	svc := newTestInvoiceSvc(&mockLLMClient{}, &mockInvoiceRepo{})
 
-	err := svc.Delete(context.Background(), uuid.New())
+	err := svc.Delete(context.Background(), uuid.New(), dummyUserID)
 	if !errors.Is(err, entity.ErrInvoiceNotFound) {
 		t.Errorf("expected ErrInvoiceNotFound, got %v", err)
 	}
@@ -342,10 +363,10 @@ func TestGetAll_ReturnsSavedInvoices(t *testing.T) {
 	}, repo)
 
 	for i := 0; i < 3; i++ {
-		_, _ = svc.CategorizeDocument(context.Background(), "text")
+		_, _ = svc.CategorizeDocument(context.Background(), dummyUserID, "text")
 	}
 
-	all, err := svc.GetAll(context.Background())
+	all, err := svc.GetAll(context.Background(), dummyUserID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -353,4 +374,3 @@ func TestGetAll_ReturnsSavedInvoices(t *testing.T) {
 		t.Errorf("expected 3 invoices, got %d", len(all))
 	}
 }
-

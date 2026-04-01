@@ -40,6 +40,7 @@ import (
 	"log/slog"
 
 	"github.com/extrame/xls"
+	"github.com/google/uuid"
 
 	"cogni-cash/internal/domain/entity"
 )
@@ -56,7 +57,7 @@ type Parser struct {
 func NewParser(logger *slog.Logger) *Parser { return &Parser{logger: logger} }
 
 // Parse opens the binary XLS at filePath and returns a BankStatement.
-func (p *Parser) Parse(_ context.Context, filePath string) (entity.BankStatement, error) {
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
 	p.logger.Info("Parsing Amazon Visa XLS", "filePath", filePath)
 	// Verify the file exists before handing it to the library.
 	if _, err := os.Stat(filePath); err != nil {

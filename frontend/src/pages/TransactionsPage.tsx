@@ -66,7 +66,7 @@ export default function TransactionsPage() {
     // Columns Configuration
     const [showColMenu, setShowColMenu] = React.useState(false);
     const [visibleCols, setVisibleCols] = React.useState<Record<TxColKey, boolean>>({
-        date: true, description: true, location: true, reference: false, category: true, amount: true
+        date: true, description: true, counterparty: true, location: true, reference: false, category: true, amount: true
     });
 
     const qc = useQueryClient();

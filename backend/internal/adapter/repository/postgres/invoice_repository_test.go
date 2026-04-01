@@ -17,11 +17,17 @@ func TestInvoiceRepository(t *testing.T) {
 
 	repo := NewInvoiceRepository(globalPool, setupLogger())
 
+	userID := uuid.New()
+	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'inv_user', 'hash', 'inv@example.com')", userID)
+	if err != nil {
+		t.Fatalf("failed to insert user: %v", err)
+	}
+
 	// Insert a test category so FK constraint is satisfied
 	catID := uuid.New()
-	_, err := globalPool.Exec(ctx,
-		"INSERT INTO categories (id, name, color) VALUES ($1, 'Software-inv', '#000001') ON CONFLICT DO NOTHING",
-		catID)
+	_, err = globalPool.Exec(ctx,
+		"INSERT INTO categories (id, user_id, name, color) VALUES ($1, $2, 'Software-inv', '#000001') ON CONFLICT DO NOTHING",
+		catID, userID)
 	if err != nil {
 		t.Fatalf("failed to insert test category: %v", err)
 	}
@@ -30,6 +36,7 @@ func TestInvoiceRepository(t *testing.T) {
 		invID := uuid.New()
 		inv := entity.Invoice{
 			ID:         invID,
+			UserID:     userID,
 			RawText:    "Invoice data 123",
 			CategoryID: &catID,
 			Vendor:     entity.Vendor{Name: "GitHub"},
@@ -42,7 +49,7 @@ func TestInvoiceRepository(t *testing.T) {
 			t.Fatalf("Save: unexpected error: %v", err)
 		}
 
-		found, err := repo.FindByID(ctx, invID)
+		found, err := repo.FindByID(ctx, invID, userID)
 		if err != nil {
 			t.Fatalf("FindByID: unexpected error: %v", err)
 		}
@@ -57,13 +64,14 @@ func TestInvoiceRepository(t *testing.T) {
 		}
 
 		// cleanup
-		_ = repo.Delete(ctx, invID)
+		_ = repo.Delete(ctx, invID, userID)
 	})
 
 	t.Run("Save_Upsert_UpdatesFields", func(t *testing.T) {
 		invID := uuid.New()
 		inv := entity.Invoice{
 			ID:       invID,
+			UserID:   userID,
 			RawText:  "initial text",
 			Vendor:   entity.Vendor{Name: "InitialVendor"},
 			Amount:   10.00,
@@ -75,22 +83,23 @@ func TestInvoiceRepository(t *testing.T) {
 		if err := repo.Save(ctx, inv); err != nil {
 			t.Fatalf("Save upsert: %v", err)
 		}
-		found, _ := repo.FindByID(ctx, invID)
+		found, _ := repo.FindByID(ctx, invID, userID)
 		if found.Amount != 20.00 {
 			t.Errorf("upsert amount: want 20.00, got %f", found.Amount)
 		}
 
-		_ = repo.Delete(ctx, invID)
+		_ = repo.Delete(ctx, invID, userID)
 	})
 
 	t.Run("Update_ChangesFields", func(t *testing.T) {
 		invID := uuid.New()
 		_ = repo.Save(ctx, entity.Invoice{
-			ID: invID, Vendor: entity.Vendor{Name: "OldCo"}, Amount: 5.00, Currency: "EUR",
+			ID: invID, UserID: userID, Vendor: entity.Vendor{Name: "OldCo"}, Amount: 5.00, Currency: "EUR",
 		})
 
 		err := repo.Update(ctx, entity.Invoice{
 			ID:         invID,
+			UserID:     userID,
 			Vendor:     entity.Vendor{Name: "NewCo"},
 			CategoryID: &catID,
 			Amount:     99.99,
@@ -100,7 +109,7 @@ func TestInvoiceRepository(t *testing.T) {
 			t.Fatalf("Update: %v", err)
 		}
 
-		found, _ := repo.FindByID(ctx, invID)
+		found, _ := repo.FindByID(ctx, invID, userID)
 		if found.Vendor.Name != "NewCo" {
 			t.Errorf("vendor after update: want 'NewCo', got '%s'", found.Vendor.Name)
 		}
@@ -108,18 +117,18 @@ func TestInvoiceRepository(t *testing.T) {
 			t.Errorf("amount after update: want 99.99, got %f", found.Amount)
 		}
 
-		_ = repo.Delete(ctx, invID)
+		_ = repo.Delete(ctx, invID, userID)
 	})
 
 	t.Run("Update_NotFound_ReturnsError", func(t *testing.T) {
-		err := repo.Update(ctx, entity.Invoice{ID: uuid.New(), Currency: "EUR"})
+		err := repo.Update(ctx, entity.Invoice{ID: uuid.New(), UserID: userID, Currency: "EUR"})
 		if !errors.Is(err, entity.ErrInvoiceNotFound) {
 			t.Errorf("expected ErrInvoiceNotFound, got %v", err)
 		}
 	})
 
 	t.Run("ExistsByContentHash_FalseWhenAbsent", func(t *testing.T) {
-		exists, err := repo.ExistsByContentHash(ctx, "nonexistenthash")
+		exists, err := repo.ExistsByContentHash(ctx, "nonexistenthash", userID)
 		if err != nil {
 			t.Fatalf("ExistsByContentHash: %v", err)
 		}
@@ -132,11 +141,11 @@ func TestInvoiceRepository(t *testing.T) {
 		hash := "abc123uniquehash-" + uuid.New().String()
 		invID := uuid.New()
 		_ = repo.Save(ctx, entity.Invoice{
-			ID: invID, Vendor: entity.Vendor{Name: "HashCo"},
+			ID: invID, UserID: userID, Vendor: entity.Vendor{Name: "HashCo"},
 			Amount: 1, Currency: "EUR", ContentHash: hash,
 		})
 
-		exists, err := repo.ExistsByContentHash(ctx, hash)
+		exists, err := repo.ExistsByContentHash(ctx, hash, userID)
 		if err != nil {
 			t.Fatalf("ExistsByContentHash: %v", err)
 		}
@@ -144,7 +153,7 @@ func TestInvoiceRepository(t *testing.T) {
 			t.Error("expected true after saving with that hash, got false")
 		}
 
-		_ = repo.Delete(ctx, invID)
+		_ = repo.Delete(ctx, invID, userID)
 	})
 
 	t.Run("GetOriginalFile_ReturnsFileData", func(t *testing.T) {
@@ -153,6 +162,7 @@ func TestInvoiceRepository(t *testing.T) {
 		hash := "filehash-" + uuid.New().String()
 		_ = repo.Save(ctx, entity.Invoice{
 			ID:                  invID,
+			UserID:              userID,
 			Vendor:              entity.Vendor{Name: "FileCo"},
 			Amount:              1,
 			Currency:            "EUR",
@@ -163,7 +173,7 @@ func TestInvoiceRepository(t *testing.T) {
 			OriginalFileContent: fileBytes,
 		})
 
-		content, mime, name, err := repo.GetOriginalFile(ctx, invID)
+		content, mime, name, err := repo.GetOriginalFile(ctx, invID, userID)
 		if err != nil {
 			t.Fatalf("GetOriginalFile: %v", err)
 		}
@@ -177,11 +187,11 @@ func TestInvoiceRepository(t *testing.T) {
 			t.Errorf("name: want 'receipt.pdf', got '%s'", name)
 		}
 
-		_ = repo.Delete(ctx, invID)
+		_ = repo.Delete(ctx, invID, userID)
 	})
 
 	t.Run("GetOriginalFile_NotFound_ReturnsError", func(t *testing.T) {
-		_, _, _, err := repo.GetOriginalFile(ctx, uuid.New())
+		_, _, _, err := repo.GetOriginalFile(ctx, uuid.New(), userID)
 		if !errors.Is(err, entity.ErrInvoiceNotFound) {
 			t.Errorf("expected ErrInvoiceNotFound, got %v", err)
 		}
@@ -189,20 +199,22 @@ func TestInvoiceRepository(t *testing.T) {
 
 	t.Run("FindAll_ReturnsAllSaved", func(t *testing.T) {
 		clearTables(ctx, t)
-		// Re-create category after clear
+		// Re-create user and category after clear
+		_, _ = globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'inv_user_2', 'hash', 'inv2@example.com')", userID)
 		_, _ = globalPool.Exec(ctx,
-			"INSERT INTO categories (id, name, color) VALUES ($1, 'Software-inv', '#000001') ON CONFLICT DO NOTHING",
-			catID)
+			"INSERT INTO categories (id, user_id, name, color) VALUES ($1, $2, 'Software-inv', '#000001') ON CONFLICT DO NOTHING",
+			catID, userID)
 
 		for i := 0; i < 3; i++ {
 			_ = repo.Save(ctx, entity.Invoice{
 				ID:       uuid.New(),
+				UserID:   userID,
 				Vendor:   entity.Vendor{Name: "Vendor"},
 				Amount:   float64(i + 1),
 				Currency: "EUR",
 			})
 		}
-		all, err := repo.FindAll(ctx)
+		all, err := repo.FindAll(ctx, userID)
 		if err != nil {
 			t.Fatalf("FindAll: %v", err)
 		}
@@ -212,14 +224,14 @@ func TestInvoiceRepository(t *testing.T) {
 	})
 
 	t.Run("Delete_NotFound_ReturnsError", func(t *testing.T) {
-		err := repo.Delete(ctx, uuid.New())
+		err := repo.Delete(ctx, uuid.New(), userID)
 		if !errors.Is(err, entity.ErrInvoiceNotFound) {
 			t.Errorf("expected ErrInvoiceNotFound, got %v", err)
 		}
 	})
 
 	t.Run("FindByID_NotFound_ReturnsError", func(t *testing.T) {
-		_, err := repo.FindByID(ctx, uuid.New())
+		_, err := repo.FindByID(ctx, uuid.New(), userID)
 		if !errors.Is(err, entity.ErrInvoiceNotFound) {
 			t.Errorf("expected ErrInvoiceNotFound, got %v", err)
 		}

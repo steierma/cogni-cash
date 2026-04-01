@@ -177,17 +177,15 @@ export default function AnalyticsPage() {
         });
 
         filteredTxns.forEach(t => {
-            if (t.amount < 0) {
-                const isMatch = t.category_id === selectedCategoryTrendId ||
-                    (!t.category_id && selectedCategoryTrendId === 'uncategorized');
+            const isMatch = t.category_id === selectedCategoryTrendId ||
+                (!t.category_id && selectedCategoryTrendId === 'uncategorized');
 
-                if (isMatch) {
-                    const month = toIsoDate(t.booking_date).slice(0, 7);
-                    if (monthly[month]) {
-                        monthly[month].amount += Math.abs(t.amount);
-                    } else {
-                        monthly[month] = { month, amount: Math.abs(t.amount) };
-                    }
+            if (isMatch) {
+                const month = toIsoDate(t.booking_date).slice(0, 7);
+                if (monthly[month]) {
+                    monthly[month].amount += Math.abs(t.amount);
+                } else {
+                    monthly[month] = { month, amount: Math.abs(t.amount) };
                 }
             }
         });

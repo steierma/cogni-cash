@@ -19,6 +19,7 @@ import (
 	"cogni-cash/internal/domain/entity"
 
 	"github.com/golang-jwt/jwt/v5"
+	"github.com/google/uuid"
 )
 
 const (
@@ -84,7 +85,7 @@ func (a *Adapter) doRequest(ctx context.Context, method, path string, bodyData i
 
 // Implementation of port.BankProvider
 
-func (a *Adapter) GetInstitutions(ctx context.Context, countryCode string, isSandbox bool) ([]entity.BankInstitution, error) {
+func (a *Adapter) GetInstitutions(ctx context.Context, userID uuid.UUID, countryCode string, isSandbox bool) ([]entity.BankInstitution, error) {
 	path := fmt.Sprintf("/aspsps?country=%s", countryCode)
 
 	if isSandbox {
@@ -122,7 +123,7 @@ func (a *Adapter) GetInstitutions(ctx context.Context, countryCode string, isSan
 	return institutions, nil
 }
 
-func (a *Adapter) CreateRequisition(ctx context.Context, institutionID, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error) {
+func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error) {
 	payloadBytes, _ := json.Marshal(map[string]interface{}{
 		"aspsp": map[string]string{
 			"name":    institutionID,
@@ -153,7 +154,7 @@ func (a *Adapter) CreateRequisition(ctx context.Context, institutionID, country,
 
 	return &entity.BankConnection{
 		InstitutionID:   institutionID,
-		InstitutionName: institutionID,
+		InstitutionName: institutionName,
 		RequisitionID:   referenceID,
 		ReferenceID:     referenceID,
 		AuthLink:        res.URL,
@@ -162,7 +163,7 @@ func (a *Adapter) CreateRequisition(ctx context.Context, institutionID, country,
 	}, nil
 }
 
-func (a *Adapter) ExchangeCodeForSession(ctx context.Context, code string) (string, error) {
+func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error) {
 	payload, _ := json.Marshal(map[string]string{
 		"code": code,
 	})
@@ -180,8 +181,9 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, code string) (stri
 				IBAN string `json:"iban"`
 				BBAN string `json:"bban"`
 			} `json:"account_id"`
-			Currency string `json:"currency"`
-			Name     string `json:"name"`
+			Currency        string `json:"currency"`
+			Name            string `json:"name"`
+			CashAccountType string `json:"cash_account_type"`
 		} `json:"accounts"`
 	}
 	if err := json.Unmarshal(resp, &res); err != nil {
@@ -197,11 +199,22 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, code string) (stri
 			iban = r.AccountID.BBAN
 		}
 
+		// Detect account type based on PSD2 CashAccountType
+		// CACC=Current, CARD=Card, SVGS=Savings, MONE=Money Market
+		accType := entity.StatementTypeGiro
+		switch r.CashAccountType {
+		case "CARD":
+			accType = entity.StatementTypeCreditCard
+		case "SVGS", "MONE":
+			accType = entity.StatementTypeExtraAccount
+		}
+
 		bankAccounts[i] = entity.BankAccount{
 			ProviderAccountID: r.UID, // The UID is the actual string identifier for the account
 			IBAN:              iban,
 			Name:              r.Name,
 			Currency:          r.Currency,
+			AccountType:       accType,
 		}
 	}
 
@@ -213,7 +226,7 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, code string) (stri
 	return res.SessionID, nil
 }
 
-func (a *Adapter) GetRequisitionStatus(ctx context.Context, requisitionID string) (entity.ConnectionStatus, error) {
+func (a *Adapter) GetRequisitionStatus(ctx context.Context, userID uuid.UUID, requisitionID string) (entity.ConnectionStatus, error) {
 	resp, err := a.doRequest(ctx, "GET", "/sessions/"+requisitionID, nil)
 	if err != nil {
 		return entity.StatusFailed, err
@@ -236,7 +249,7 @@ func (a *Adapter) GetRequisitionStatus(ctx context.Context, requisitionID string
 	}
 }
 
-func (a *Adapter) FetchAccounts(ctx context.Context, requisitionID string) ([]entity.BankAccount, error) {
+func (a *Adapter) FetchAccounts(ctx context.Context, userID uuid.UUID, requisitionID string) ([]entity.BankAccount, error) {
 	a.mu.Lock()
 	accounts, exists := a.accountsCache[requisitionID]
 	if exists {
@@ -252,42 +265,57 @@ func (a *Adapter) FetchAccounts(ctx context.Context, requisitionID string) ([]en
 	return accounts, nil
 }
 
-func extractRemittanceData(raw string) (creditorID, description, location string) {
-	description = raw // Default fallback
+func extractRemittanceData(raw string) (creditorID, mandateReference, description, location string) {
+        description = raw // Default fallback
 
-	if strings.Contains(raw, "remittanceinformation:") {
-		// Extract Creditor ID safely
-		cidStart := strings.Index(raw, "creditorid:")
-		if cidStart != -1 {
-			cidStart += len("creditorid:")
-			cidEnd := strings.Index(raw[cidStart:], ",")
-			if cidEnd != -1 {
-				creditorID = raw[cidStart : cidStart+cidEnd]
-			} else {
-				creditorID = raw[cidStart:]
-			}
-		}
+        if strings.Contains(raw, "remittanceinformation:") {
+                // Extract Creditor ID safely
+                cidStart := strings.Index(raw, "creditorid:")
+                if cidStart != -1 {
+                        cidStart += len("creditorid:")
+                        cidEnd := strings.Index(raw[cidStart:], ",")
+                        if cidEnd != -1 {
+                                creditorID = raw[cidStart : cidStart+cidEnd]
+                        } else {
+                                creditorID = raw[cidStart:]
+                        }
+                }
 
-		// Extract the actual description text
-		remStart := strings.Index(raw, "remittanceinformation:")
-		if remStart != -1 {
-			description = raw[remStart+len("remittanceinformation:"):]
+                // Extract Mandate Reference
+                mrStart := strings.Index(raw, "mandatereference:")
+                if mrStart != -1 {
+                        mrStart += len("mandatereference:")
+                        mrEnd := strings.Index(raw[mrStart:], ",")
+                        if mrEnd != -1 {
+                                mandateReference = raw[mrStart : mrStart+mrEnd]
+                        } else {
+                                mandateReference = raw[mrStart:]
+                        }
+                }
 
-			// Regex to find city names before "Datum" or " DE "
-			// Matches letters (including German umlauts), allowing spaces/hyphens inside,
-			// right before the keyword "Datum" or isolated "DE".
-			locRegex := regexp.MustCompile(`(?i)([A-ZÄÖÜa-zäöüß]+(?:[\s\-][A-ZÄÖÜa-zäöüß]+)*)\s*(?:Datum|\s+DE\s+)`)
-			matches := locRegex.FindStringSubmatch(description)
-			if len(matches) > 1 {
-				location = strings.TrimSpace(matches[1])
-			}
-		}
+                // Extract the actual description text
+                remStart := strings.Index(raw, "remittanceinformation:")
+                if remStart != -1 {
+                        description = raw[remStart+len("remittanceinformation:"):]
+
+                        // Regex to find city names before "Datum" or " DE "
+                        // Matches letters (including German umlauts), allowing spaces/hyphens inside,
+                        // right before the keyword "Datum" or isolated "DE".
+                        locRegex := regexp.MustCompile(`(?i)([A-ZÄÖÜa-zäöüß]+(?:[\s\-][A-ZÄÖÜa-zäöüß]+)*)\s*(?:Datum|\s+DE\s+)`)
+                        matches := locRegex.FindStringSubmatch(description)
+                        if len(matches) > 1 {
+                                location = strings.TrimSpace(matches[1])
+                        }
+                }
+        }
+
+        return strings.TrimSpace(creditorID), strings.TrimSpace(mandateReference), strings.TrimSpace(description), location
+}
+func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, providerAccountID string, dateFrom *time.Time, dateTo *time.Time) ([]entity.Transaction, float64, error) {
+	if providerAccountID == "dummy_acc_id" || strings.HasPrefix(providerAccountID, "mock_") {
+		return nil, 0, fmt.Errorf("enablebanking: invalid account id '%s' (this looks like mock data)", providerAccountID)
 	}
 
-	return strings.TrimSpace(creditorID), strings.TrimSpace(description), location
-}
-
-func (a *Adapter) FetchTransactions(ctx context.Context, providerAccountID string, dateFrom *time.Time, dateTo *time.Time) ([]entity.Transaction, float64, error) {
 	a.logger.Debug("fetching transactions from Enable Banking", "account_id", providerAccountID)
 
 	urlPath := "/accounts/" + providerAccountID + "/transactions"
@@ -307,6 +335,7 @@ func (a *Adapter) FetchTransactions(ctx context.Context, providerAccountID strin
 		a.logger.Error("failed to fetch transactions from Enable Banking", "account_id", providerAccountID, "error", err)
 		return nil, 0, err
 	}
+	a.logger.Debug("successfully fetched transactions from Enable Banking", "account_id", providerAccountID, "response", resp)
 
 	var res struct {
 		Transactions []struct {
@@ -379,30 +408,36 @@ func (a *Adapter) FetchTransactions(ctx context.Context, providerAccountID strin
 			valutaDate = bookingDate
 		}
 
-		// 3. DESCRIPTION & LOCATION
+		// 3. DESCRIPTION, LOCATION & COUNTERPARTY
 		rawRemittance := r.Remittance
 		if rawRemittance == "" && len(r.RemittanceArray) > 0 {
 			rawRemittance = strings.Join(r.RemittanceArray, " ")
 		}
 
-		creditorID, parsedDesc, location := extractRemittanceData(rawRemittance)
+		creditorID, mandateRef, parsedDesc, location := extractRemittanceData(rawRemittance)
+
+		cName := r.CreditorName
+		if cName == "" {
+			cName = r.Creditor.Name
+		}
+		dName := r.DebtorName
+		if dName == "" {
+			dName = r.Debtor.Name
+		}
 
 		desc := parsedDesc
 		if desc == "" {
-			cName := r.CreditorName
-			if cName == "" {
-				cName = r.Creditor.Name
-			}
-			dName := r.DebtorName
-			if dName == "" {
-				dName = r.Debtor.Name
-			}
-
 			if txnType == "debit" {
 				desc = cName
 			} else {
 				desc = dName
 			}
+		}
+
+		// Counterparty: creditor for debits, debtor for credits
+		counterparty := cName
+		if txnType == "credit" {
+			counterparty = dName
 		}
 
 		// 4. REFERENCE
@@ -415,14 +450,18 @@ func (a *Adapter) FetchTransactions(ctx context.Context, providerAccountID strin
 		}
 
 		transactions = append(transactions, entity.Transaction{
-			BookingDate: bookingDate,
-			ValutaDate:  valutaDate,
-			Description: desc,
-			Location:    location,
-			Amount:      amt,
-			Currency:    r.AmountObj.Currency,
-			Type:        entity.TransactionType(txnType),
-			Reference:   ref,
+			BookingDate:        bookingDate,
+			ValutaDate:         valutaDate,
+			Description:        desc,
+			Location:           location,
+			Amount:             amt,
+			Currency:           r.AmountObj.Currency,
+			Type:               entity.TransactionType(txnType),
+			Reference:          ref,
+			MandateReference:   mandateRef,
+			CounterpartyName:   counterparty,
+			ExchangeRate:       1.0,
+			AmountBaseCurrency: amt,
 		})
 	}
 

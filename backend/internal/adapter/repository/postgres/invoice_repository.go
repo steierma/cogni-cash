@@ -53,14 +53,15 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv entity.Invoice) error 
 		origContent = inv.OriginalFileContent
 	}
 
-	r.Logger.Info("Saving invoice", "id", inv.ID)
+	r.Logger.Info("Saving invoice", "id", inv.ID, "user_id", inv.UserID)
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO invoices (
-			id, raw_text, category_id, vendor, amount, currency, invoice_date,
+			id, user_id, raw_text, category_id, vendor, amount, currency, invoice_date,
 			description,
 			content_hash, original_file_name, original_file_mime, original_file_size, original_file_content
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, $14)
 		ON CONFLICT (id) DO UPDATE SET
+			user_id              = EXCLUDED.user_id,
 			raw_text             = EXCLUDED.raw_text,
 			category_id          = EXCLUDED.category_id,
 			vendor               = EXCLUDED.vendor,
@@ -73,12 +74,12 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv entity.Invoice) error 
 			original_file_mime   = COALESCE(EXCLUDED.original_file_mime, invoices.original_file_mime),
 			original_file_size   = COALESCE(EXCLUDED.original_file_size, invoices.original_file_size),
 			original_file_content= COALESCE(EXCLUDED.original_file_content, invoices.original_file_content)`,
-		inv.ID, inv.RawText, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt,
+		inv.ID, inv.UserID, inv.RawText, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt,
 		inv.Description,
 		contentHash, origName, origMime, origSize, origContent,
 	)
 	if err != nil {
-		r.Logger.Error("Failed to save invoice", "id", inv.ID, "error", err)
+		r.Logger.Error("Failed to save invoice", "id", inv.ID, "user_id", inv.UserID, "error", err)
 		return fmt.Errorf("invoice repo: save: %w", err)
 	}
 	r.Logger.Info("Invoice saved successfully", "id", inv.ID)
@@ -92,7 +93,7 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 	if !inv.IssuedAt.IsZero() {
 		issuedAt = &inv.IssuedAt
 	}
-	r.Logger.Info("Updating invoice", "id", inv.ID)
+	r.Logger.Info("Updating invoice", "id", inv.ID, "user_id", inv.UserID)
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE invoices SET
 			raw_text     = $2,
@@ -102,8 +103,8 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 			currency     = $6,
 			invoice_date = $7,
 			description  = $8
-		WHERE id = $1`,
-		inv.ID, inv.RawText, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt, inv.Description,
+		WHERE id = $1 AND user_id = $9`,
+		inv.ID, inv.RawText, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt, inv.Description, inv.UserID,
 	)
 	if err != nil {
 		return fmt.Errorf("invoice repo: update: %w", err)
@@ -115,13 +116,13 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 }
 
 // FindByID retrieves a single Invoice by UUID.
-func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID) (entity.Invoice, error) {
-	r.Logger.Info("Finding invoice by ID", "id", id)
+func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error) {
+	r.Logger.Info("Finding invoice by ID", "id", id, "user_id", userID)
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, raw_text, category_id, vendor, amount, currency, invoice_date,
+		SELECT id, user_id, raw_text, category_id, vendor, amount, currency, invoice_date,
 		       content_hash, original_file_name, original_file_mime, original_file_size,
 		       description
-		FROM invoices WHERE id = $1`, id)
+		FROM invoices WHERE id = $1 AND user_id = $2`, id, userID)
 	inv, err := scanInvoice(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -133,14 +134,15 @@ func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID) (entity.
 }
 
 // FindAll returns all Invoices ordered by creation time descending.
-func (r *InvoiceRepository) FindAll(ctx context.Context) ([]entity.Invoice, error) {
-	r.Logger.Info("Finding all invoices")
+func (r *InvoiceRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error) {
+	r.Logger.Info("Finding all invoices", "user_id", userID)
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, raw_text, category_id, vendor, amount, currency, invoice_date,
+		SELECT id, user_id, raw_text, category_id, vendor, amount, currency, invoice_date,
 		       content_hash, original_file_name, original_file_mime, original_file_size,
 		       description
 		FROM invoices
-		ORDER BY created_at DESC`)
+		WHERE user_id = $1
+		ORDER BY created_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("invoice repo: find all: %w", err)
 	}
@@ -158,9 +160,9 @@ func (r *InvoiceRepository) FindAll(ctx context.Context) ([]entity.Invoice, erro
 }
 
 // Delete removes an Invoice by UUID.
-func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	r.Logger.Info("Deleting invoice", "id", id)
-	tag, err := r.pool.Exec(ctx, `DELETE FROM invoices WHERE id = $1`, id)
+func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	r.Logger.Info("Deleting invoice", "id", id, "user_id", userID)
+	tag, err := r.pool.Exec(ctx, `DELETE FROM invoices WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return fmt.Errorf("invoice repo: delete: %w", err)
 	}
@@ -172,10 +174,10 @@ func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID) error {
 
 // ExistsByContentHash returns true when an invoice with the given SHA-256 hash
 // is already stored (used for deduplication on file import).
-func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string) (bool, error) {
+func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string, userID uuid.UUID) (bool, error) {
 	var exists bool
 	err := r.pool.QueryRow(ctx,
-		`SELECT EXISTS(SELECT 1 FROM invoices WHERE content_hash = $1)`, hash).Scan(&exists)
+		`SELECT EXISTS(SELECT 1 FROM invoices WHERE content_hash = $1 AND user_id = $2)`, hash, userID).Scan(&exists)
 	if err != nil {
 		return false, fmt.Errorf("invoice repo: exists by hash: %w", err)
 	}
@@ -184,11 +186,11 @@ func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string
 
 // GetOriginalFile returns the stored binary content, MIME type and file name for
 // an invoice, or an error when no file was attached.
-func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID) ([]byte, string, string, error) {
+func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error) {
 	var content []byte
 	var mime, name *string
 	err := r.pool.QueryRow(ctx,
-		`SELECT original_file_content, original_file_mime, original_file_name FROM invoices WHERE id = $1`, id).
+		`SELECT original_file_content, original_file_mime, original_file_name FROM invoices WHERE id = $1 AND user_id = $2`, id, userID).
 		Scan(&content, &mime, &name)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -226,6 +228,7 @@ func scanInvoice(row scanner) (entity.Invoice, error) {
 	)
 	err := row.Scan(
 		&inv.ID,
+		&inv.UserID,
 		&inv.RawText,
 		&categoryID,
 		&vendorName,

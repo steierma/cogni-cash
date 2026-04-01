@@ -74,5 +74,14 @@ func TestUserRepository(t *testing.T) {
 		if finalUser.PasswordHash != "final_hash" {
 			t.Errorf("expected final_hash, got %s", finalUser.PasswordHash)
 		}
+
+		// 5. GetAdminID
+		adminID, err := repo.GetAdminID(ctx)
+		if err != nil {
+			t.Fatalf("expected no error getting admin ID, got: %v", err)
+		}
+		if adminID != userID {
+			t.Errorf("expected admin ID %v, got %v", userID, adminID)
+		}
 	})
 }

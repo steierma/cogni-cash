@@ -11,6 +11,7 @@ import (
 
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/ledongthuc/pdf"
 )
 
@@ -32,7 +33,7 @@ func NewParser(logger *slog.Logger) *Parser {
 	return &Parser{Logger: logger}
 }
 
-func (p *Parser) Parse(_ context.Context, filePath string) (entity.Payslip, error) {
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.Payslip, error) {
 	p.Logger.Info("Parsing CARIAD Payslip PDF", "filePath", filePath)
 	raw, err := extractRawText(filePath)
 	if err != nil {
@@ -41,7 +42,8 @@ func (p *Parser) Parse(_ context.Context, filePath string) (entity.Payslip, erro
 	}
 
 	payslip := entity.Payslip{
-		SourceFile: filePath,
+		SourceFile:   filePath,
+		EmployerName: "CARIAD SE", // Default employer for this parser
 	}
 
 	// 1. Extract Header Metadata

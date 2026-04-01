@@ -12,6 +12,8 @@ import (
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
+
+	"github.com/google/uuid"
 )
 
 // ErrPayslipDuplicate is returned when a payslip with the same content hash already exists.
@@ -33,12 +35,12 @@ func NewPayslipService(repo port.PayslipRepository, staticParser port.PayslipPar
 	}
 }
 
-func (s *PayslipService) Import(ctx context.Context, filePath, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error) {
+func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, filePath, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error) {
 	hashFunc := sha256.New()
 	hashFunc.Write(fileBytes)
 	contentHash := hex.EncodeToString(hashFunc.Sum(nil))
 
-	exists, err := s.repo.ExistsByHash(ctx, contentHash)
+	exists, err := s.repo.ExistsByHash(ctx, contentHash, userID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to check hash: %w", err)
 	}
@@ -50,23 +52,23 @@ func (s *PayslipService) Import(ctx context.Context, filePath, fileName, mimeTyp
 	var parseErr error
 
 	if useAI {
-		s.logger.Info("Force AI Parsing requested. Bypassing static parser.")
-		payslip, parseErr = s.aiParser.Parse(ctx, filePath)
+		s.logger.Info("Force AI Parsing requested. Bypassing static parser.", "user_id", userID)
+		payslip, parseErr = s.aiParser.Parse(ctx, userID, filePath)
 		if parseErr != nil {
 			return nil, fmt.Errorf("failed to parse payslip with forced AI: %w", parseErr)
 		}
 	} else {
-		payslip, parseErr = s.staticParser.Parse(ctx, filePath)
+		payslip, parseErr = s.staticParser.Parse(ctx, userID, filePath)
 
 		if parseErr != nil || payslip.PeriodMonthNum == 0 || payslip.EmployeeName == "" || payslip.GrossPay == 0 {
 
 			canSkipAI := overrides != nil && overrides.PeriodMonthNum != 0 && overrides.EmployeeName != "" && overrides.GrossPay != 0
 
 			if !canSkipAI {
-				s.logger.Warn("Static parser failed or returned incomplete data. Triggering AI fallback.", "file", fileName, "static_error", parseErr)
+				s.logger.Warn("Static parser failed or returned incomplete data. Triggering AI fallback.", "file", fileName, "static_error", parseErr, "user_id", userID)
 
 				var aiErr error
-				aiPayslip, aiErr := s.aiParser.Parse(ctx, filePath)
+				aiPayslip, aiErr := s.aiParser.Parse(ctx, userID, filePath)
 				if aiErr != nil {
 					return nil, fmt.Errorf("failed to parse payslip with AI fallback: %w", aiErr)
 				}
@@ -86,6 +88,9 @@ func (s *PayslipService) Import(ctx context.Context, filePath, fileName, mimeTyp
 		}
 		if overrides.EmployeeName != "" {
 			payslip.EmployeeName = overrides.EmployeeName
+		}
+		if overrides.EmployerName != "" {
+			payslip.EmployerName = overrides.EmployerName
 		}
 		if overrides.TaxClass != "" {
 			payslip.TaxClass = overrides.TaxClass
@@ -110,6 +115,7 @@ func (s *PayslipService) Import(ctx context.Context, filePath, fileName, mimeTyp
 		}
 	}
 
+	payslip.UserID = userID
 	payslip.OriginalFileName = fileName
 	payslip.OriginalFileMime = mimeType
 	payslip.OriginalFileSize = int64(len(fileBytes))
@@ -120,18 +126,18 @@ func (s *PayslipService) Import(ctx context.Context, filePath, fileName, mimeTyp
 		return nil, fmt.Errorf("failed to save payslip: %w", err)
 	}
 
-	s.logger.Info("Successfully imported payslip", "id", payslip.ID, "month", payslip.PeriodMonthNum, "name", payslip.EmployeeName)
+	s.logger.Info("Successfully imported payslip", "id", payslip.ID, "month", payslip.PeriodMonthNum, "name", payslip.EmployeeName, "user_id", userID)
 	return &payslip, nil
 }
 
 func (s *PayslipService) Update(ctx context.Context, payslip *entity.Payslip) error {
-	s.logger.Info("Updating payslip", "id", payslip.ID)
+	s.logger.Info("Updating payslip", "id", payslip.ID, "user_id", payslip.UserID)
 	if len(payslip.OriginalFileContent) > 0 {
 		hashFunc := sha256.New()
 		hashFunc.Write(payslip.OriginalFileContent)
 		payslip.ContentHash = hex.EncodeToString(hashFunc.Sum(nil))
 
-		exists, err := s.repo.ExistsByHash(ctx, payslip.ContentHash)
+		exists, err := s.repo.ExistsByHash(ctx, payslip.ContentHash, payslip.UserID)
 		if err != nil {
 			return fmt.Errorf("failed to check hash: %w", err)
 		}
@@ -143,9 +149,9 @@ func (s *PayslipService) Update(ctx context.Context, payslip *entity.Payslip) er
 	return s.repo.Update(ctx, payslip)
 }
 
-func (s *PayslipService) Delete(ctx context.Context, id string) error {
-	s.logger.Info("Deleting payslip", "id", id)
-	return s.repo.Delete(ctx, id)
+func (s *PayslipService) Delete(ctx context.Context, id string, userID uuid.UUID) error {
+	s.logger.Info("Deleting payslip", "id", id, "user_id", userID)
+	return s.repo.Delete(ctx, id, userID)
 }
 
 // JSONPayslipEntry represents a single record in the payslip bulk-import JSON manifest.
@@ -153,6 +159,7 @@ type JSONPayslipEntry struct {
 	PeriodMonthNum   int            `json:"period_month_num"`
 	PeriodYear       int            `json:"period_year"`
 	EmployeeName     string         `json:"employee_name"`
+	EmployerName     string         `json:"employer_name"`
 	TaxClass         string         `json:"tax_class"`
 	TaxID            string         `json:"tax_id"`
 	GrossPay         float64        `json:"gross_pay"`
@@ -163,7 +170,7 @@ type JSONPayslipEntry struct {
 	OriginalFileName string         `json:"original_file_name"`
 }
 
-func (s *PayslipService) ImportFromJSONFile(ctx context.Context, jsonFilePath string) (imported int, skipped int, errs []error, fatalErr error) {
+func (s *PayslipService) ImportFromJSONFile(ctx context.Context, userID uuid.UUID, jsonFilePath string) (imported int, skipped int, errs []error, fatalErr error) {
 	data, err := os.ReadFile(jsonFilePath)
 	if err != nil {
 		if os.IsNotExist(err) {
@@ -179,7 +186,7 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, jsonFilePath st
 
 	jsonDir := filepath.Dir(jsonFilePath)
 
-	s.logger.Info("Payslip JSON import: starting", "file", jsonFilePath, "total_entries", len(entries))
+	s.logger.Info("Payslip JSON import: starting", "file", jsonFilePath, "total_entries", len(entries), "user_id", userID)
 
 	for _, entry := range entries {
 		select {
@@ -193,13 +200,13 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, jsonFilePath st
 			continue
 		}
 
-		exists, checkErr := s.repo.ExistsByOriginalFileName(ctx, entry.OriginalFileName)
+		exists, checkErr := s.repo.ExistsByOriginalFileName(ctx, entry.OriginalFileName, userID)
 		if checkErr != nil {
 			errs = append(errs, fmt.Errorf("check exists %s: %w", entry.OriginalFileName, checkErr))
 			continue
 		}
 		if exists {
-			s.logger.Debug("Payslip JSON import: skipping already-imported entry", "file", entry.OriginalFileName)
+			s.logger.Debug("Payslip JSON import: skipping already-imported entry", "file", entry.OriginalFileName, "user_id", userID)
 			skipped++
 			continue
 		}
@@ -217,12 +224,12 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, jsonFilePath st
 			fileMime = "application/pdf"
 			fileSize = int64(len(fileBytes))
 		} else {
-			hashInput := fmt.Sprintf("json-import:%s:%d-%02d", entry.OriginalFileName, entry.PeriodYear, entry.PeriodMonthNum)
+			hashInput := fmt.Sprintf("json-import:%s:%d-%02d:%s", entry.OriginalFileName, entry.PeriodYear, entry.PeriodMonthNum, userID)
 			h := sha256.Sum256([]byte(hashInput))
 			contentHash = hex.EncodeToString(h[:])
 		}
 
-		hashExists, checkErr := s.repo.ExistsByHash(ctx, contentHash)
+		hashExists, checkErr := s.repo.ExistsByHash(ctx, contentHash, userID)
 		if checkErr != nil {
 			errs = append(errs, fmt.Errorf("check hash %s: %w", entry.OriginalFileName, checkErr))
 			continue
@@ -232,7 +239,8 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, jsonFilePath st
 			continue
 		}
 
-		p := entity.Payslip{
+		payslip := entity.Payslip{
+			UserID:              userID,
 			OriginalFileName:    entry.OriginalFileName,
 			OriginalFileMime:    fileMime,
 			OriginalFileSize:    fileSize,
@@ -241,6 +249,7 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, jsonFilePath st
 			PeriodMonthNum:      entry.PeriodMonthNum,
 			PeriodYear:          entry.PeriodYear,
 			EmployeeName:        entry.EmployeeName,
+			EmployerName:        entry.EmployerName,
 			TaxClass:            entry.TaxClass,
 			TaxID:               entry.TaxID,
 			GrossPay:            entry.GrossPay,
@@ -249,34 +258,36 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, jsonFilePath st
 			Bonuses:             entry.Bonuses,
 		}
 		if entry.CustomDeductions != nil {
-			p.CustomDeductions = *entry.CustomDeductions
+			payslip.CustomDeductions = *entry.CustomDeductions
 		}
 
-		if saveErr := s.repo.Save(ctx, &p); saveErr != nil {
+		if saveErr := s.repo.Save(ctx, &payslip); saveErr != nil {
 			errs = append(errs, fmt.Errorf("save %s: %w", entry.OriginalFileName, saveErr))
 			continue
 		}
 
 		s.logger.Info("Payslip JSON import: saved entry",
-			"id", p.ID,
+			"id", payslip.ID,
 			"file", entry.OriginalFileName,
 			"period", fmt.Sprintf("%d-%02d", entry.PeriodYear, entry.PeriodMonthNum),
 			"file_stored", len(fileBytes) > 0,
+			"user_id", userID,
 		)
 		imported++
 
 		if len(fileBytes) > 0 {
 			if removeErr := os.Remove(pdfPath); removeErr != nil && !os.IsNotExist(removeErr) {
 				s.logger.Warn("Payslip JSON import: could not delete source PDF",
-					"path", pdfPath, "error", removeErr)
+					"path", pdfPath, "error", removeErr, "user_id", userID)
 			} else if removeErr == nil {
-				s.logger.Info("Payslip JSON import: deleted source PDF", "path", pdfPath)
+				s.logger.Info("Payslip JSON import: deleted source PDF", "path", pdfPath, "user_id", userID)
 			}
 		}
 	}
 
 	s.logger.Info("Payslip JSON import: finished",
 		"imported", imported, "skipped", skipped, "errors", len(errs),
+		"user_id", userID,
 	)
 	return imported, skipped, errs, nil
 }

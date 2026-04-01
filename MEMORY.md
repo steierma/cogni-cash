@@ -3,16 +3,60 @@
 This file tracks persistent project state, maintenance requirements, and synchronization tasks. It must be updated by Gemini CLI regularly.
 
 ## 1. Post-Feature Maintenance
-- [x] **i18n Cleanup**: Finalized translation files for en, de, es, fr. Added bank integration and provider settings.
-- [x] **README.md Sync**: Updated "Target Architecture & Roadmap" and migration history.
-- [x] **DATABASE_SCHEMA.md Sync**: Added `provider` column to `bank_connections` and migration `004`.
+- [x] **Full User Tenancy**: Implemented comprehensive multi-tenant isolation across all entities (categories, bank statements, transactions, invoices, payslips, and settings). Added migration `010_add_user_tenancy.sql` and updated all backend services and repositories to enforce `user_id` filtering. Verified with comprehensive integration and unit tests (all green).
+- [x] **Auth Layer Enhancement**: Implemented HttpOnly cookie-based session management for the web frontend. Added `/api/v1/logout` endpoint. Updated `authMiddleware` to support both cookies and `Authorization` headers.
+- [x] **SMTP Integration**: Implemented SMTP adapter and notification service. Added SMTP settings to UI and seeded from .env.
+- [x] **i18n Cleanup**: Finalized translation files for en, de, es, fr. Added bank integration, provider settings, and SMTP configuration.
+- [x] **README.md Sync**: Updated "Target Architecture & Roadmap" and migration history to include full tenancy and mobile improvements.
+- [x] **DATABASE_SCHEMA.md Sync**: Synchronized documentation with all 10 migrations, including user tenancy and bank account sync errors.
 - [x] **Settings Service Sync**: Added `Get` method to `SettingsUseCase` to support granular retrieval.
 - [x] **Transaction Review System**: Added `reviewed` field to transactions, "Unreviewed" default inbox, and "Review All" batch actions.
 - [x] **AI Few-Shot Learning**: Enhanced auto-categorization by providing historical examples to the LLM (configurable via settings).
 - [x] **Smart Bank Sync**: Implemented a randomized background worker that synchronizes bank accounts every 2 days between 08:00 and 20:00.
+- [x] **Security Audit**: Verified SQL injection safety and implemented role-based access control for all sensitive endpoints.
+- [x] **CI/CD Quality Gates**: Enforced strict, multi-level test coverage checks in GitHub Actions. Excluded non-logic files (entities, ports, cmd/, migrations/, main.go) from coverage calculation.
+- [x] **CI/CD Deployment Optimization**: Replaced broad `rsync --delete` with a surgical sync of only `docker-compose.yml`. This ensures that all server-side state (like `.env`, `docker-compose.override.yml`, central Caddy config, and PEM keys) is completely preserved and never overridden by the CI/CD pipeline.
+- [x] **Production Hardening**: Enforced mandatory `JWT_SECRET` and implemented secure CORS handling for both Web and Mobile.
+- [x] **Mobile Implementation**: Fully functional Flutter app with Dashboard, Analytics, Transactions, Invoices, and User management.
+- [x] **Mobile i18n & L10n**: Full application-wide internationalization (150+ keys) supporting EN, DE, ES, and FR with real-time switching and persistence.
+- [x] **Mobile Bank Integration**: Enhanced Bank Connections view with nested accounts, balances, last sync status, and expandable/collapsible UI.
+- [x] **Mobile Salary Analysis**: Integrated salary trend chart in Payslips view showing Gross vs. Net development.
+- [x] **Branding & Documentation**: Standardized application name to **CogniCash** across the entire full-stack project, added a polished eye-catcher to the `README.md`, and integrated the application logo into the mobile app (Login screen and Navigation Drawer).
+- [x] **Mobile UI Polishing**: Fixed chart legends spacing, removed global FAB in favor of localized view-specific upload buttons, resolved `DropdownButton` crashes during data loading, and fixed a bug where the "All" filter for transaction review status was unresponsive.
+- [x] **Mobile Independent Theming**: Implemented `ThemeController` using `shared_preferences` to allow mobile-specific theme selection (Light/Dark/System) that persists locally and operates independently from the web frontend's theme setting.
+  - [x] **Theme Reactivity**: Fixed a bug where theme changes required a restart/re-login by properly watching the `themeProvider` state in `main.dart`.
+  - [x] **Theme Localization**: Added localized labels for theme modes in EN, DE, ES, and FR.
+- [x] **Mobile Filter Logic**: Implemented the sentinel pattern in `TransactionFilter.copyWith` to allow explicit `null` state transitions for the `reviewed` field, enabling the "All" filter to function correctly.
+- [x] **Mobile Backend Bridge**: Hardened CORS for dynamic localhost ports, improved TLS handshake error reporting with helpful user hints, and fixed JSON null array handling.
+- [x] **Bank Sync Error Tracking**: Added `last_sync_error` to `bank_accounts` and UI indicators (tooltips) for transparent error reporting. Added fail-fast validation for mock IDs in real adapters.
+- [x] **Automatic Bank Account Categorization**: Enhanced `EnableBanking` adapter to automatically detect `credit_card` and `extra_account` types using PSD2 CashAccountType.
+- [x] **Readable Bank Names**: Implemented storage and display of human-readable institution names across the entire banking stack.
+- [x] **Bank Statement Linking**: Improved duplicate detection in `BankStatementService` to link existing transactions (from API sync) to uploaded statements using fuzzy matching. Linked and newly imported transactions remain open for review by default.
 - [x] **Security Audit**: Verified SQL injection safety across the entire PostgreSQL repository layer.
+- [x] **Layout Mode Implementation**: Added "Layout Density" setting (Standard vs. Compact) to the web frontend. Implemented global CSS class toggling and updated all table views and sidebars to respond to the compact preference. Added full translations for EN, DE, ES, and FR.
 
 ## 2. Technical Debt & Roadmap
+- **Security Hardening (High Priority)**:
+  - [x] **Tenancy & Isolation**: Implementing stricter data ownership (`user_id`).
+  - [ ] **Auth Layer Enhancement**: Strengthening session management (HttpOnly cookies).
+- **Mobile Development (Flutter) (Phase 17)**: ✅
+  - [x] High-fidelity Dashboard with fl_chart integrations.
+  - [x] Full application-wide internationalization (EN, DE, ES, FR).
+  - [x] Enhanced Bank Connections with account-level sync tracking.
+  - [x] Salary Trend Visualization in Payslips.
+  - [x] Cross-platform support (Web Debug + Android Release built).
+  - [x] Onboarding flow for dynamic backend URL configuration.
+  - [x] Parity with Web UI for Transactions, Invoices, and Reconciliations.
+  - [x] Improved resilience for TLS handshakes and dropdown data loading.
+  - [x] UI/UX refinements (spacing, localized FABs).
+  - [ ] Native Document Scanner (Auto-cropping/OCR).
+  - [ ] Implement a proper caching layer for offline support and faster data loading.
+- **Email & Notifications (SMTP) (Phase 16)**: ✅
+  - [x] Implement `EmailProvider` port and `SMTPAdapter`.
+  - [x] Create `NotificationUseCase` and `NotificationService`.
+  - [x] Seed SMTP settings from `.env` and expose in Web UI.
+  - [x] Integrate `SendWelcomeEmail` into user creation flow.
+  - [x] Added `SendTestEmail` capability for configuration verification.
 - **Smart Bank Sync (Phase 15)**: ✅
   - [x] Background worker with randomized schedule (8:00 - 20:00).
   - [x] Persistent scheduling via `bank_sync_next_run` setting.
@@ -34,16 +78,31 @@ This file tracks persistent project state, maintenance requirements, and synchro
   - [x] Refactor PostgreSQL adapters to use port interfaces instead of concrete types for cross-adapter dependencies.
 - **Configurable Bank Sync History**: ✅
   - [x] Update `BankProvider` port interface to accept `dateFrom` and `dateTo` parameters.
-  - [x] Update `EnableBanking`, `GoCardless`, `Dynamic`, and `Mock` adapters to support the new date parameters and pass them to the respective external APIs.
+  - [x] Update `EnableBanking`, `Dynamic`, and `Mock` adapters to support the new date parameters and pass them to the respective external APIs.
   - [x] Integrate `SettingsUseCase` into `BankService` to dynamically retrieve the `bank_sync_history_days` setting.
   - [x] Add inline settings control for `bank_sync_history_days` directly to the `BankConnectionsPage.tsx` UI.
 
 ## 3. Active Context & State
-- **Current Phase:** Enhancing Bank Integration Features ✅
-- **Last Database Migration:** `004_add_bank_provider.sql` (Note: In-memory mode does not use migrations)
+- [x] **Transactions Metadata Integration**: Fully integrated `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and `mandate_reference`.
+  - [x] **Backend Search**: Updated PostgreSQL repository to include all new fields in the search ILIKE filter.
+  - [x] **AI Categorization**: Updated `TransactionToCategorize` and `TransactionService` to pass all new metadata to the LLM for higher accuracy.
+  - [x] **Frontend UI**: Improved `TransactionTable` to show counterparty info by default in a combined view with description.
+- [x] **Reconciliation UI**: Made the batch reconciliation "Link" button in the Suggestions tab float always at the bottom of the page (Web).
+  - [x] **Mobile Reconcile View**: Updated suggestions and manual tabs to include `counterparty_name` and `location` for better identification, matching the web app improvements.
+  - [x] **Mobile UI**: Verified detail sheets and fixed a mapping typo (`counterparty_ame` -> `counterparty_name`) in the Flutter entity.
+- **Current Phase:** Advanced Visuals & Polishing (Mobile) ✅
+- **Last Database Migration:** `010_add_user_tenancy.sql` (Note: In-memory mode does not use migrations)
+- **Security & Hardening (2026-03-31):**
+  - Implemented full multi-tenant isolation across the entire database and backend application layer.
+  - Verified per-user data isolation for categories, statements, transactions, invoices, and payslips.
+  - Conducted security audit of TLS handshake error reporting and CORS configurations.
 - **Recent Significant Changes:**
-  - Implemented a complete in-memory persistence layer for local development and testing.
-  - Added `DB_TYPE` environment variable (defaults to `postgres`) to control the storage adapter.
-  - Extended the bank synchronization engine to support configurable historical data fetching via the `bank_sync_history_days` setting.
-  - Threaded date boundaries through the core domain down to the HTTP adapters, modifying Enable Banking and GoCardless query parameters.
-  - Implemented inline settings mutation directly within the Bank Connections React page to adjust the sync window on the fly.
+  - **Full User Tenancy (Full Stack):** Implemented database-level and application-level isolation for multiple users. Added migration `010` and updated all services to respect `UserID`.
+  - **Mobile UIUX Refinements:**
+    - Improved "Spending By Category" chart spacing and legend alignment.
+    - Localized upload/scan buttons to specific views (Invoices, Payslips, Bank Statements).
+    - Hardened `DropdownButton` implementation to prevent crashes during asynchronous data loading.
+  - **Improved Connection Resiliency (Mobile):** Enhanced error reporting for TLS handshake failures with specific guidance for local IP connections.
+  - **Mobile Build Stability:** Resolved missing import errors and ensured consistent Riverpod provider usage.
+  - [x] **Documentation & Data Sync**: Fully updated `DATABASE_SCHEMA.md`, `README.md`, and `dummy-data.sql` to align with the latest architectural changes (multi-tenancy, transaction enrichment, CI/CD optimizations).
+

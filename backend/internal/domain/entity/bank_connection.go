@@ -18,7 +18,7 @@ const (
 type BankConnection struct {
 	ID            uuid.UUID        `json:"id"`
 	UserID        uuid.UUID        `json:"user_id"`
-	Provider      string           `json:"provider"`       // 'gocardless' or 'enablebanking'
+	Provider      string           `json:"provider"`       // 'enablebanking'
 	InstitutionID string           `json:"institution_id"`
 	InstitutionName string         `json:"institution_name"`
 	RequisitionID string           `json:"requisition_id"` // Provider session ID

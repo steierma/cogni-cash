@@ -30,11 +30,16 @@ const (
 // Transaction represents a single line-item on a bank statement.
 type Transaction struct {
 	ID                 uuid.UUID       `json:"id"`
+	UserID             uuid.UUID       `json:"user_id"`
 	BankStatementID    *uuid.UUID      `json:"bank_statement_id,omitempty"`
 	BankAccountID      *uuid.UUID      `json:"bank_account_id,omitempty"`
 	BookingDate        time.Time       `json:"booking_date"`
 	ValutaDate         time.Time       `json:"valuta_date"`
 	Description        string          `json:"description"`
+	CounterpartyName   string          `json:"counterparty_name,omitempty"`
+	CounterpartyIban   string          `json:"counterparty_iban,omitempty"`
+	BankTransactionCode string         `json:"bank_transaction_code,omitempty"`
+	MandateReference   string          `json:"mandate_reference,omitempty"`
 	Location           string          `json:"location,omitempty"` // <-- NEW Optional Field
 	Amount             float64         `json:"amount"`
 	Currency           string          `json:"currency"`
@@ -53,6 +58,7 @@ type Transaction struct {
 // BankStatement is the top-level entity representing one parsed Kontoauszug.
 type BankStatement struct {
 	ID                  uuid.UUID     `json:"id"`
+	UserID              uuid.UUID     `json:"user_id"`
 	AccountHolder       string        `json:"account_holder"`
 	IBAN                string        `json:"iban"`
 	BIC                 string        `json:"bic"`
@@ -104,6 +110,7 @@ type BankStatementSummary struct {
 
 // TransactionFilter holds the query parameters to search and filter transactions server-side.
 type TransactionFilter struct {
+	UserID        uuid.UUID
 	StatementID   *uuid.UUID
 	CategoryID    *uuid.UUID // Replaces Category string
 	Type          string     // "credit", "debit", "all"
@@ -119,25 +126,32 @@ type TransactionFilter struct {
 
 // CategorizationExample represents a historical categorization for few-shot learning.
 type CategorizationExample struct {
-	Description string `json:"description"`
-	Category    string `json:"category"`
+	Description         string `json:"description"`
+	Reference           string `json:"reference"`
+	CounterpartyName    string `json:"counterparty_name,omitempty"`
+	CounterpartyIban    string `json:"counterparty_iban,omitempty"`
+	BankTransactionCode string `json:"bank_transaction_code,omitempty"`
+	MandateReference    string `json:"mandate_reference,omitempty"`
+	Category            string `json:"category"`
 }
 
 // ---- Analytics DTOs for the Frontend ----
 
 // CategoryTotal represents aggregated category data for charts (e.g., Pie/Doughnut charts).
 type CategoryTotal struct {
-	Category string  `json:"category"`
-	Amount   float64 `json:"amount"` // Absolute amount
-	Type     string  `json:"type"`   // "income" or "expense"
-	Color    string  `json:"color"`  // Hex color fetched from category repository
+	CategoryID string  `json:"category_id"`
+	Category   string  `json:"category"`
+	Amount     float64 `json:"amount"` // Absolute amount
+	Type       string  `json:"type"`   // "income" or "expense"
+	Color      string  `json:"color"`  // Hex color fetched from category repository
 }
 
 // TimeSeriesPoint represents aggregated data for a specific time period (e.g., Line/Bar charts).
 type TimeSeriesPoint struct {
-	Date    string  `json:"date"`    // Format dynamically adjusted (YYYY-MM-DD, YYYY-MM, or YYYY)
-	Income  float64 `json:"income"`  // Total income for the period
-	Expense float64 `json:"expense"` // Total expense for the period
+	Date            string             `json:"date"`             // Format dynamically adjusted (YYYY-MM-DD, YYYY-MM, or YYYY)
+	Income          float64            `json:"income"`           // Total income for the period
+	Expense         float64            `json:"expense"`          // Total expense for the period
+	CategoryAmounts map[string]float64 `json:"category_amounts"` // Map of CategoryID -> Amount for this period
 }
 
 // MerchantTotal represents an aggregated amount per payee/merchant.

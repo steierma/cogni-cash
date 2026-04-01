@@ -26,7 +26,8 @@ func (h *Handler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
 
 	bankProvider := "enablebanking"
 	if h.settingsSvc != nil {
-		if val, err := h.settingsSvc.Get(r.Context(), "bank_provider"); err == nil && val != "" {
+		userID := h.getUserID(r.Context())
+		if val, err := h.settingsSvc.Get(r.Context(), "bank_provider", userID); err == nil && val != "" {
 			bankProvider = val
 		}
 	}
@@ -53,7 +54,8 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	settings, err := h.settingsSvc.GetAll(r.Context())
+	userID := h.getUserID(r.Context())
+	settings, err := h.settingsSvc.GetAll(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
 		return
@@ -74,10 +76,40 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.settingsSvc.UpdateMultiple(r.Context(), payload); err != nil {
+	userID := h.getUserID(r.Context())
+	if err := h.settingsSvc.UpdateMultiple(r.Context(), payload, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update settings")
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
+	if h.notificationSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "notification service not available")
+		return
+	}
+
+	var payload struct {
+		To string `json:"to"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if payload.To == "" {
+		writeError(w, http.StatusBadRequest, "recipient email is required")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	if err := h.notificationSvc.SendTestEmail(r.Context(), payload.To, userID); err != nil {
+		h.Logger.Error("Test email failed", "to", payload.To, "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to send test email: "+err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"message": "Test email sent successfully"})
 }

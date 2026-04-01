@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -45,6 +46,17 @@ func (r *UserRepository) FindByID(ctx context.Context, id uuid.UUID) (entity.Use
 		return entity.User{}, entity.ErrUserNotFound
 	}
 	return user, nil
+}
+
+func (r *UserRepository) GetAdminID(ctx context.Context) (uuid.UUID, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, u := range r.users {
+		if u.Username == "admin" {
+			return u.ID, nil
+		}
+	}
+	return uuid.Nil, errors.New("admin user not found")
 }
 
 func (r *UserRepository) FindAll(ctx context.Context, search string) ([]entity.User, error) {

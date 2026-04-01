@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"testing"
+
+	"github.com/google/uuid"
 )
 
 // pdfPath returns the absolute path to the test fixture PDF.
@@ -24,7 +26,7 @@ func pdfPath() string {
 func TestINGParser_ParseRealPDF(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := NewParser(logger)
-	stmt, err := p.Parse(context.Background(), pdfPath())
+	stmt, err := p.Parse(context.Background(), uuid.Nil, pdfPath())
 	if err != nil {
 		t.Fatalf("unexpected parse error: %v", err)
 	}

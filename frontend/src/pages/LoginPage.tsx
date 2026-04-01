@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, Lock, LogIn } from 'lucide-react';
 import { login } from '../api/client';
@@ -9,12 +9,12 @@ export default function LoginPage() {
     const { t } = useTranslation();
     const [username, setUsername] = useState('');
     const [password, setPassword] = useState('');
+    const [rememberMe, setRememberMe] = useState(false);
     const navigate = useNavigate();
 
     const loginMut = useMutation({
         mutationFn: () => login(username, password),
-        onSuccess: (data) => {
-            localStorage.setItem('auth_token', data.token);
+        onSuccess: () => {
             navigate('/');
         },
     });
@@ -59,7 +59,15 @@ export default function LoginPage() {
                     </div>
 
                     <div className="space-y-1.5">
-                        <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('login.password')}</label>
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-medium text-gray-700 dark:text-gray-300">{t('login.password')}</label>
+                            <Link
+                                to="/forgot-password"
+                                className="text-xs text-indigo-600 dark:text-indigo-400 hover:underline font-medium"
+                            >
+                                {t('login.forgotPassword')}
+                            </Link>
+                        </div>
                         <input
                             type="password"
                             required
@@ -70,10 +78,24 @@ export default function LoginPage() {
                         />
                     </div>
 
+                    <div className="flex items-center">
+                        <input
+                            id="remember-me"
+                            name="remember-me"
+                            type="checkbox"
+                            checked={rememberMe}
+                            onChange={(e) => setRememberMe(e.target.checked)}
+                            className="h-4 w-4 text-indigo-600 focus:ring-indigo-500 border-gray-300 rounded cursor-pointer"
+                        />
+                        <label htmlFor="remember-me" className="ml-2 block text-sm text-gray-700 dark:text-gray-300 cursor-pointer">
+                            {t('login.rememberMe')}
+                        </label>
+                    </div>
+
                     <button
                         type="submit"
                         disabled={loginMut.isPending || !username || !password}
-                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 mt-2 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                        className="w-full flex items-center justify-center gap-2 py-2.5 px-4 bg-indigo-600 text-white font-medium rounded-xl hover:bg-indigo-700 focus:outline-none focus:ring-4 focus:ring-indigo-100 dark:focus:ring-indigo-900 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                     >
                         {loginMut.isPending ? t('login.authenticating') : (
                             <>

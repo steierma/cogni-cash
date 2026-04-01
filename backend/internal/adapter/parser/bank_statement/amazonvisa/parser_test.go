@@ -9,6 +9,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // xlsPath resolves the path to the real test fixture relative to this file.
@@ -26,7 +28,7 @@ func xlsPath() string {
 func TestAmazonVisaParser_ParseRealXLS(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := NewParser(logger)
-	stmt, err := p.Parse(context.Background(), xlsPath())
+	stmt, err := p.Parse(context.Background(), uuid.Nil, xlsPath())
 	if err != nil {
 		t.Fatalf("unexpected parse error: %v", err)
 	}
@@ -109,7 +111,7 @@ func TestAmazonVisaParser_ParseRealXLS(t *testing.T) {
 func TestAmazonVisaParser_MissingFile(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := NewParser(logger)
-	_, err := p.Parse(context.Background(), "/nonexistent/file.xls")
+	_, err := p.Parse(context.Background(), uuid.Nil, "/nonexistent/file.xls")
 	if err == nil {
 		t.Error("expected error for missing file, got nil")
 	}

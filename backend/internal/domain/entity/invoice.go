@@ -10,6 +10,7 @@ import (
 // It records the vendor, amount, and the category assigned to it by the LLM.
 type Invoice struct {
 	ID                 uuid.UUID  `json:"id"`
+	UserID             uuid.UUID  `json:"user_id"`
 	Vendor             Vendor     `json:"vendor"`
 	CategoryID         *uuid.UUID `json:"category_id"`
 	Amount             float64    `json:"amount"`

@@ -8,6 +8,7 @@ import (
 
 type Reconciliation struct {
 	ID                               uuid.UUID `json:"id"`
+	UserID                           uuid.UUID `json:"user_id"`
 	SettlementTransactionHash        string    `json:"settlement_transaction_hash"`
 	TargetTransactionHash            string    `json:"target_transaction_hash"`
 	SettlementTransactionDescription string    `json:"settlement_transaction_description,omitempty"`

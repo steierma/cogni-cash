@@ -15,5 +15,6 @@ type BankAccount struct {
 	Currency           string        `json:"currency"`
 	Balance            float64       `json:"balance"`
 	LastSyncedAt       time.Time     `json:"last_synced_at"`
+	LastSyncError      *string       `json:"last_sync_error,omitempty"`
 	AccountType        StatementType `json:"account_type"`
 }

@@ -44,11 +44,11 @@ func (r *BankRepository) CreateConnection(ctx context.Context, conn *entity.Bank
 	return nil
 }
 
-func (r *BankRepository) GetConnection(ctx context.Context, id uuid.UUID) (*entity.BankConnection, error) {
+func (r *BankRepository) GetConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*entity.BankConnection, error) {
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at
-		FROM bank_connections WHERE id = $1
-	`, id)
+		FROM bank_connections WHERE id = $1 AND user_id = $2
+	`, id, userID)
 
 	var conn entity.BankConnection
 	var status string
@@ -122,8 +122,8 @@ func (r *BankRepository) UpdateRequisitionID(ctx context.Context, id uuid.UUID, 
 	return nil
 }
 
-func (r *BankRepository) DeleteConnection(ctx context.Context, id uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, "DELETE FROM bank_connections WHERE id = $1", id)
+func (r *BankRepository) DeleteConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, "DELETE FROM bank_connections WHERE id = $1 AND user_id = $2", id, userID)
 	if err != nil {
 		return fmt.Errorf("bank repo: delete connection: %w", err)
 	}
@@ -161,15 +161,17 @@ func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.B
 	return nil
 }
 
-func (r *BankRepository) GetAccountByID(ctx context.Context, id uuid.UUID) (*entity.BankAccount, error) {
+func (r *BankRepository) GetAccountByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*entity.BankAccount, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type
-		FROM bank_accounts WHERE id = $1
-	`, id)
+		SELECT ba.id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error
+		FROM bank_accounts ba
+		JOIN bank_connections bc ON ba.connection_id = bc.id
+		WHERE ba.id = $1 AND bc.user_id = $2
+	`, id, userID)
 
 	var acc entity.BankAccount
 	var accType string
-	err := row.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType)
+	err := row.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -182,7 +184,7 @@ func (r *BankRepository) GetAccountByID(ctx context.Context, id uuid.UUID) (*ent
 
 func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connectionID uuid.UUID) ([]entity.BankAccount, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type
+		SELECT id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type, last_sync_error
 		FROM bank_accounts WHERE connection_id = $1
 	`, connectionID)
 	if err != nil {
@@ -194,7 +196,7 @@ func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connecti
 	for rows.Next() {
 		var acc entity.BankAccount
 		var accType string
-		if err := rows.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType); err != nil {
+		if err := rows.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError); err != nil {
 			return nil, fmt.Errorf("bank repo: scan account: %w", err)
 		}
 		acc.AccountType = entity.StatementType(accType)
@@ -205,13 +207,13 @@ func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connecti
 
 func (r *BankRepository) GetAccountByProviderID(ctx context.Context, providerAccountID string) (*entity.BankAccount, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type
+		SELECT id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type, last_sync_error
 		FROM bank_accounts WHERE provider_account_id = $1
 	`, providerAccountID)
 
 	var acc entity.BankAccount
 	var accType string
-	err := row.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType)
+	err := row.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError)
 	if err != nil {
 		if err == pgx.ErrNoRows {
 			return nil, nil
@@ -222,16 +224,23 @@ func (r *BankRepository) GetAccountByProviderID(ctx context.Context, providerAcc
 	return &acc, nil
 }
 
-func (r *BankRepository) UpdateAccountBalance(ctx context.Context, id uuid.UUID, balance float64, syncedAt interface{}) error {
-	_, err := r.pool.Exec(ctx, "UPDATE bank_accounts SET balance = $1, last_synced_at = $2 WHERE id = $3", balance, syncedAt, id)
+func (r *BankRepository) UpdateAccountBalance(ctx context.Context, id uuid.UUID, balance float64, syncedAt interface{}, errorMsg *string) error {
+	_, err := r.pool.Exec(ctx, "UPDATE bank_accounts SET balance = $1, last_synced_at = $2, last_sync_error = $3 WHERE id = $4", balance, syncedAt, errorMsg, id)
 	if err != nil {
 		return fmt.Errorf("bank repo: update account balance: %w", err)
 	}
 	return nil
 }
 
-func (r *BankRepository) UpdateAccountType(ctx context.Context, id uuid.UUID, accType entity.StatementType) error {
-	_, err := r.pool.Exec(ctx, "UPDATE bank_accounts SET account_type = $1 WHERE id = $2", string(accType), id)
+func (r *BankRepository) UpdateAccountType(ctx context.Context, id uuid.UUID, accType entity.StatementType, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE bank_accounts
+		SET account_type = $1
+		FROM bank_connections bc
+		WHERE bank_accounts.connection_id = bc.id
+		  AND bank_accounts.id = $2
+		  AND bc.user_id = $3
+	`, string(accType), id, userID)
 	if err != nil {
 		return fmt.Errorf("bank repo: update account type: %w", err)
 	}

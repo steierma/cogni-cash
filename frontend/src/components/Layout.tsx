@@ -6,7 +6,7 @@ import {
     ArrowLeftRight, BarChart3, Briefcase, ChevronLeft, ChevronRight, FileText, Landmark,
     LayoutDashboard, Link2, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List
 } from 'lucide-react';
-import {fetchSettings, updateSettings, fetchMe} from '../api/client';
+import {fetchSettings, updateSettings, fetchMe, logout} from '../api/client';
 import type { User } from '../api/types';
 
 const ALL_NAV_GROUPS = [
@@ -61,6 +61,7 @@ export default function Layout({children}: { children?: React.ReactNode }) {
 
     // Directly derive state from the query instead of syncing to a local useState via useEffect
     const theme = settings?.['theme'] || 'system';
+    const layoutMode = settings?.['layout_mode'] || 'standard';
     const isDesktopExpanded = settings?.sidebar_expanded !== undefined ? settings.sidebar_expanded === 'true' : true;
 
     useEffect(() => {
@@ -73,6 +74,15 @@ export default function Layout({children}: { children?: React.ReactNode }) {
             root.classList.add(theme);
         }
     }, [theme]);
+
+    useEffect(() => {
+        const root = window.document.documentElement;
+        if (layoutMode === 'compact') {
+            root.classList.add('layout-compact');
+        } else {
+            root.classList.remove('layout-compact');
+        }
+    }, [layoutMode]);
 
     const settingsMut = useMutation({
         mutationFn: (newSettings: Record<string, string>) => updateSettings(newSettings),
@@ -103,8 +113,12 @@ export default function Layout({children}: { children?: React.ReactNode }) {
         settingsMut.mutate({...(settings || {}), sidebar_expanded: String(nextState)});
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem('auth_token');
+    const handleLogout = async () => {
+        try {
+            await logout();
+        } catch (error) {
+            console.error('Logout failed', error);
+        }
         queryClient.clear();
         navigate('/login');
     };

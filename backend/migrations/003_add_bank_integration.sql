@@ -1,5 +1,5 @@
 -- ============================================================
--- Bank Integration (PSD2 / GoCardless)
+-- Bank Integration (PSD2 / Enable Banking)
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS bank_connections (

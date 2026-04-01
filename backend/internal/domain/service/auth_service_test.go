@@ -48,6 +48,15 @@ func (m *mockUserRepoForAuth) FindByID(_ context.Context, id uuid.UUID) (entity.
 	return entity.User{}, errors.New("user not found")
 }
 
+func (m *mockUserRepoForAuth) GetAdminID(_ context.Context) (uuid.UUID, error) {
+	for _, u := range m.users {
+		if u.Username == "admin" {
+			return u.ID, nil
+		}
+	}
+	return uuid.Nil, errors.New("admin not found")
+}
+
 func (m *mockUserRepoForAuth) FindAll(_ context.Context, _ string) ([]entity.User, error) {
 	var result []entity.User
 	for _, u := range m.users {
@@ -96,8 +105,148 @@ func (m *mockUserRepoForAuth) Delete(_ context.Context, id uuid.UUID) error {
 	return errors.New("user not found")
 }
 
+// --- Mock Password Reset Repository ---
+
+type mockResetRepo struct {
+	tokens  map[uuid.UUID]entity.PasswordResetToken
+	hashMap map[string]entity.PasswordResetToken
+}
+
+func newMockResetRepo() *mockResetRepo {
+	return &mockResetRepo{
+		tokens:  make(map[uuid.UUID]entity.PasswordResetToken),
+		hashMap: make(map[string]entity.PasswordResetToken),
+	}
+}
+
+func (m *mockResetRepo) Create(_ context.Context, t entity.PasswordResetToken) error {
+	m.tokens[t.ID] = t
+	m.hashMap[t.TokenHash] = t
+	return nil
+}
+
+func (m *mockResetRepo) FindByHash(_ context.Context, hash string) (entity.PasswordResetToken, error) {
+	if t, ok := m.hashMap[hash]; ok {
+		return t, nil
+	}
+	return entity.PasswordResetToken{}, entity.ErrResetTokenInvalid
+}
+
+func (m *mockResetRepo) DeleteByUserID(_ context.Context, userID uuid.UUID) error {
+	for id, t := range m.tokens {
+		if t.UserID == userID {
+			delete(m.tokens, id)
+			delete(m.hashMap, t.TokenHash)
+		}
+	}
+	return nil
+}
+
+func (m *mockResetRepo) Delete(_ context.Context, id uuid.UUID) error {
+	if t, ok := m.tokens[id]; ok {
+		delete(m.tokens, id)
+		delete(m.hashMap, t.TokenHash)
+	}
+	return nil
+}
+
+func (m *mockResetRepo) CleanupExpired(_ context.Context) error { return nil }
+
+// --- Mock Notification Service ---
+
+type mockNotificationSvc struct {
+	sentResetEmail bool
+	lastResetURL   string
+}
+
+func (m *mockNotificationSvc) SendWelcomeEmail(_ context.Context, _ entity.User) error { return nil }
+func (m *mockNotificationSvc) SendPasswordResetEmail(_ context.Context, _ entity.User, url string) error {
+	m.sentResetEmail = true
+	m.lastResetURL = url
+	return nil
+}
+func (m *mockNotificationSvc) SendTestEmail(_ context.Context, _ string, _ uuid.UUID) error { return nil }
+
+// --- Mock Settings Repository ---
+
+type mockSettingsRepoForAuth struct {
+	settings map[string]string
+}
+
+func (m *mockSettingsRepoForAuth) Get(_ context.Context, key string, _ uuid.UUID) (string, error) {
+	return m.settings[key], nil
+}
+func (m *mockSettingsRepoForAuth) GetAll(_ context.Context, _ uuid.UUID) (map[string]string, error) {
+	return m.settings, nil
+}
+func (m *mockSettingsRepoForAuth) Set(_ context.Context, key, value string, _ uuid.UUID) error {
+	m.settings[key] = value
+	return nil
+}
+
 func nopLogger() *slog.Logger {
 	return slog.New(slog.NewTextHandler(io.Discard, nil))
+}
+
+func TestAuthService_PasswordReset(t *testing.T) {
+	userRepo := newMockUserRepoForAuth()
+	resetRepo := newMockResetRepo()
+	notifSvc := &mockNotificationSvc{}
+	settingsRepo := &mockSettingsRepoForAuth{settings: make(map[string]string)}
+	logger := nopLogger()
+	secret := "test-secret"
+
+	user := entity.User{
+		ID:       uuid.New(),
+		Username: "testuser",
+		Email:    "test@example.com",
+	}
+	userRepo.addUser(user)
+
+	svc := service.NewAuthService(userRepo, resetRepo, notifSvc, settingsRepo, secret, logger)
+
+	t.Run("RequestPasswordReset success", func(t *testing.T) {
+		err := svc.RequestPasswordReset(context.Background(), "test@example.com")
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if !notifSvc.sentResetEmail {
+			t.Error("expected reset email to be sent")
+		}
+	})
+
+	t.Run("ConfirmPasswordReset success", func(t *testing.T) {
+		// 1. Request to get a token
+		_ = svc.RequestPasswordReset(context.Background(), "test@example.com")
+		
+		// Extract token from mock URL (e.g. http://localhost:3000/reset-password?token=...)
+		url := notifSvc.lastResetURL
+		token := url[len(url)-64:] // 32 bytes hex = 64 chars
+
+		// 2. Confirm reset
+		newPwd := "new-secure-password"
+		err := svc.ConfirmPasswordReset(context.Background(), token, newPwd)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		// 3. Verify password was updated
+		updatedUser, _ := userRepo.FindByID(context.Background(), user.ID)
+		err = bcrypt.CompareHashAndPassword([]byte(updatedUser.PasswordHash), []byte(newPwd))
+		if err != nil {
+			t.Error("expected password hash to match new password")
+		}
+	})
+
+	t.Run("ValidateResetToken invalid", func(t *testing.T) {
+		valid, err := svc.ValidateResetToken(context.Background(), "invalid-token")
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+		if valid {
+			t.Error("expected token to be invalid")
+		}
+	})
 }
 
 func hashPassword(t *testing.T, plain string) string {
@@ -120,7 +269,7 @@ func TestAuthService_Login_Success(t *testing.T) {
 	}
 	repo.addUser(user)
 
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	token, err := svc.Login(context.Background(), "admin", "secret123")
 	if err != nil {
@@ -140,7 +289,7 @@ func TestAuthService_Login_WrongPassword(t *testing.T) {
 	}
 	repo.addUser(user)
 
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	_, err := svc.Login(context.Background(), "admin", "wrong")
 	if !errors.Is(err, service.ErrInvalidCredentials) {
@@ -150,7 +299,7 @@ func TestAuthService_Login_WrongPassword(t *testing.T) {
 
 func TestAuthService_Login_UserNotFound(t *testing.T) {
 	repo := newMockUserRepoForAuth()
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	_, err := svc.Login(context.Background(), "nonexistent", "password")
 	if !errors.Is(err, service.ErrInvalidCredentials) {
@@ -159,7 +308,7 @@ func TestAuthService_Login_UserNotFound(t *testing.T) {
 }
 
 func TestAuthService_Login_NilRepo(t *testing.T) {
-	svc := service.NewAuthService(nil, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(nil, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	_, err := svc.Login(context.Background(), "admin", "password")
 	if err == nil {
@@ -178,7 +327,7 @@ func TestAuthService_ValidateToken_Success(t *testing.T) {
 	}
 	repo.addUser(user)
 
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	token, err := svc.Login(context.Background(), "admin", "secret123")
 	if err != nil {
@@ -195,7 +344,7 @@ func TestAuthService_ValidateToken_Success(t *testing.T) {
 }
 
 func TestAuthService_ValidateToken_InvalidToken(t *testing.T) {
-	svc := service.NewAuthService(nil, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(nil, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	_, err := svc.ValidateToken("invalid.token.string")
 	if err == nil {
@@ -212,10 +361,10 @@ func TestAuthService_ValidateToken_WrongSecret(t *testing.T) {
 	}
 	repo.addUser(user)
 
-	svc1 := service.NewAuthService(repo, "secret-1", nopLogger())
+	svc1 := service.NewAuthService(repo, nil, nil, nil, "secret-1", nopLogger())
 	token, _ := svc1.Login(context.Background(), "admin", "secret123")
 
-	svc2 := service.NewAuthService(repo, "secret-2", nopLogger())
+	svc2 := service.NewAuthService(repo, nil, nil, nil, "secret-2", nopLogger())
 	_, err := svc2.ValidateToken(token)
 	if err == nil {
 		t.Error("expected error when validating token signed with different secret")
@@ -234,7 +383,7 @@ func TestAuthService_ChangePassword_Success(t *testing.T) {
 	}
 	repo.addUser(user)
 
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	err := svc.ChangePassword(context.Background(), userID.String(), "oldpass", "newpass")
 	if err != nil {
@@ -258,7 +407,7 @@ func TestAuthService_ChangePassword_WrongOldPassword(t *testing.T) {
 	}
 	repo.addUser(user)
 
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	err := svc.ChangePassword(context.Background(), userID.String(), "wrong", "newpass")
 	if err == nil {
@@ -267,7 +416,7 @@ func TestAuthService_ChangePassword_WrongOldPassword(t *testing.T) {
 }
 
 func TestAuthService_ChangePassword_InvalidUserID(t *testing.T) {
-	svc := service.NewAuthService(newMockUserRepoForAuth(), "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(newMockUserRepoForAuth(), nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	err := svc.ChangePassword(context.Background(), "not-a-uuid", "old", "new")
 	if err == nil {
@@ -276,7 +425,7 @@ func TestAuthService_ChangePassword_InvalidUserID(t *testing.T) {
 }
 
 func TestAuthService_ChangePassword_UserNotFound(t *testing.T) {
-	svc := service.NewAuthService(newMockUserRepoForAuth(), "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(newMockUserRepoForAuth(), nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	err := svc.ChangePassword(context.Background(), uuid.New().String(), "old", "new")
 	if err == nil {
@@ -288,7 +437,7 @@ func TestAuthService_ChangePassword_UserNotFound(t *testing.T) {
 
 func TestAuthService_EnsureAdminUser_CreatesNewUser(t *testing.T) {
 	repo := newMockUserRepoForAuth()
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	err := svc.EnsureAdminUser(context.Background(), "admin", "password123")
 	if err != nil {
@@ -304,7 +453,7 @@ func TestAuthService_EnsureAdminUser_CreatesNewUser(t *testing.T) {
 
 func TestAuthService_EnsureAdminUser_SkipsWhenAlreadyCorrect(t *testing.T) {
 	repo := newMockUserRepoForAuth()
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	// Create admin first
 	err := svc.EnsureAdminUser(context.Background(), "admin", "password123")
@@ -321,7 +470,7 @@ func TestAuthService_EnsureAdminUser_SkipsWhenAlreadyCorrect(t *testing.T) {
 
 func TestAuthService_EnsureAdminUser_RotatesPassword(t *testing.T) {
 	repo := newMockUserRepoForAuth()
-	svc := service.NewAuthService(repo, "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(repo, nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	// Create admin with initial password
 	err := svc.EnsureAdminUser(context.Background(), "admin", "initial")
@@ -343,7 +492,7 @@ func TestAuthService_EnsureAdminUser_RotatesPassword(t *testing.T) {
 }
 
 func TestAuthService_EnsureAdminUser_EmptyCredentials(t *testing.T) {
-	svc := service.NewAuthService(newMockUserRepoForAuth(), "test-jwt-secret", nopLogger())
+	svc := service.NewAuthService(newMockUserRepoForAuth(), nil, nil, nil, "test-jwt-secret", nopLogger())
 
 	err := svc.EnsureAdminUser(context.Background(), "", "")
 	if err != nil {

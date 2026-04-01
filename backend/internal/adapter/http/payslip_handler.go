@@ -12,13 +12,21 @@ import (
 	"cogni-cash/internal/domain/entity"
 
 	"github.com/go-chi/chi/v5"
+	"github.com/google/uuid"
 )
 
 // listPayslips handles GET /api/v1/payslips/
 func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
-	payslips, err := h.payslipRepo.FindAll(r.Context())
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
+	payslips, err := h.payslipRepo.FindAll(r.Context(), userID)
 	if err != nil {
-		h.Logger.Error("Failed to list payslips", "error", err)
+		h.Logger.Error("Failed to list payslips", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "Failed to fetch payslips")
 		return
 	}
@@ -31,15 +39,22 @@ func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
 
 // getPayslip handles GET /api/v1/payslips/{id}
 func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "Missing payslip ID")
 		return
 	}
 
-	payslip, err := h.payslipRepo.FindByID(r.Context(), id)
+	payslip, err := h.payslipRepo.FindByID(r.Context(), id, userID)
 	if err != nil {
-		h.Logger.Error("Failed to fetch payslip", "id", id, "error", err)
+		h.Logger.Error("Failed to fetch payslip", "id", id, "error", err, "user_id", userID)
 		writeError(w, http.StatusNotFound, "Payslip not found")
 		return
 	}
@@ -49,6 +64,13 @@ func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
 
 // importPayslip handles POST /api/v1/payslips/import
 func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	const maxUpload = 10 << 20 // 10 MB hard cap
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
 	if err := r.ParseMultipartForm(maxUpload); err != nil {
@@ -80,6 +102,7 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 	// --- Extract Manual Overrides from Multipart Form ---
 	overrides := &entity.Payslip{
 		EmployeeName: r.FormValue("employee_name"),
+		EmployerName: r.FormValue("employer_name"),
 	}
 	if val := r.FormValue("period_month_num"); val != "" {
 		if parsed, err := strconv.Atoi(val); err == nil {
@@ -150,9 +173,9 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 	tempFile.Close() // Close it so the underlying parser can open it safely
 
 	// Pass the actual physical temp file path, overrides, and useAI flag to the service layer
-	payslip, err := h.payslipSvc.Import(r.Context(), tempFile.Name(), header.Filename, mimeType, fileBytes, overrides, useAI)
+	payslip, err := h.payslipSvc.Import(r.Context(), userID, tempFile.Name(), header.Filename, mimeType, fileBytes, overrides, useAI)
 	if err != nil {
-		h.Logger.Error("Failed to import payslip", "error", err)
+		h.Logger.Error("Failed to import payslip", "error", err, "user_id", userID)
 		if errors.Is(err, entity.ErrPayslipDuplicate) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
@@ -166,6 +189,13 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 
 // updatePayslip handles PUT /api/v1/payslips/{id}
 func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "Missing payslip ID")
@@ -218,9 +248,10 @@ func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	p.ID = id
+	p.UserID = userID
 
 	if err := h.payslipSvc.Update(r.Context(), &p); err != nil {
-		h.Logger.Error("Failed to update payslip", "id", id, "error", err)
+		h.Logger.Error("Failed to update payslip", "id", id, "error", err, "user_id", userID)
 		if errors.Is(err, entity.ErrPayslipDuplicate) {
 			writeError(w, http.StatusConflict, err.Error())
 			return
@@ -230,9 +261,9 @@ func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Re-fetch to return the persisted state (including Bonuses and new file metadata)
-	updated, err := h.payslipRepo.FindByID(r.Context(), id)
+	updated, err := h.payslipRepo.FindByID(r.Context(), id, userID)
 	if err != nil {
-		h.Logger.Error("Failed to fetch updated payslip", "id", id, "error", err)
+		h.Logger.Error("Failed to fetch updated payslip", "id", id, "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "Failed to fetch updated payslip")
 		return
 	}
@@ -242,14 +273,21 @@ func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
 
 // deletePayslip handles DELETE /api/v1/payslips/{id}
 func (h *Handler) deletePayslip(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "Missing payslip ID")
 		return
 	}
 
-	if err := h.payslipSvc.Delete(r.Context(), id); err != nil {
-		h.Logger.Error("Failed to delete payslip", "id", id, "error", err)
+	if err := h.payslipSvc.Delete(r.Context(), id, userID); err != nil {
+		h.Logger.Error("Failed to delete payslip", "id", id, "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "Failed to delete payslip")
 		return
 	}
@@ -259,15 +297,22 @@ func (h *Handler) deletePayslip(w http.ResponseWriter, r *http.Request) {
 
 // downloadPayslipFile handles GET /api/v1/payslips/{id}/download
 func (h *Handler) downloadPayslipFile(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	id := chi.URLParam(r, "id")
 	if id == "" {
 		writeError(w, http.StatusBadRequest, "Missing payslip ID")
 		return
 	}
 
-	content, mimeType, filename, err := h.payslipRepo.GetOriginalFile(r.Context(), id)
+	content, mimeType, filename, err := h.payslipRepo.GetOriginalFile(r.Context(), id, userID)
 	if err != nil {
-		h.Logger.Error("Failed to fetch original file", "id", id, "error", err)
+		h.Logger.Error("Failed to fetch original file", "id", id, "error", err, "user_id", userID)
 		writeError(w, http.StatusNotFound, "File not found")
 		return
 	}
@@ -318,6 +363,8 @@ func (h *Handler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "No 'files' found in form data")
 		return
 	}
+
+	userID := h.getUserID(r.Context())
 
 	response := batchImportResponse{
 		Successful: make([]*entity.Payslip, 0),
@@ -373,7 +420,7 @@ func (h *Handler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
 		tempFile.Close()
 
 		// Call the service (passing nil for manual overrides in a batch context, and false for useAI)
-		payslip, err := h.payslipSvc.Import(r.Context(), tempFile.Name(), fileHeader.Filename, mimeType, fileBytes, nil, false)
+		payslip, err := h.payslipSvc.Import(r.Context(), userID, tempFile.Name(), fileHeader.Filename, mimeType, fileBytes, nil, false)
 
 		// Clean up the temp file immediately after the service is done
 		os.Remove(tempFile.Name())

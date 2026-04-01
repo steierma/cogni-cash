@@ -11,12 +11,13 @@ import (
 
 	"cogni-cash/internal/domain/entity"
 
+	"github.com/google/uuid"
 	"github.com/ledongthuc/pdf"
 )
 
 // LLMStatementParser defines the method we expect the LLM adapter to fulfill.
 type LLMStatementParser interface {
-	ParseBankStatementText(ctx context.Context, text string) (entity.BankStatement, error)
+	ParseBankStatementText(ctx context.Context, userID uuid.UUID, text string) (entity.BankStatement, error)
 }
 
 // Parser implements port.BankStatementParser using an LLM.
@@ -32,7 +33,7 @@ func NewParser(llm LLMStatementParser, logger *slog.Logger) *Parser {
 	}
 }
 
-func (p *Parser) Parse(ctx context.Context, filePath string) (entity.BankStatement, error) {
+func (p *Parser) Parse(ctx context.Context, userID uuid.UUID, filePath string) (entity.BankStatement, error) {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	var rawText string
 	var err error
@@ -56,7 +57,7 @@ func (p *Parser) Parse(ctx context.Context, filePath string) (entity.BankStateme
 	}
 
 	p.logger.Info("Sending extracted text to LLM for bank statement parsing", "file", filepath.Base(filePath), "text_length", len(rawText))
-	return p.llm.ParseBankStatementText(ctx, rawText)
+	return p.llm.ParseBankStatementText(ctx, userID, rawText)
 }
 
 func extractPDFText(path string) (string, error) {

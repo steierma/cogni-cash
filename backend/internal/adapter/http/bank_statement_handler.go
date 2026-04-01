@@ -27,7 +27,8 @@ func (h *Handler) listBankStatements(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "bank statement repository not available")
 		return
 	}
-	summaries, err := h.bankStmtRepo.FindSummaries(r.Context())
+	userID := h.getUserID(r.Context())
+	summaries, err := h.bankStmtRepo.FindSummaries(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -50,7 +51,8 @@ func (h *Handler) getBankStatement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid bank statement id")
 		return
 	}
-	stmt, err := h.bankStmtRepo.FindByID(r.Context(), id)
+	userID := h.getUserID(r.Context())
+	stmt, err := h.bankStmtRepo.FindByID(r.Context(), id, userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
@@ -76,6 +78,7 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userID := h.getUserID(r.Context())
 	useAI := r.FormValue("use_ai") == "true"
 
 	// Capture the statement type from the frontend form (e.g., "giro", "extra_account", "credit_card")
@@ -116,7 +119,7 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 		}
 
 		// Pass the statementType down to the service layer.
-		stmt, err := h.bankStatementSvc.ImportFromFile(r.Context(), tmp.Name(), useAI, statementType)
+		stmt, err := h.bankStatementSvc.ImportFromFile(r.Context(), userID, tmp.Name(), useAI, statementType)
 		os.Remove(tmp.Name())
 
 		if err != nil {
@@ -172,7 +175,8 @@ func (h *Handler) deleteBankStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.bankStatementSvc.DeleteStatement(r.Context(), id); err != nil {
+	userID := h.getUserID(r.Context())
+	if err := h.bankStatementSvc.DeleteStatement(r.Context(), id, userID); err != nil {
 		h.Logger.Error("Failed to delete bank statement", "error", err, "statement_id", id)
 		writeError(w, http.StatusInternalServerError, "failed to delete bank statement")
 		return
@@ -194,7 +198,8 @@ func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	stmt, err := h.bankStmtRepo.FindByID(r.Context(), id)
+	userID := h.getUserID(r.Context())
+	stmt, err := h.bankStmtRepo.FindByID(r.Context(), id, userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "bank statement not found")
 		return
@@ -233,7 +238,7 @@ func (h *Handler) getTransactionAnalytics(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	filter := parseTransactionFilter(r)
+	filter := h.parseTransactionFilter(r)
 	analytics, err := h.transactionSvc.GetTransactionAnalytics(r.Context(), filter)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to fetch transaction analytics")
@@ -249,7 +254,7 @@ func (h *Handler) listTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	filter := parseTransactionFilter(r)
+	filter := h.parseTransactionFilter(r)
 	txns, err := h.transactionSvc.ListTransactions(r.Context(), filter)
 	if err != nil {
 		h.Logger.Error("Failed to fetch transactions", "error", err, "filter", filter)
@@ -292,7 +297,8 @@ func (h *Handler) updateTransactionCategory(w http.ResponseWriter, r *http.Reque
 		catIDPtr = &parsedID
 	}
 
-	if err := h.transactionSvc.UpdateCategory(r.Context(), contentHash, catIDPtr); err != nil {
+	userID := h.getUserID(r.Context())
+	if err := h.transactionSvc.UpdateCategory(r.Context(), contentHash, catIDPtr, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -312,7 +318,8 @@ func (h *Handler) markTransactionReviewed(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.transactionSvc.MarkAsReviewed(r.Context(), contentHash); err != nil {
+	userID := h.getUserID(r.Context())
+	if err := h.transactionSvc.MarkAsReviewed(r.Context(), contentHash, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -326,9 +333,16 @@ func (h *Handler) startAutoCategorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
 	batchSize := 10
 	if h.settingsSvc != nil {
-		if settings, err := h.settingsSvc.GetAll(r.Context()); err == nil {
+		if settings, err := h.settingsSvc.GetAll(r.Context(), h.getUserID(r.Context())); err == nil {
 			if bsStr, ok := settings["auto_categorization_batch_size"]; ok {
 				if bs, err := strconv.Atoi(bsStr); err == nil && bs > 0 {
 					batchSize = bs
@@ -337,7 +351,7 @@ func (h *Handler) startAutoCategorize(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	err := h.transactionSvc.StartAutoCategorizeAsync(r.Context(), batchSize)
+	err := h.transactionSvc.StartAutoCategorizeAsync(r.Context(), userID, batchSize)
 	if err != nil {
 		if errors.Is(err, entity.ErrJobAlreadyRunning) {
 			writeError(w, http.StatusConflict, err.Error())
@@ -373,11 +387,17 @@ func (h *Handler) cancelAutoCategorize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Cancellation requested"})
 }
 
-func parseTransactionFilter(r *http.Request) entity.TransactionFilter {
+func (h *Handler) parseTransactionFilter(r *http.Request) entity.TransactionFilter {
 	q := r.URL.Query()
 	f := entity.TransactionFilter{
 		Type:   q.Get("type"),
 		Search: q.Get("search"),
+	}
+
+	if userIDStr, ok := r.Context().Value(userIDKey).(string); ok {
+		if uid, err := uuid.Parse(userIDStr); err == nil {
+			f.UserID = uid
+		}
 	}
 
 	if catID, err := uuid.Parse(q.Get("category_id")); err == nil {

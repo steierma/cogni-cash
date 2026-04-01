@@ -58,7 +58,7 @@ export default function PayslipsPage() {
     // Table Settings
     const [showColMenu, setShowColMenu] = useState(false);
     const [visibleCols, setVisibleCols] = useState<Record<ColKey, boolean>>({
-        period: true, employee: true, gross: true, net: true, adjNet: false, payout: true, leasing: false,
+        period: true, employee: true, employer: true, gross: true, net: true, adjNet: false, payout: true, leasing: false,
     });
     const [sortConfig, setSortConfig] = useState<{ key: ColKey; direction: SortDirection }>({
         key: 'period', direction: 'desc'
@@ -203,6 +203,9 @@ export default function PayslipsPage() {
                 case 'employee':
                     comparison = (a.employee_name || '').localeCompare(b.employee_name || '');
                     break;
+                case 'employer':
+                    comparison = (a.employer_name || '').localeCompare(b.employer_name || '');
+                    break;
                 case 'gross':
                     comparison = a.gross_pay - b.gross_pay;
                     break;
@@ -343,7 +346,7 @@ export default function PayslipsPage() {
                     {showColMenu && (
                         <div
                             className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-10 overflow-hidden p-2 space-y-1">
-                            {[{key: 'period', label: t('payslips.modals.period')}, {key: 'employee', label: t('payslips.modals.employee')}, {
+                            {[{key: 'period', label: t('payslips.modals.period')}, {key: 'employee', label: t('payslips.modals.employee')}, {key: 'employer', label: t('payslips.modals.employer')}, {
                                 key: 'gross',
                                 label: t('payslips.modals.gross')
                             }, {key: 'net', label: t('payslips.modals.net')}, {

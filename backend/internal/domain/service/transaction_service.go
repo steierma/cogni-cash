@@ -44,12 +44,12 @@ func (s *TransactionService) ListTransactions(ctx context.Context, filter entity
 	return s.repo.FindTransactions(ctx, filter)
 }
 
-func (s *TransactionService) UpdateCategory(ctx context.Context, hash string, categoryID *uuid.UUID) error {
-	return s.repo.UpdateTransactionCategory(ctx, hash, categoryID)
+func (s *TransactionService) UpdateCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return s.repo.UpdateTransactionCategory(ctx, hash, categoryID, userID)
 }
 
-func (s *TransactionService) MarkAsReviewed(ctx context.Context, hash string) error {
-	return s.repo.MarkTransactionReviewed(ctx, hash)
+func (s *TransactionService) MarkAsReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
+	return s.repo.MarkTransactionReviewed(ctx, hash, userID)
 }
 
 func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter entity.TransactionFilter) (entity.TransactionAnalytics, error) {
@@ -64,11 +64,14 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 
 	var cats []entity.Category
 	if s.categoryRepo != nil {
-		cats, _ = s.categoryRepo.FindAll(ctx)
+		cats, _ = s.categoryRepo.FindAll(ctx, filter.UserID)
 	}
 	colorMap := make(map[string]string)
+	nameMap := make(map[string]string)
 	for _, c := range cats {
-		colorMap[c.Name] = c.Color
+		idStr := c.ID.String()
+		colorMap[idStr] = c.Color
+		nameMap[idStr] = c.Name
 	}
 
 	result := entity.TransactionAnalytics{
@@ -91,28 +94,28 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 	for _, tx := range txns {
 		dateStr := tx.BookingDate.Format(timeFormat)
 		if _, ok := timeSeriesMap[dateStr]; !ok {
-			timeSeriesMap[dateStr] = &entity.TimeSeriesPoint{Date: dateStr}
+			timeSeriesMap[dateStr] = &entity.TimeSeriesPoint{
+				Date:            dateStr,
+				CategoryAmounts: make(map[string]float64),
+			}
 		}
 
-		catName := "Uncategorized"
+		catID := "uncategorized"
 		if tx.CategoryID != nil {
-			for _, c := range cats {
-				if c.ID == *tx.CategoryID {
-					catName = c.Name
-					break
-				}
-			}
+			catID = tx.CategoryID.String()
 		}
 
 		if tx.Amount >= 0 {
 			result.TotalIncome += tx.Amount
 			timeSeriesMap[dateStr].Income += tx.Amount
-			catIncomeMap[catName] += tx.Amount
+			catIncomeMap[catID] += tx.Amount
+			timeSeriesMap[dateStr].CategoryAmounts[catID] += tx.Amount
 		} else {
 			absAmount := math.Abs(tx.Amount)
 			result.TotalExpense += absAmount
 			timeSeriesMap[dateStr].Expense += absAmount
-			catExpenseMap[catName] += absAmount
+			catExpenseMap[catID] += absAmount
+			timeSeriesMap[dateStr].CategoryAmounts[catID] += absAmount
 
 			merchant := strings.TrimSpace(tx.Description)
 			if merchant == "" {
@@ -129,30 +132,50 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 
 	result.NetSavings = result.TotalIncome - result.TotalExpense
 
-	for cat, amount := range catExpenseMap {
-		color := colorMap[cat]
-		if color == "" {
+	// Deduplicate CategoryTotals by ID
+	mergedCatMap := make(map[string]entity.CategoryTotal)
+
+	for id, amount := range catExpenseMap {
+		color := colorMap[id]
+		name := nameMap[id]
+		if id == "uncategorized" {
 			color = "#9ca3af"
+			name = "Uncategorized"
 		}
-		result.CategoryTotals = append(result.CategoryTotals, entity.CategoryTotal{
-			Category: cat,
-			Amount:   amount,
-			Type:     "expense",
-			Color:    color,
-		})
+		mergedCatMap[id] = entity.CategoryTotal{
+			CategoryID: id,
+			Category:   name,
+			Amount:     amount,
+			Type:       "expense",
+			Color:      color,
+		}
 	}
 
-	for cat, amount := range catIncomeMap {
-		color := colorMap[cat]
-		if color == "" {
-			color = "#9ca3af"
+	for id, amount := range catIncomeMap {
+		if existing, ok := mergedCatMap[id]; ok {
+			// If already exists as expense, keep as expense but add to amount
+			// or decide which type to prioritize. Usually expense is what people want to track.
+			existing.Amount += amount
+			mergedCatMap[id] = existing
+		} else {
+			color := colorMap[id]
+			name := nameMap[id]
+			if id == "uncategorized" {
+				color = "#9ca3af"
+				name = "Uncategorized"
+			}
+			mergedCatMap[id] = entity.CategoryTotal{
+				CategoryID: id,
+				Category:   name,
+				Amount:     amount,
+				Type:       "income",
+				Color:      color,
+			}
 		}
-		result.CategoryTotals = append(result.CategoryTotals, entity.CategoryTotal{
-			Category: cat,
-			Amount:   amount,
-			Type:     "income",
-			Color:    color,
-		})
+	}
+
+	for _, catTotal := range mergedCatMap {
+		result.CategoryTotals = append(result.CategoryTotals, catTotal)
 	}
 
 	sort.Slice(result.CategoryTotals, func(i, j int) bool {
@@ -184,12 +207,12 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 	return result, nil
 }
 
-func (s *TransactionService) StartAutoCategorizeAsync(ctx context.Context, batchSize int) error {
+func (s *TransactionService) StartAutoCategorizeAsync(ctx context.Context, userID uuid.UUID, batchSize int) error {
 	if s.llm == nil {
 		return errors.New("transaction service: LLM categorizer not configured")
 	}
 
-	allTxns, err := s.repo.SearchTransactions(ctx, entity.TransactionFilter{})
+	allTxns, err := s.repo.SearchTransactions(ctx, entity.TransactionFilter{UserID: userID})
 	if err != nil {
 		return fmt.Errorf("fetch pending transactions: %w", err)
 	}
@@ -198,9 +221,13 @@ func (s *TransactionService) StartAutoCategorizeAsync(ctx context.Context, batch
 	for _, tx := range allTxns {
 		if tx.CategoryID == nil {
 			toCategorize = append(toCategorize, port.TransactionToCategorize{
-				Hash:        tx.ContentHash,
-				Description: tx.Description,
-				Reference:   tx.Reference,
+				Hash:                tx.ContentHash,
+				Description:         tx.Description,
+				Reference:           tx.Reference,
+				CounterpartyName:    tx.CounterpartyName,
+				CounterpartyIban:    tx.CounterpartyIban,
+				BankTransactionCode: tx.BankTransactionCode,
+				MandateReference:    tx.MandateReference,
 			})
 		}
 	}
@@ -209,7 +236,7 @@ func (s *TransactionService) StartAutoCategorizeAsync(ctx context.Context, batch
 		return ErrNothingToCategorize
 	}
 
-	cats, err := s.categoryRepo.FindAll(ctx)
+	cats, err := s.categoryRepo.FindAll(ctx, userID)
 	if err != nil {
 		return fmt.Errorf("fetch categories: %w", err)
 	}
@@ -217,12 +244,12 @@ func (s *TransactionService) StartAutoCategorizeAsync(ctx context.Context, batch
 	// Fetch historical examples for few-shot learning
 	examplesCount := 20
 	if s.settingsRepo != nil {
-		if val, err := s.settingsRepo.Get(ctx, "auto_categorization_examples_per_category"); err == nil && val != "" {
+		if val, err := s.settingsRepo.Get(ctx, "auto_categorization_examples_per_category", userID); err == nil && val != "" {
 			fmt.Sscanf(val, "%d", &examplesCount)
 		}
 	}
 
-	examples, err := s.repo.GetCategorizationExamples(ctx, examplesCount)
+	examples, err := s.repo.GetCategorizationExamples(ctx, userID, examplesCount)
 	if err != nil {
 		s.Logger.Warn("Failed to fetch categorization examples, proceeding without them", "error", err)
 	}
@@ -234,13 +261,13 @@ func (s *TransactionService) StartAutoCategorizeAsync(ctx context.Context, batch
 		return err
 	}
 
-	go s.runCategorizeLoop(jobCtx, toCategorize, cats, examples, batchSize)
+	go s.runCategorizeLoop(jobCtx, userID, toCategorize, cats, examples, batchSize)
 
 	return nil
 }
 
-func (s *TransactionService) runCategorizeLoop(ctx context.Context, txns []port.TransactionToCategorize, categories []entity.Category, examples []entity.CategorizationExample, batchSize int) {
-	s.Logger.Info("Starting auto-categorization job", "total_transactions", len(txns), "examples", len(examples))
+func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.UUID, txns []port.TransactionToCategorize, categories []entity.Category, examples []entity.CategorizationExample, batchSize int) {
+	s.Logger.Info("Starting auto-categorization job", "total_transactions", len(txns), "examples", len(examples), "user_id", userID)
 	defer func() {
 		if s.JobTracker.GetState().Status == "running" {
 			s.JobTracker.Finish("completed")
@@ -270,7 +297,7 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, txns []port.
 		}
 		batch := txns[i:end]
 
-		results, err := s.llm.CategorizeBatch(ctx, batch, catNames, examples)
+		results, err := s.llm.CategorizeBatch(ctx, userID, batch, catNames, examples)
 		if err != nil {
 			if ctx.Err() != nil {
 				s.JobTracker.Finish("cancelled")
@@ -292,7 +319,7 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, txns []port.
 			}
 
 			if validCategoryID != nil {
-				if err := s.repo.UpdateTransactionCategory(ctx, res.Hash, validCategoryID); err != nil {
+				if err := s.repo.UpdateTransactionCategory(ctx, res.Hash, validCategoryID, userID); err != nil {
 					s.Logger.Error("Failed to update transaction category", "hash", res.Hash, "error", err)
 				} else {
 					successfulResults = append(successfulResults, res)

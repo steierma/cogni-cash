@@ -5,6 +5,8 @@ import (
 	"testing"
 
 	"cogni-cash/internal/domain/entity"
+
+	"github.com/google/uuid"
 )
 
 func TestPayslipRepository(t *testing.T) {
@@ -13,9 +15,16 @@ func TestPayslipRepository(t *testing.T) {
 
 	repo := NewPayslipRepository(globalPool)
 
+	userID := uuid.New()
+	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'payslip_user', 'hash', 'ps@example.com')", userID)
+	if err != nil {
+		t.Fatalf("failed to insert user: %v", err)
+	}
+
 	t.Run("Save, Find, Update, Delete Lifecycle", func(t *testing.T) {
 		// 1. Setup dummy entity matching our real-world data
 		payslip := entity.Payslip{
+			UserID:              userID,
 			SourceFile:          "testdata/99999999_Monatsabrechnung_202602.pdf",
 			OriginalFileName:    "99999999_Monatsabrechnung_202602.pdf",
 			OriginalFileMime:    "application/pdf",
@@ -46,13 +55,13 @@ func TestPayslipRepository(t *testing.T) {
 		}
 
 		// 3. ExistsByHash
-		exists, err := repo.ExistsByHash(ctx, "dummy_sha256_hash_12345")
+		exists, err := repo.ExistsByHash(ctx, "dummy_sha256_hash_12345", userID)
 		if err != nil || !exists {
 			t.Errorf("expected hash to exist in database")
 		}
 
 		// 4. FindByID — also verify Bonuses are loaded
-		found, err := repo.FindByID(ctx, payslip.ID)
+		found, err := repo.FindByID(ctx, payslip.ID, userID)
 		if err != nil {
 			t.Fatalf("expected no error finding by ID, got: %v", err)
 		}
@@ -81,7 +90,7 @@ func TestPayslipRepository(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected no error updating payslip, got: %v", err)
 		}
-		updated, _ := repo.FindByID(ctx, payslip.ID)
+		updated, _ := repo.FindByID(ctx, payslip.ID, userID)
 		if updated.TaxClass != "3" {
 			t.Errorf("expected updated TaxClass 3, got %s", updated.TaxClass)
 		}
@@ -111,13 +120,13 @@ func TestPayslipRepository(t *testing.T) {
 		if err = repo.Update(ctx, &updated); err != nil {
 			t.Fatalf("expected no error clearing bonuses, got: %v", err)
 		}
-		afterClear, _ := repo.FindByID(ctx, payslip.ID)
+		afterClear, _ := repo.FindByID(ctx, payslip.ID, userID)
 		if len(afterClear.Bonuses) != 0 {
 			t.Errorf("expected 0 Bonuses after clear, got %d", len(afterClear.Bonuses))
 		}
 
 		// 6. GetOriginalFile
-		content, mime, filename, err := repo.GetOriginalFile(ctx, payslip.ID)
+		content, mime, filename, err := repo.GetOriginalFile(ctx, payslip.ID, userID)
 		if err != nil {
 			t.Fatalf("expected no error fetching file, got: %v", err)
 		}
@@ -126,17 +135,17 @@ func TestPayslipRepository(t *testing.T) {
 		}
 
 		// 7. FindAll
-		all, err := repo.FindAll(ctx)
+		all, err := repo.FindAll(ctx, userID)
 		if err != nil || len(all) == 0 {
 			t.Fatalf("expected at least 1 payslip in FindAll, got %d", len(all))
 		}
 
 		// 8. Delete (should cascade and remove Bonuses as well)
-		err = repo.Delete(ctx, payslip.ID)
+		err = repo.Delete(ctx, payslip.ID, userID)
 		if err != nil {
 			t.Fatalf("expected no error deleting payslip, got: %v", err)
 		}
-		_, err = repo.FindByID(ctx, payslip.ID)
+		_, err = repo.FindByID(ctx, payslip.ID, userID)
 		if err == nil {
 			t.Errorf("expected error when querying deleted payslip, got nil")
 		}

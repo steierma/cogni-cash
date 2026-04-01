@@ -10,8 +10,8 @@ application.
 * **Development Methodology:** **Test-Driven Development (TDD)**. No feature code is written without a failing test
   first. Domain logic is tested with mocks — no database or network connection required.
 * **Runtime Environment:** **Docker + Compose** for all services (Postgres, Backend, Frontend).
-* **Persistence:** **PostgreSQL 16** (containerised via Docker Compose). *Note: In-memory fallback has been deprecated;
-  a running database is strictly required.*
+* **Persistence:** **PostgreSQL 16** (containerised via Docker Compose).
+* **Multi-Tenancy:** **Strict User Isolation** via `user_id` on all data-owning tables.
 * **Secrets:** No credentials are hardcoded. All secrets live in a `.env` file (gitignored).
 * **Internationalisation (i18n):** **All user-visible strings in the frontend must use `react-i18next`.**
   No hard-coded English (or any language) strings are permitted in `.tsx` / `.ts` UI files. Every new page,
@@ -96,9 +96,10 @@ the `backend/migrations/` directory.
   for dynamic payslip formats.
 
 ### D. The Access Control Agent (RBAC Middleware)
+* **Responsibility:** Secures API routes by validating JWT tokens and intercepting requests based on user roles.
+* **Hardened Constraint:** System settings (`/api/v1/settings`), user management (`/api/v1/users`), and critical bank provider configurations MUST be protected by `adminMiddleware`. Standard users (managers) MUST NOT be able to modify global application state.
+* **Validation:** All role-based changes must be accompanied by integration tests verifying the `403 Forbidden` behavior for unauthorized users.
 
-* **Responsibility:** Secures API routes by validating JWT tokens and intercepting requests based on administrative
-  roles. Ensures standard managers cannot modify peer users or escalate privileges.
 
 ---
 
@@ -148,19 +149,18 @@ the `backend/migrations/` directory.
 * [x] **Sample file:** `backend/payslips/payslips_import.json` with realistic test entries ready to use.
 * [x] **TDD:** Four unit tests covering no-op (file absent), happy path + file deletion, filename-dedup skip, and error-keeps-file.
 
-### Phase 9: Multi-Language Frontend (i18n) 🚧
+### Phase 9: Multi-Language Frontend (i18n) ✅
 
 > Introduces `i18next` / `react-i18next` so the UI can be rendered in multiple languages. The active language
 > is auto-detected from the browser and persisted per-user via the `ui_language` settings key.
 
-* [ ] **Dependencies:** Install `i18next`, `react-i18next`, `i18next-browser-languagedetector`.
-* [ ] **Bootstrap:** Create `frontend/src/i18n/index.ts`; side-effect import in `main.tsx`.
-* [ ] **Catalogues:** Author `locales/en/translation.json` (source of truth), `locales/de/translation.json`, `locales/es/translation.json` and `locales/fr/translation.json`.
-* [ ] **App wiring:** Read `ui_language` from settings in `App.tsx`; call `i18n.changeLanguage` on change.
-* [ ] **Pages & components:** Replace all hard-coded strings with `t('...')` across all 18 affected files.
-* [ ] **Settings UI:** Language selector dropdown in `SettingsPage.tsx`; persist via `PATCH /api/v1/settings/`.
-* [ ] **Number/date formatting:** Update `frontend/src/utils/formatters.ts` to use `i18n.language` as locale for `Intl.NumberFormat` / `Intl.DateTimeFormat`.
-* [ ] **Backend:** No changes required — `ui_language` is a regular settings key.
+* [x] **Dependencies:** `i18next`, `react-i18next`, `i18next-browser-languagedetector`.
+* [x] **Bootstrap:** Created `frontend/src/i18n/index.ts` with auto-detector and English/German/Spanish/French support.
+* [x] **Catalogues:** Authored translations for EN, DE, ES, and FR across 10+ pages.
+* [x] **App wiring:** Dynamic `i18n.changeLanguage` in `App.tsx` responding to settings changes.
+* [x] **Pages & components:** Replaced hard-coded strings with `t('...')` in all frontend files.
+* [x] **Settings UI:** Language selector dropdown in `SettingsPage.tsx` with instant switch.
+* [x] **Number/date formatting:** Localized `formatters.ts` using `i18n.language`.
 
 ### Phase 10: Backend Hexagonal Architecture Hardening ✅
 

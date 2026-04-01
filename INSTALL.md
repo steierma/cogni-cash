@@ -26,7 +26,7 @@ The only thing required on the host is Docker. No Go, no Node.js, no manual data
 > ```text
 > postgres  (auto-creates user + db)
 >    ↓  healthy
-> migrate   (applies 001…011 SQL migrations, then exits 0)
+> migrate   (applies 001…010 SQL migrations, then exits 0)
 >    ↓  completed successfully
 > backend   (connects, seeds admin user, serves API on :8080)
 >    ↓  healthy
@@ -232,6 +232,11 @@ All variables live in `.env` (project root). Docker Compose reads it automatical
 | `IMPORT_INTERVAL`          | `1h`                             | Re-scan interval (Go duration: `30m`, `1h`, …)
 | `PAYSLIP_IMPORT_JSON_PATH` | *(empty)*                        | Absolute path to a `payslips_import.json` manifest. Worker imports all entries, deletes each imported PDF, and keeps the JSON. Leave empty to disable.
 | `PAYSLIP_IMPORT_INTERVAL`  | `1h`                             | How often the worker checks for the JSON file (Go duration: `1m`, `1h`, …)
+| `SMTP_HOST`                | *(empty)*                        | SMTP server hostname for email notifications.
+| `SMTP_PORT`                | `587`                            | SMTP server port.
+| `SMTP_USER`                | *(empty)*                        | SMTP authentication username.
+| `SMTP_PASSWORD`            | *(empty)*                        | SMTP authentication password.
+| `SMTP_FROM_EMAIL`          | `noreply@cognicash.local`        | Sender address for outgoing emails.
 
 ---
 

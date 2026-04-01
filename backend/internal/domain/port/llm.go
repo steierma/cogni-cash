@@ -3,6 +3,8 @@ package port
 import (
 	"cogni-cash/internal/domain/entity"
 	"context"
+
+	"github.com/google/uuid"
 )
 
 // CategorizationRequest is the input to the LLM categorization call.
@@ -19,19 +21,24 @@ type CategorizationResult struct {
 	VendorName   string
 	Amount       float64
 	Currency     string
+	InvoiceDate  string
 	Description  string
 }
 
 // LLMClient is the output port for the AI categorization adapter.
 type LLMClient interface {
-	Categorize(ctx context.Context, req CategorizationRequest) (CategorizationResult, error)
+	Categorize(ctx context.Context, userID uuid.UUID, req CategorizationRequest) (CategorizationResult, error)
 }
 
 // TransactionToCategorize holds the data needed to categorize a single transaction.
 type TransactionToCategorize struct {
-	Hash        string `json:"hash"`
-	Description string `json:"description"`
-	Reference   string `json:"reference"`
+	Hash                string `json:"hash"`
+	Description         string `json:"description"`
+	Reference           string `json:"reference"`
+	CounterpartyName    string `json:"counterparty_name,omitempty"`
+	CounterpartyIban    string `json:"counterparty_iban,omitempty"`
+	BankTransactionCode string `json:"bank_transaction_code,omitempty"`
+	MandateReference    string `json:"mandate_reference,omitempty"`
 }
 
 type CategorizedTransaction struct {
@@ -41,5 +48,5 @@ type CategorizedTransaction struct {
 
 // TransactionCategorizer handles batch LLM operations for transactions.
 type TransactionCategorizer interface {
-	CategorizeBatch(ctx context.Context, txns []TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]CategorizedTransaction, error)
+	CategorizeBatch(ctx context.Context, userID uuid.UUID, txns []TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]CategorizedTransaction, error)
 }

@@ -54,50 +54,8 @@ func (s *BankStatementService) RegisterParser(ext string, parser port.BankStatem
 	s.parsers[ext] = append(s.parsers[ext], parser)
 }
 
-func (s *BankStatementService) ImportFromDirectory(ctx context.Context, dirPath string) (int, []error) {
-	if dirPath == "" {
-		return 0, []error{ErrEmptyFilePath}
-	}
-
-	s.Logger.Info("Scanning directory for bank statements", "path", dirPath)
-	entries, err := os.ReadDir(dirPath)
-	if err != nil {
-		return 0, []error{fmt.Errorf("bank statement service: read dir %s: %w", dirPath, err)}
-	}
-
-	var importedCount int
-	var errs []error
-
-	for _, entry := range entries {
-		if entry.IsDir() {
-			continue
-		}
-
-		ext := strings.ToLower(filepath.Ext(entry.Name()))
-		if _, ok := s.parsers[ext]; !ok {
-			continue
-		}
-
-		fullPath := filepath.Join(dirPath, entry.Name())
-		s.Logger.Info("Auto-importing file from directory", "file", entry.Name())
-		_, err := s.ImportFromFile(ctx, fullPath, false, "")
-		if err != nil {
-			if errors.Is(err, ErrDuplicate) {
-				s.Logger.Debug("Skipped duplicate file in directory", "file", entry.Name())
-				continue
-			}
-			errs = append(errs, fmt.Errorf("file %s: %w", entry.Name(), err))
-			continue
-		}
-		importedCount++
-	}
-
-	s.Logger.Info("Directory import completed", "path", dirPath, "imported", importedCount, "errors", len(errs))
-	return importedCount, errs
-}
-
-func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath string, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error) {
-	s.Logger.Info("Starting import of bank statement file", "file", filePath, "use_ai_parser", useAI, "fallback_parser", s.fallbackParser)
+func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.UUID, filePath string, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error) {
+	s.Logger.Info("Starting import of bank statement file", "file", filePath, "use_ai_parser", useAI, "user_id", userID)
 	if filePath == "" {
 		return entity.BankStatement{}, ErrEmptyFilePath
 	}
@@ -109,17 +67,17 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath stri
 
 	if useAI {
 		if s.fallbackParser != nil {
-			s.Logger.Info("Attempting AI parser exclusively as requested", "file", filePath)
-			stmt, parseErr = s.fallbackParser.Parse(ctx, filePath)
+			s.Logger.Info("Attempting AI parser exclusively as requested", "file", filePath, "user_id", userID)
+			stmt, parseErr = s.fallbackParser.Parse(ctx, userID, filePath)
 			if parseErr == nil {
 				if err := stmt.IsValid(); err == nil {
 					parsedSuccessfully = true
 				} else {
 					parseErr = fmt.Errorf("AI parser validation failed: %w", err)
-					s.Logger.Error("AI parser validation failed", "file", filePath, "error", parseErr)
+					s.Logger.Error("AI parser validation failed", "file", filePath, "user_id", userID, "error", parseErr)
 				}
 			} else {
-				s.Logger.Error("AI parser failed", "file", filePath, "error", parseErr)
+				s.Logger.Error("AI parser failed", "file", filePath, "user_id", userID, "error", parseErr)
 			}
 		} else {
 			parseErr = errors.New("bank statement service: AI parser requested but not configured")
@@ -128,7 +86,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath stri
 		if parserList, ok := s.parsers[ext]; ok {
 			var lastErr error
 			for _, parser := range parserList {
-				stmt, parseErr = parser.Parse(ctx, filePath)
+				stmt, parseErr = parser.Parse(ctx, userID, filePath)
 				if parseErr == nil {
 					if err := stmt.IsValid(); err != nil {
 						lastErr = fmt.Errorf("validation failed: %w", err)
@@ -162,16 +120,16 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath stri
 		return entity.BankStatement{}, fmt.Errorf("bank statement service: parse %s: %w", filePath, parseErr)
 	}
 
+	stmt.UserID = userID
 	if userStmtType != "" {
 		stmt.StatementType = userStmtType
-		for i := range stmt.Transactions {
-			stmt.Transactions[i].StatementType = userStmtType
-		}
 	} else if stmt.StatementType == "" {
 		stmt.StatementType = entity.StatementTypeGiro
-		for i := range stmt.Transactions {
-			stmt.Transactions[i].StatementType = entity.StatementTypeGiro
-		}
+	}
+
+	for i := range stmt.Transactions {
+		stmt.Transactions[i].UserID = userID
+		stmt.Transactions[i].StatementType = stmt.StatementType
 	}
 
 	fileBytes, err := os.ReadFile(filePath)
@@ -194,7 +152,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath stri
 	for i := range stmt.Transactions {
 		if stmt.Transactions[i].ContentHash == "" {
 			tx := &stmt.Transactions[i]
-			baseStr := fmt.Sprintf("%s|%.2f|%s|%s", tx.BookingDate.Format("2006-01-02"), tx.Amount, tx.Description, tx.Reference)
+			baseStr := fmt.Sprintf("%s|%s|%.2f|%s|%s", stmt.IBAN, tx.BookingDate.Format("2006-01-02"), tx.Amount, tx.Description, tx.Reference)
 			txCounts[baseStr]++
 
 			uniqueStr := fmt.Sprintf("%s|%d", baseStr, txCounts[baseStr])
@@ -215,6 +173,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath stri
 		}
 
 		filter := entity.TransactionFilter{
+			UserID:   userID,
 			FromDate: &minDate,
 			ToDate:   &maxDate,
 		}
@@ -223,19 +182,32 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath stri
 		if err == nil && len(existingTxns) > 0 {
 			var uniqueTxns []entity.Transaction
 			var skippedTxns []entity.Transaction
+			var linkTxIDs []uuid.UUID
 
 			availableTxns := make([]entity.Transaction, len(existingTxns))
 			copy(availableTxns, existingTxns)
 
+			if stmt.ID == uuid.Nil {
+				stmt.ID = uuid.New()
+			}
+
 			for _, tx := range stmt.Transactions {
 				dupIdx := s.findDuplicateIndex(tx, availableTxns)
 				if dupIdx >= 0 {
+					existingTx := availableTxns[dupIdx]
 					previewLen := 30
 					if len(tx.Description) < 30 {
 						previewLen = len(tx.Description)
 					}
-					s.Logger.Info("Skipping duplicate transaction", "date", tx.BookingDate.Format("2006-01-02"), "amount", tx.Amount, "desc_preview", tx.Description[:previewLen])
+					s.Logger.Info("Mapping duplicate transaction to statement",
+						"date", tx.BookingDate.Format("2006-01-02"),
+						"amount", tx.Amount,
+						"desc_preview", tx.Description[:previewLen],
+						"existing_id", existingTx.ID,
+						"user_id", userID)
+
 					skippedTxns = append(skippedTxns, tx)
+					linkTxIDs = append(linkTxIDs, existingTx.ID)
 
 					availableTxns = append(availableTxns[:dupIdx], availableTxns[dupIdx+1:]...)
 				} else {
@@ -246,27 +218,57 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, filePath stri
 			stmt.Transactions = uniqueTxns
 			stmt.SkippedTransactions = skippedTxns
 
-			if len(stmt.Transactions) == 0 {
-				s.Logger.Warn("All transactions in statement are duplicates", "content_hash", stmt.ContentHash)
+			if len(stmt.Transactions) == 0 && len(linkTxIDs) == 0 {
+				s.Logger.Warn("All transactions in statement are duplicates and no new statement needed", "content_hash", stmt.ContentHash, "user_id", userID)
 				return stmt, ErrDuplicate
 			}
-		} else if err != nil {
-			s.Logger.Warn("Could not fetch existing transactions for deduplication", "error", err)
-		}
-	}
 
-	if s.repo != nil {
-		if err := s.repo.Save(ctx, stmt); err != nil {
-			if errors.Is(err, ErrDuplicate) {
-				s.Logger.Warn("Duplicate bank statement detected (full hash match)", "content_hash", stmt.ContentHash)
-				return entity.BankStatement{}, fmt.Errorf("bank statement service: %w", ErrDuplicate)
+			if s.repo != nil {
+				if err := s.repo.Save(ctx, stmt); err != nil {
+					if errors.Is(err, ErrDuplicate) {
+						s.Logger.Warn("Duplicate bank statement detected (full hash match)", "content_hash", stmt.ContentHash, "user_id", userID)
+						return entity.BankStatement{}, fmt.Errorf("bank statement service: %w", ErrDuplicate)
+					}
+					s.Logger.Error("Failed to persist bank statement", "error", err, "user_id", userID)
+					return entity.BankStatement{}, fmt.Errorf("bank statement service: persist: %w", err)
+				}
+
+				// Link transactions after statement is saved
+				for _, txID := range linkTxIDs {
+					if err := s.repo.LinkTransactionToStatement(ctx, txID, stmt.ID, userID); err != nil {
+						s.Logger.Error("Failed to link transaction to statement", "tx_id", txID, "stmt_id", stmt.ID, "user_id", userID, "error", err)
+					}
+				}
 			}
-			s.Logger.Error("Failed to persist bank statement", "error", err)
-			return entity.BankStatement{}, fmt.Errorf("bank statement service: persist: %w", err)
+		} else {
+			if err != nil {
+				s.Logger.Warn("Could not fetch existing transactions for deduplication", "error", err, "user_id", userID)
+			}
+			if s.repo != nil {
+				if err := s.repo.Save(ctx, stmt); err != nil {
+					if errors.Is(err, ErrDuplicate) {
+						s.Logger.Warn("Duplicate bank statement detected (full hash match)", "content_hash", stmt.ContentHash, "user_id", userID)
+						return entity.BankStatement{}, fmt.Errorf("bank statement service: %w", ErrDuplicate)
+					}
+					s.Logger.Error("Failed to persist bank statement", "error", err, "user_id", userID)
+					return entity.BankStatement{}, fmt.Errorf("bank statement service: persist: %w", err)
+				}
+			}
+		}
+	} else {
+		if s.repo != nil {
+			if err := s.repo.Save(ctx, stmt); err != nil {
+				if errors.Is(err, ErrDuplicate) {
+					s.Logger.Warn("Duplicate bank statement detected (full hash match)", "content_hash", stmt.ContentHash, "user_id", userID)
+					return entity.BankStatement{}, fmt.Errorf("bank statement service: %w", ErrDuplicate)
+				}
+				s.Logger.Error("Failed to persist bank statement", "error", err, "user_id", userID)
+				return entity.BankStatement{}, fmt.Errorf("bank statement service: persist: %w", err)
+			}
 		}
 	}
 
-	s.Logger.Info("Bank statement imported successfully", "id", stmt.ID, "content_hash", stmt.ContentHash, "imported_count", len(stmt.Transactions), "skipped_count", len(stmt.SkippedTransactions))
+	s.Logger.Info("Bank statement imported successfully", "id", stmt.ID, "content_hash", stmt.ContentHash, "user_id", userID, "imported_count", len(stmt.Transactions), "skipped_count", len(stmt.SkippedTransactions))
 	return stmt, nil
 }
 
@@ -304,29 +306,62 @@ func normalizeTransactionText(v string) string {
 }
 
 func transactionTextMatches(newRef, newDesc, exRef, exDesc string) bool {
-	if newRef != "" && exRef != "" && newRef == exRef {
+	if newRef != "" && exRef != "" && (newRef == exRef || strings.Contains(newRef, exRef) || strings.Contains(exRef, newRef)) {
 		return true
 	}
 
-	if newDesc != "" && exDesc != "" && newDesc == exDesc {
+	if newDesc != "" && exDesc != "" && (newDesc == exDesc || strings.Contains(newDesc, exDesc) || strings.Contains(exDesc, newDesc)) {
 		return true
 	}
 
 	// Some parsers place the same value in reference vs description fields.
-	if newRef != "" && newRef == exDesc {
+	if newRef != "" && (newRef == exDesc || strings.Contains(newRef, exDesc) || strings.Contains(exDesc, newRef)) {
 		return true
 	}
-	if newDesc != "" && newDesc == exRef {
+	if newDesc != "" && (newDesc == exRef || strings.Contains(newDesc, exRef) || strings.Contains(exRef, newDesc)) {
 		return true
 	}
 
 	return false
 }
 
-func (s *BankStatementService) DeleteStatement(ctx context.Context, id uuid.UUID) error {
+func (s *BankStatementService) DeleteStatement(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	if s.repo == nil {
 		return errors.New("bank statement service: repository not configured")
 	}
-	s.Logger.Info("Deleting bank statement", "id", id)
-	return s.repo.Delete(ctx, id)
+	s.Logger.Info("Deleting bank statement", "id", id, "user_id", userID)
+	return s.repo.Delete(ctx, id, userID)
+}
+
+func (s *BankStatementService) ImportFromDirectory(ctx context.Context, userID uuid.UUID, dirPath string) (int, []error) {
+	if dirPath == "" {
+		return 0, []error{errors.New("directory path is empty")}
+	}
+
+	files, err := os.ReadDir(dirPath)
+	if err != nil {
+		return 0, []error{fmt.Errorf("failed to read directory: %w", err)}
+	}
+
+	imported := 0
+	var errs []error
+
+	for _, f := range files {
+		if f.IsDir() {
+			continue
+		}
+
+		filePath := filepath.Join(dirPath, f.Name())
+		// We don't know the statement type for auto-imports, so we use empty/giro
+		_, err := s.ImportFromFile(ctx, userID, filePath, false, "")
+		if err != nil {
+			if !errors.Is(err, ErrDuplicate) && !errors.Is(err, ErrUnsupportedFormat) {
+				errs = append(errs, fmt.Errorf("file %s: %w", f.Name(), err))
+			}
+			continue
+		}
+		imported++
+	}
+
+	return imported, errs
 }

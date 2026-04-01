@@ -25,7 +25,7 @@ func NewReconciliationRepository(pool *pgxpool.Pool, stmtRepo port.BankStatement
 }
 
 func (r *ReconciliationRepository) Save(ctx context.Context, rec entity.Reconciliation) (entity.Reconciliation, error) {
-	r.Logger.Info("Saving 1:1 reconciliation", "settlement_tx_hash", rec.SettlementTransactionHash, "target_tx_hash", rec.TargetTransactionHash)
+	r.Logger.Info("Saving 1:1 reconciliation", "settlement_tx_hash", rec.SettlementTransactionHash, "target_tx_hash", rec.TargetTransactionHash, "user_id", rec.UserID)
 
 	if rec.ID == uuid.Nil {
 		rec.ID = uuid.New()
@@ -42,9 +42,10 @@ func (r *ReconciliationRepository) Save(ctx context.Context, rec entity.Reconcil
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO reconciliations
-			(id, settlement_transaction_hash, target_transaction_hash, amount, reconciled_at)
-		VALUES ($1, $2, $3, $4, $5)`,
+			(id, user_id, settlement_transaction_hash, target_transaction_hash, amount, reconciled_at)
+		VALUES ($1, $2, $3, $4, $5, $6)`,
 		rec.ID,
+		rec.UserID,
 		rec.SettlementTransactionHash,
 		rec.TargetTransactionHash,
 		rec.Amount,
@@ -57,8 +58,8 @@ func (r *ReconciliationRepository) Save(ctx context.Context, rec entity.Reconcil
 	_, err = tx.Exec(ctx, `
 		UPDATE transactions
 		SET is_reconciled = true, reconciliation_id = $1
-		WHERE content_hash IN ($2, $3)`,
-		rec.ID, rec.SettlementTransactionHash, rec.TargetTransactionHash,
+		WHERE content_hash IN ($2, $3) AND user_id = $4`,
+		rec.ID, rec.SettlementTransactionHash, rec.TargetTransactionHash, rec.UserID,
 	)
 	if err != nil {
 		return entity.Reconciliation{}, fmt.Errorf("reconciliation repo: mark transactions reconciled: %w", err)
@@ -71,28 +72,29 @@ func (r *ReconciliationRepository) Save(ctx context.Context, rec entity.Reconcil
 	return rec, nil
 }
 
-func (r *ReconciliationRepository) FindBySettlementTx(ctx context.Context, hash string) (entity.Reconciliation, error) {
+func (r *ReconciliationRepository) FindBySettlementTx(ctx context.Context, hash string, userID uuid.UUID) (entity.Reconciliation, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, settlement_transaction_hash, target_transaction_hash, amount, reconciled_at
+		SELECT id, user_id, settlement_transaction_hash, target_transaction_hash, amount, reconciled_at
 		FROM reconciliations
-		WHERE settlement_transaction_hash = $1`, hash)
+		WHERE settlement_transaction_hash = $1 AND user_id = $2`, hash, userID)
 
 	return scanReconciliation(row)
 }
 
-func (r *ReconciliationRepository) FindByTargetTx(ctx context.Context, hash string) (entity.Reconciliation, error) {
+func (r *ReconciliationRepository) FindByTargetTx(ctx context.Context, hash string, userID uuid.UUID) (entity.Reconciliation, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, settlement_transaction_hash, target_transaction_hash, amount, reconciled_at
+		SELECT id, user_id, settlement_transaction_hash, target_transaction_hash, amount, reconciled_at
 		FROM reconciliations
-		WHERE target_transaction_hash = $1`, hash)
+		WHERE target_transaction_hash = $1 AND user_id = $2`, hash, userID)
 
 	return scanReconciliation(row)
 }
 
-func (r *ReconciliationRepository) FindAll(ctx context.Context) ([]entity.Reconciliation, error) {
+func (r *ReconciliationRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Reconciliation, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT 
 			r.id, 
+			r.user_id,
 			r.settlement_transaction_hash, 
 			r.target_transaction_hash, 
 			r.amount, 
@@ -104,11 +106,12 @@ func (r *ReconciliationRepository) FindAll(ctx context.Context) ([]entity.Reconc
 			bs_s.statement_type AS settlement_statement_type,
 			bs_t.statement_type AS target_statement_type
 		FROM reconciliations r
-		LEFT JOIN transactions s ON r.settlement_transaction_hash = s.content_hash
-		LEFT JOIN transactions t ON r.target_transaction_hash = t.content_hash
+		LEFT JOIN transactions s ON r.settlement_transaction_hash = s.content_hash AND r.user_id = s.user_id
+		LEFT JOIN transactions t ON r.target_transaction_hash = t.content_hash AND r.user_id = t.user_id
 		LEFT JOIN bank_statements bs_s ON s.bank_statement_id = bs_s.id
 		LEFT JOIN bank_statements bs_t ON t.bank_statement_id = bs_t.id
-		ORDER BY r.reconciled_at DESC`)
+		WHERE r.user_id = $1
+		ORDER BY r.reconciled_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("reconciliation repo: find all: %w", err)
 	}
@@ -122,6 +125,7 @@ func (r *ReconciliationRepository) FindAll(ctx context.Context) ([]entity.Reconc
 
 		err := rows.Scan(
 			&rec.ID,
+			&rec.UserID,
 			&rec.SettlementTransactionHash,
 			&rec.TargetTransactionHash,
 			&rec.Amount,
@@ -169,6 +173,7 @@ func scanReconciliation(row reconciliationScanner) (entity.Reconciliation, error
 	var rec entity.Reconciliation
 	err := row.Scan(
 		&rec.ID,
+		&rec.UserID,
 		&rec.SettlementTransactionHash,
 		&rec.TargetTransactionHash,
 		&rec.Amount,
@@ -177,7 +182,7 @@ func scanReconciliation(row reconciliationScanner) (entity.Reconciliation, error
 	return rec, err
 }
 
-func (r *ReconciliationRepository) Delete(ctx context.Context, id uuid.UUID) error {
+func (r *ReconciliationRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("reconciliation repo: begin tx: %w", err)
@@ -188,15 +193,18 @@ func (r *ReconciliationRepository) Delete(ctx context.Context, id uuid.UUID) err
 	_, err = tx.Exec(ctx, `
 		UPDATE transactions
 		SET is_reconciled = false, reconciliation_id = NULL
-		WHERE reconciliation_id = $1`, id)
+		WHERE reconciliation_id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return fmt.Errorf("reconciliation repo: unlink transactions: %w", err)
 	}
 
 	// Delete the actual reconciliation record
-	_, err = tx.Exec(ctx, `DELETE FROM reconciliations WHERE id = $1`, id)
+	tag, err := tx.Exec(ctx, `DELETE FROM reconciliations WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return fmt.Errorf("reconciliation repo: delete record: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("reconciliation repo: delete: not found: %s", id)
 	}
 
 	return tx.Commit(ctx)

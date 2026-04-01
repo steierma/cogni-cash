@@ -28,14 +28,17 @@ func NewBankStatementRepository(pool *pgxpool.Pool, logger *slog.Logger) *BankSt
 }
 
 func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStatement) error {
-	r.Logger.Info("Saving bank statement", "content_hash", stmt.ContentHash, "source_file", stmt.SourceFile)
+	r.Logger.Info("Saving bank statement", "content_hash", stmt.ContentHash, "source_file", stmt.SourceFile, "user_id", stmt.UserID)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("bank_statement repo: begin tx: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
 
-	stmtID := uuid.New()
+	stmtID := stmt.ID
+	if stmtID == uuid.Nil {
+		stmtID = uuid.New()
+	}
 
 	var statementDate *time.Time
 	if !stmt.StatementDate.IsZero() {
@@ -44,18 +47,18 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO bank_statements
-			(id, account_holder, iban, bic, account_number,
+			(id, user_id, account_holder, iban, bic, account_number,
 			 statement_date, statement_no,
 			 old_balance, new_balance, currency, source_file, original_file, content_hash, statement_type)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
-		stmtID, stmt.AccountHolder, stmt.IBAN, stmt.BIC, stmt.AccountNumber,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, $15)`,
+		stmtID, stmt.UserID, stmt.AccountHolder, stmt.IBAN, stmt.BIC, stmt.AccountNumber,
 		statementDate, stmt.StatementNo, stmt.OldBalance, stmt.NewBalance,
 		stmt.Currency, stmt.SourceFile, stmt.OriginalFile, stmt.ContentHash,
 		string(stmt.StatementType),
 	)
 	if err != nil {
 		if isDuplicateHashError(err) {
-			r.Logger.Warn("Duplicate bank statement detected", "content_hash", stmt.ContentHash)
+			r.Logger.Warn("Duplicate bank statement detected", "content_hash", stmt.ContentHash, "user_id", stmt.UserID)
 			return entity.ErrDuplicate
 		}
 		return fmt.Errorf("bank_statement repo: insert statement: %w", err)
@@ -70,11 +73,14 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 
 		batch.Queue(`
 			INSERT INTO transactions
-				(id, bank_statement_id, booking_date, valuta_date,
-				 description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-			ON CONFLICT (content_hash) DO NOTHING`,
+			        (id, user_id, bank_statement_id, booking_date, valuta_date,
+			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference,
+			         exchange_rate, amount_base_currency)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			ON CONFLICT (content_hash, user_id) DO NOTHING`,
 			uuid.New(),
+			stmt.UserID,
 			stmtID,
 			t.BookingDate,
 			t.ValutaDate,
@@ -88,6 +94,12 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			t.ContentHash,
 			string(t.StatementType),
 			t.Reviewed,
+			t.CounterpartyName,
+			t.CounterpartyIban,
+			t.BankTransactionCode,
+			t.MandateReference,
+			t.ExchangeRate,
+			t.AmountBaseCurrency,
 		)
 	}
 
@@ -120,11 +132,14 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 
 		batch.Queue(`
 			INSERT INTO transactions
-				(id, bank_account_id, booking_date, valuta_date,
-				 description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)
-			ON CONFLICT (content_hash) DO NOTHING`,
+			        (id, user_id, bank_account_id, booking_date, valuta_date,
+			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference,
+			         exchange_rate, amount_base_currency)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			ON CONFLICT (content_hash, user_id) DO NOTHING`,
 			t.ID,
+			t.UserID,
 			t.BankAccountID,
 			t.BookingDate,
 			t.ValutaDate,
@@ -138,6 +153,12 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			t.ContentHash,
 			string(t.StatementType),
 			t.Reviewed,
+			t.CounterpartyName,
+			t.CounterpartyIban,
+			t.BankTransactionCode,
+			t.MandateReference,
+			t.ExchangeRate,
+			t.AmountBaseCurrency,
 		)
 	}
 
@@ -154,16 +175,16 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 
 func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
 	query := `
-		SELECT t.booking_date, t.valuta_date, t.description, t.location, t.amount,
-		       t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
-		       t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-		       t.reviewed
-		FROM transactions t
-		LEFT JOIN bank_statements b ON t.bank_statement_id = b.id
+	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
+	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
+	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference,
+	               COALESCE(t.exchange_rate, 1.0), t.amount_base_currency
+	        FROM transactions t		LEFT JOIN bank_statements b ON t.bank_statement_id = b.id
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
-		WHERE 1=1`
+		WHERE t.user_id = $1`
 
-	var args []any
+	args := []any{filter.UserID}
 
 	addCondition := func(condition string, arg any) {
 		args = append(args, arg)
@@ -184,7 +205,7 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 	if filter.Search != "" {
 		args = append(args, "%"+filter.Search+"%")
 		idx := len(args)
-		query += fmt.Sprintf(" AND (t.description ILIKE $%d OR t.reference ILIKE $%d OR t.location ILIKE $%d)", idx, idx, idx)
+		query += fmt.Sprintf(" AND (t.description ILIKE $%d OR t.reference ILIKE $%d OR t.location ILIKE $%d OR t.counterparty_name ILIKE $%d OR t.counterparty_iban ILIKE $%d OR t.bank_transaction_code ILIKE $%d OR t.mandate_reference ILIKE $%d)", idx, idx, idx, idx, idx, idx, idx)
 	}
 	if filter.FromDate != nil {
 		addCondition("t.booking_date >=", *filter.FromDate)
@@ -204,6 +225,13 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 			query += ` AND t.is_reconciled = false`
 		} else {
 			query += ` AND t.is_reconciled = true`
+		}
+	}
+	if filter.Reviewed != nil {
+		if !*filter.Reviewed {
+			query += ` AND t.reviewed = false`
+		} else {
+			query += ` AND t.reviewed = true`
 		}
 	}
 	if filter.StatementType != nil {
@@ -230,17 +258,17 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 	return txns, rows.Err()
 }
 
-func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID uuid.UUID) ([]entity.Transaction, error) {
+func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT t.booking_date, t.valuta_date, t.description, t.location, t.amount,
-		       t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
-		       t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-		       t.reviewed
-		FROM transactions t
-		JOIN bank_statements b ON t.bank_statement_id = b.id
+	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
+	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
+	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference,
+	               COALESCE(t.exchange_rate, 1.0), t.amount_base_currency
+	        FROM transactions t		JOIN bank_statements b ON t.bank_statement_id = b.id
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
-		WHERE t.bank_statement_id = $1
-		ORDER BY t.booking_date DESC, t.id`, stmtID)
+		WHERE t.bank_statement_id = $1 AND t.user_id = $2
+		ORDER BY t.booking_date DESC, t.id`, stmtID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: load transactions: %w", err)
 	}
@@ -260,47 +288,72 @@ func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID u
 // scanTransaction scans a single transaction row. Shared by FindTransactions
 // and loadTransactions to avoid duplicating the nullable-column logic.
 func scanTransaction(row scanner) (entity.Transaction, error) {
-	var t entity.Transaction
-	var desc, loc, currency, txType, ref, stmtType *string
+        var t entity.Transaction
+        var desc, loc, currency, txType, ref, stmtType *string
+        var cpName, cpIban, bankTxCode, mandateRef *string
+        var amountBase *float64
 
-	if err := row.Scan(
-		&t.BookingDate,
-		&t.ValutaDate,
-		&desc,
-		&loc,
-		&t.Amount,
-		&currency,
-		&txType,
-		&ref,
-		&t.CategoryID,
-		&t.ContentHash,
-		&t.IsReconciled,
-		&t.ReconciliationID,
-		&stmtType,
-		&t.Reviewed,
-	); err != nil {
-		return entity.Transaction{}, err
-	}
+        if err := row.Scan(
+                &t.ID,
+                &t.UserID,
+                &t.BookingDate,
+                &t.ValutaDate,
+                &desc,
+                &loc,
+                &t.Amount,
+                &currency,
+                &txType,
+                &ref,
+                &t.CategoryID,
+                &t.ContentHash,
+                &t.IsReconciled,
+                &t.ReconciliationID,
+                &stmtType,
+                &t.Reviewed,
+                &cpName,
+                &cpIban,
+                &bankTxCode,
+                &mandateRef,
+                &t.ExchangeRate,
+                &amountBase,
+        ); err != nil {
+                return entity.Transaction{}, err
+        }
 
-	if desc != nil {
-		t.Description = *desc
-	}
-	if loc != nil {
-		t.Location = *loc
-	}
-	if currency != nil {
-		t.Currency = *currency
-	}
-	if ref != nil {
-		t.Reference = *ref
-	}
-	if txType != nil {
-		t.Type = entity.TransactionType(*txType)
-	}
-	if stmtType != nil {
-		t.StatementType = entity.StatementType(*stmtType)
-	}
-	return t, nil
+        if desc != nil {
+                t.Description = *desc
+        }
+        if loc != nil {
+                t.Location = *loc
+        }
+        if currency != nil {
+                t.Currency = *currency
+        }
+        if ref != nil {
+                t.Reference = *ref
+        }
+        if txType != nil {
+                t.Type = entity.TransactionType(*txType)
+        }
+        if stmtType != nil {
+                t.StatementType = entity.StatementType(*stmtType)
+        }
+        if cpName != nil {
+                t.CounterpartyName = *cpName
+        }
+        if cpIban != nil {
+                t.CounterpartyIban = *cpIban
+        }
+        if bankTxCode != nil {
+                t.BankTransactionCode = *bankTxCode
+        }
+        if mandateRef != nil {
+                t.MandateReference = *mandateRef
+        }
+        if amountBase != nil {
+                t.AmountBaseCurrency = *amountBase
+        }
+        return t, nil
 }
 
 func isDuplicateHashError(err error) bool {
@@ -311,32 +364,33 @@ func isDuplicateHashError(err error) bool {
 	return false
 }
 
-func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID) (entity.BankStatement, error) {
+func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.BankStatement, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, account_holder, iban, bic, account_number,
+		SELECT id, user_id, account_holder, iban, bic, account_number,
 		       statement_date, statement_no,
 		       old_balance, new_balance, currency, source_file, original_file, imported_at, statement_type
-		FROM bank_statements WHERE id = $1`, id)
+		FROM bank_statements WHERE id = $1 AND user_id = $2`, id, userID)
 
 	stmt, err := scanStatement(row)
 	if err != nil {
 		return entity.BankStatement{}, fmt.Errorf("bank_statement repo: find by id: %w", err)
 	}
 
-	stmt.Transactions, err = r.loadTransactions(ctx, id)
+	stmt.Transactions, err = r.loadTransactions(ctx, id, userID)
 	if err != nil {
 		return entity.BankStatement{}, err
 	}
 	return stmt, nil
 }
 
-func (r *BankStatementRepository) FindAll(ctx context.Context) ([]entity.BankStatement, error) {
+func (r *BankStatementRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.BankStatement, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, account_holder, iban, bic, account_number,
+		SELECT id, user_id, account_holder, iban, bic, account_number,
 		       statement_date, statement_no,
 		       old_balance, new_balance, currency, source_file, NULL::bytea as original_file, imported_at, statement_type
 		FROM bank_statements
-		ORDER BY statement_date DESC NULLS LAST, imported_at DESC`)
+		WHERE user_id = $1
+		ORDER BY statement_date DESC NULLS LAST, imported_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: find all: %w", err)
 	}
@@ -355,7 +409,7 @@ func (r *BankStatementRepository) FindAll(ctx context.Context) ([]entity.BankSta
 	}
 
 	for i := range stmts {
-		stmts[i].Transactions, err = r.loadTransactions(ctx, stmts[i].ID)
+		stmts[i].Transactions, err = r.loadTransactions(ctx, stmts[i].ID, userID)
 		if err != nil {
 			return nil, fmt.Errorf("bank_statement repo: load transactions for %s: %w", stmts[i].ID, err)
 		}
@@ -363,7 +417,7 @@ func (r *BankStatementRepository) FindAll(ctx context.Context) ([]entity.BankSta
 	return stmts, nil
 }
 
-func (r *BankStatementRepository) FindSummaries(ctx context.Context) ([]entity.BankStatementSummary, error) {
+func (r *BankStatementRepository) FindSummaries(ctx context.Context, userID uuid.UUID) ([]entity.BankStatementSummary, error) {
 	rows, err := r.pool.Query(ctx, `
 		SELECT
 			bs.id,
@@ -379,9 +433,10 @@ func (r *BankStatementRepository) FindSummaries(ctx context.Context) ([]entity.B
 			(bs.original_file IS NOT NULL AND length(bs.original_file) > 0) AS has_original_file
 		FROM bank_statements bs
 		LEFT JOIN transactions t ON t.bank_statement_id = bs.id
+		WHERE bs.user_id = $1
 		GROUP BY bs.id
 		ORDER BY end_date DESC NULLS LAST, bs.statement_date DESC
-	`)
+	`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: find summaries: %w", err)
 	}
@@ -446,21 +501,35 @@ func (r *BankStatementRepository) SearchTransactions(ctx context.Context, filter
 	return r.FindTransactions(ctx, filter)
 }
 
-func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, examplesPerCategory int) ([]entity.CategorizationExample, error) {
-	// For each category, get N unique transaction descriptions.
+func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesPerCategory int) ([]entity.CategorizationExample, error) {
+	// For each category, get N unique transaction combinations.
 	// We use a LATERAL join to perform this per-category.
 	query := `
-		SELECT c.name, t.description
+		SELECT 
+			c.name, 
+			t.description, 
+			t.reference, 
+			t.counterparty_name, 
+			t.counterparty_iban, 
+			t.bank_transaction_code, 
+			t.mandate_reference
 		FROM categories c
 		CROSS JOIN LATERAL (
-			SELECT DISTINCT description
+			SELECT DISTINCT 
+				description, 
+				reference, 
+				counterparty_name, 
+				counterparty_iban, 
+				bank_transaction_code, 
+				mandate_reference
 			FROM transactions
-			WHERE category_id = c.id
+			WHERE category_id = c.id AND user_id = $2
 			LIMIT $1
 		) t
+		WHERE c.user_id = $2
 		ORDER BY c.name, t.description`
 
-	rows, err := r.pool.Query(ctx, query, examplesPerCategory)
+	rows, err := r.pool.Query(ctx, query, examplesPerCategory, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: get examples: %w", err)
 	}
@@ -469,20 +538,41 @@ func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context,
 	var examples []entity.CategorizationExample
 	for rows.Next() {
 		var ex entity.CategorizationExample
-		if err := rows.Scan(&ex.Category, &ex.Description); err != nil {
+		var cpName, cpIban, bankTxCode, mandateRef *string
+		if err := rows.Scan(
+			&ex.Category,
+			&ex.Description,
+			&ex.Reference,
+			&cpName,
+			&cpIban,
+			&bankTxCode,
+			&mandateRef,
+		); err != nil {
 			return nil, err
+		}
+		if cpName != nil {
+			ex.CounterpartyName = *cpName
+		}
+		if cpIban != nil {
+			ex.CounterpartyIban = *cpIban
+		}
+		if bankTxCode != nil {
+			ex.BankTransactionCode = *bankTxCode
+		}
+		if mandateRef != nil {
+			ex.MandateReference = *mandateRef
 		}
 		examples = append(examples, ex)
 	}
 	return examples, rows.Err()
 }
 
-func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, contentHash string, categoryID *uuid.UUID) error {
+func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, contentHash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE transactions 
 		SET category_id = $1 
-		WHERE content_hash = $2`,
-		categoryID, contentHash)
+		WHERE content_hash = $2 AND user_id = $3`,
+		categoryID, contentHash, userID)
 
 	if err != nil {
 		return fmt.Errorf("bank_statement repo: update transaction category: %w", err)
@@ -493,12 +583,12 @@ func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context,
 	return nil
 }
 
-func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, contentHash string) error {
+func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, contentHash string, userID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE transactions
 		SET reviewed = true
-		WHERE content_hash = $1`,
-		contentHash)
+		WHERE content_hash = $1 AND user_id = $2`,
+		contentHash, userID)
 	if err != nil {
 		return fmt.Errorf("bank_statement repo: mark reviewed: %w", err)
 	}
@@ -508,12 +598,12 @@ func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, c
 	return nil
 }
 
-func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID) error {
+func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE transactions
 		SET is_reconciled = true, reconciliation_id = $1, reviewed = true
-		WHERE content_hash = $2`,
-		reconciliationID, contentHash)
+		WHERE content_hash = $2 AND user_id = $3`,
+		reconciliationID, contentHash, userID)
 	if err != nil {
 		return fmt.Errorf("bank_statement repo: mark reconciled: %w", err)
 	}
@@ -523,8 +613,24 @@ func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context,
 	return nil
 }
 
-func (r *BankStatementRepository) Delete(ctx context.Context, id uuid.UUID) error {
-	tag, err := r.pool.Exec(ctx, "DELETE FROM bank_statements WHERE id = $1", id)
+func (r *BankStatementRepository) LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE transactions
+		SET bank_statement_id = $1
+		WHERE id = $2 AND user_id = $3`,
+		statementID, id, userID)
+
+	if err != nil {
+		return fmt.Errorf("bank_statement repo: link transaction to statement: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return fmt.Errorf("bank_statement repo: transaction not found for linking: %s", id)
+	}
+	return nil
+}
+
+func (r *BankStatementRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	tag, err := r.pool.Exec(ctx, "DELETE FROM bank_statements WHERE id = $1 AND user_id = $2", id, userID)
 	if err != nil {
 		return fmt.Errorf("bank_statement repo: delete statement: %w", err)
 	}
@@ -532,7 +638,7 @@ func (r *BankStatementRepository) Delete(ctx context.Context, id uuid.UUID) erro
 		return fmt.Errorf("bank_statement repo: delete: statement not found: %s", id)
 	}
 
-	r.Logger.Info("Deleted bank statement and cascaded transactions", "statement_id", id)
+	r.Logger.Info("Deleted bank statement and cascaded transactions", "statement_id", id, "user_id", userID)
 	return nil
 }
 
@@ -551,6 +657,7 @@ func scanStatement(row scanner) (entity.BankStatement, error) {
 
 	err := row.Scan(
 		&s.ID,
+		&s.UserID,
 		&accHolder,
 		&iban,
 		&bic,

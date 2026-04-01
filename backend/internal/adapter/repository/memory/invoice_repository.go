@@ -51,59 +51,63 @@ func (r *InvoiceRepository) Save(ctx context.Context, invoice entity.Invoice) er
 func (r *InvoiceRepository) Update(ctx context.Context, invoice entity.Invoice) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.invoices[invoice.ID]; !ok {
+	old, ok := r.invoices[invoice.ID]
+	if !ok || old.UserID != invoice.UserID {
 		return entity.ErrInvoiceNotFound
 	}
 	r.invoices[invoice.ID] = invoice
 	return nil
 }
 
-func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID) (entity.Invoice, error) {
+func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	invoice, ok := r.invoices[id]
-	if !ok {
+	if !ok || invoice.UserID != userID {
 		return entity.Invoice{}, entity.ErrInvoiceNotFound
 	}
 	return invoice, nil
 }
 
-func (r *InvoiceRepository) FindAll(ctx context.Context) ([]entity.Invoice, error) {
+func (r *InvoiceRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var invoices []entity.Invoice
 	for _, inv := range r.invoices {
-		invoices = append(invoices, inv)
+		if inv.UserID == userID {
+			invoices = append(invoices, inv)
+		}
 	}
 	return invoices, nil
 }
 
-func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID) error {
+func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.invoices[id]; !ok {
+	inv, ok := r.invoices[id]
+	if !ok || inv.UserID != userID {
 		return entity.ErrInvoiceNotFound
 	}
 	delete(r.invoices, id)
 	return nil
 }
 
-func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string) (bool, error) {
+func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string, userID uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, inv := range r.invoices {
-		if inv.ContentHash == hash {
+		if inv.ContentHash == hash && inv.UserID == userID {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID) (content []byte, mimeType string, fileName string, err error) {
+func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) (content []byte, mimeType string, fileName string, err error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	inv, ok := r.invoices[id]
-	if !ok {
+	if !ok || inv.UserID != userID {
 		return nil, "", "", entity.ErrInvoiceNotFound
 	}
 	return inv.OriginalFileContent, inv.OriginalFileMime, inv.OriginalFileName, nil

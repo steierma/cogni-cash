@@ -24,6 +24,7 @@ import (
 
 	dynamicbank "cogni-cash/internal/adapter/bank/dynamic"
 	mockbank "cogni-cash/internal/adapter/bank/mock"
+	smtpadapter "cogni-cash/internal/adapter/email/smtp"
 	httpAdapter "cogni-cash/internal/adapter/http"
 	llmadapter "cogni-cash/internal/adapter/ollama"
 	aiparser "cogni-cash/internal/adapter/parser/bank_statement/ai"
@@ -43,10 +44,22 @@ import (
 )
 
 func main() {
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
+	logLevel := slog.LevelInfo
+	if strings.EqualFold(os.Getenv("LOG_LEVEL"), "debug") {
+		logLevel = slog.LevelDebug
+	}
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true, Level: logLevel}))
 	addr := envOrDefault("SERVER_ADDR", ":8080")
 
-	jwtSecret := envOrDefault("JWT_SECRET", "super-secret-default-key-change-me")
+	jwtSecret := os.Getenv("JWT_SECRET")
+	if jwtSecret == "" {
+		logger.Error("JWT_SECRET environment variable is NOT SET. This is a critical security risk. Exiting.")
+		os.Exit(1)
+	}
+	if jwtSecret == "super-secret-default-key-change-me" {
+		logger.Error("JWT_SECRET is set to the insecure default value. Exiting.")
+		os.Exit(1)
+	}
 	adminUsername := envOrDefault("ADMIN_USERNAME", "admin")
 	adminPassword := envOrDefault("ADMIN_PASSWORD", "")
 
@@ -68,17 +81,22 @@ func main() {
 	var reconciliationRepo port.ReconciliationRepository
 	var settingsRepo port.SettingsRepository
 	var payslipRepo port.PayslipRepository
+	var passwordResetRepo port.PasswordResetRepository
 
 	if storageMode == "memory" {
 		logger.Info("Using in-memory storage mode")
 		invoiceRepo = memrepo.NewInvoiceRepository()
-		bankStmtRepo = memrepo.NewBankStatementRepository()
-		bankRepo = memrepo.NewBankRepository()
 		categoryRepo = memrepo.NewCategoryRepository()
+		bankStmtRepo = memrepo.NewBankStatementRepository()
+		if mem, ok := bankStmtRepo.(*memrepo.BankStatementRepository); ok {
+			mem.WithCategoryRepository(categoryRepo)
+		}
+		bankRepo = memrepo.NewBankRepository()
 		userRepo = memrepo.NewUserRepository()
 		reconciliationRepo = memrepo.NewReconciliationRepository()
-		settingsRepo = memrepo.NewSettingsRepository()
+		settingsRepo = memrepo.NewSettingsRepository(userRepo)
 		payslipRepo = memrepo.NewPayslipRepository()
+		passwordResetRepo = memrepo.NewPasswordResetRepository()
 
 		dbPinger = func(ctx context.Context) error { return nil }
 		dbHost = "memory"
@@ -113,11 +131,18 @@ func main() {
 		categoryRepo = pgrepo.NewCategoryRepository(pool, logger)
 		userRepo = pgrepo.NewUserRepository(pool, logger)
 		reconciliationRepo = pgrepo.NewReconciliationRepository(pool, bankStmtRepo, logger)
-		settingsRepo = pgrepo.NewSettingsRepository(pool, logger)
+		settingsRepo = pgrepo.NewSettingsRepository(pool, userRepo, logger)
 		payslipRepo = pgrepo.NewPayslipRepository(pool)
+		passwordResetRepo = pgrepo.NewPasswordResetRepository(pool, logger)
 	}
 
-	ensureDefaultSettings(appCtx, settingsRepo, logger)
+	admin, _ := userRepo.FindByUsername(appCtx, "admin")
+	adminID := uuid.Nil
+	if admin.ID != uuid.Nil {
+		adminID = admin.ID
+	}
+
+	ensureDefaultSettings(appCtx, settingsRepo, userRepo, logger)
 
 	// --- Lade Enable Banking Key aus Environment ---
 	ebPrivateKey, err := loadEnableBankingKey(logger)
@@ -126,7 +151,7 @@ func main() {
 	}
 
 	// --- Instantiate Services ---
-	authSvc := service.NewAuthService(userRepo, jwtSecret, logger)
+	authSvc := service.NewAuthService(userRepo, passwordResetRepo, nil, settingsRepo, jwtSecret, logger)
 	if err := authSvc.EnsureAdminUser(appCtx, adminUsername, adminPassword); err != nil {
 		logger.Error("Failed to seed default admin user", "error", err)
 	}
@@ -135,11 +160,14 @@ func main() {
 	llmClient := llmadapter.NewAdapter(settingsRepo, logger)
 	settingsSvc := service.NewSettingsService(settingsRepo, logger)
 
-	// Load categories once at startup (used by InvoiceService for LLM prompts).
-	initialCategories, _ := categoryRepo.FindAll(appCtx)
+	emailProvider := smtpadapter.NewAdapter(settingsRepo, logger)
+	notificationSvc := service.NewNotificationService(emailProvider, userRepo, logger)
+
+	// Inject notificationSvc into authSvc after it's created
+	authSvc = service.NewAuthService(userRepo, passwordResetRepo, notificationSvc, settingsRepo, jwtSecret, logger)
 
 	invoiceFileParser := invoiceparser.NewParser()
-	invoiceSvc := service.NewInvoiceService(invoiceRepo, invoiceFileParser, llmClient, initialCategories, logger)
+	invoiceSvc := service.NewInvoiceService(invoiceRepo, categoryRepo, invoiceFileParser, llmClient, logger)
 
 	bankStatementSvc := service.NewBankStatementService(bankStmtRepo, logger)
 	transactionSvc := service.NewTransactionService(bankStmtRepo, categoryRepo, settingsRepo, llmClient, logger)
@@ -179,8 +207,8 @@ func main() {
 	go func() {
 		logger.Info("Background worker: Auto-import started")
 		for {
-			dir, _ := settingsRepo.Get(appCtx, "import_dir")
-			intervalStr, _ := settingsRepo.Get(appCtx, "import_interval")
+			dir, _ := settingsRepo.Get(appCtx, "import_dir", adminID)
+			intervalStr, _ := settingsRepo.Get(appCtx, "import_interval", adminID)
 
 			interval, err := time.ParseDuration(intervalStr)
 			if err != nil || interval < time.Minute {
@@ -188,7 +216,7 @@ func main() {
 			}
 
 			if dir != "" {
-				runImport(appCtx, bankStatementSvc, dir, logger)
+				runImport(appCtx, bankStatementSvc, adminID, dir, logger)
 			}
 
 			select {
@@ -203,8 +231,8 @@ func main() {
 	go func() {
 		logger.Info("Background worker: Auto-categorization started")
 		for {
-			enabledStr, _ := settingsRepo.Get(appCtx, "auto_categorization_enabled")
-			intervalStr, _ := settingsRepo.Get(appCtx, "auto_categorization_interval")
+			enabledStr, _ := settingsRepo.Get(appCtx, "auto_categorization_enabled", adminID)
+			intervalStr, _ := settingsRepo.Get(appCtx, "auto_categorization_interval", adminID)
 
 			interval, err := time.ParseDuration(intervalStr)
 			if err != nil || interval < time.Minute {
@@ -212,18 +240,21 @@ func main() {
 			}
 
 			if enabledStr == "true" {
-				batchSizeStr, _ := settingsRepo.Get(appCtx, "auto_categorization_batch_size")
+				batchSizeStr, _ := settingsRepo.Get(appCtx, "auto_categorization_batch_size", adminID)
 				batchSize := 10
 				if bs, err := strconv.Atoi(batchSizeStr); err == nil && bs > 0 {
 					batchSize = bs
 				}
 
-				if err := transactionSvc.StartAutoCategorizeAsync(appCtx, batchSize); err != nil {
-					if !errors.Is(err, service.ErrJobAlreadyRunning) && !errors.Is(err, service.ErrNothingToCategorize) {
-						logger.Error("Autocategorization tick error", "error", err)
+				users, err := userRepo.FindAll(appCtx, "")
+				if err == nil {
+					for _, u := range users {
+						if err := transactionSvc.StartAutoCategorizeAsync(appCtx, u.ID, batchSize); err != nil {
+							if !errors.Is(err, service.ErrJobAlreadyRunning) && !errors.Is(err, service.ErrNothingToCategorize) {
+								logger.Error("Autocategorization tick error for user", "user_id", u.ID, "error", err)
+							}
+						}
 					}
-				} else {
-					logger.Info("Auto-categorization job triggered via schedule", "batch_size", batchSize)
 				}
 			}
 
@@ -239,8 +270,8 @@ func main() {
 	go func() {
 		logger.Info("Background worker: Payslip JSON import started")
 		for {
-			jsonPath, _ := settingsRepo.Get(appCtx, "payslip_import_json_path")
-			intervalStr, _ := settingsRepo.Get(appCtx, "payslip_import_interval")
+			jsonPath, _ := settingsRepo.Get(appCtx, "payslip_import_json_path", adminID)
+			intervalStr, _ := settingsRepo.Get(appCtx, "payslip_import_interval", adminID)
 
 			interval, err := time.ParseDuration(intervalStr)
 			if err != nil || interval < time.Minute {
@@ -248,7 +279,7 @@ func main() {
 			}
 
 			if jsonPath != "" {
-				runPayslipJSONImport(appCtx, payslipSvc, jsonPath, logger)
+				runPayslipJSONImport(appCtx, payslipSvc, adminID, jsonPath, logger)
 			}
 
 			select {
@@ -263,7 +294,7 @@ func main() {
 	go func() {
 		logger.Info("Background worker: Smart Bank Sync started")
 		for {
-			enabledStr, _ := settingsRepo.Get(appCtx, "bank_sync_enabled")
+			enabledStr, _ := settingsRepo.Get(appCtx, "bank_sync_enabled", adminID)
 			if enabledStr != "true" {
 				select {
 				case <-appCtx.Done():
@@ -273,7 +304,7 @@ func main() {
 				}
 			}
 
-			nextSyncStr, _ := settingsRepo.Get(appCtx, "bank_sync_next_run")
+			nextSyncStr, _ := settingsRepo.Get(appCtx, "bank_sync_next_run", adminID)
 			var nextSync time.Time
 			if nextSyncStr != "" {
 				nextSync, _ = time.Parse(time.RFC3339, nextSyncStr)
@@ -303,7 +334,7 @@ func main() {
 
 				nextSync = time.Date(nextDate.Year(), nextDate.Month(), nextDate.Day(), randomHour, randomMinute, 0, 0, now.Location())
 
-				_ = settingsRepo.Set(appCtx, "bank_sync_next_run", nextSync.Format(time.RFC3339))
+				_ = settingsRepo.Set(appCtx, "bank_sync_next_run", nextSync.Format(time.RFC3339), adminID)
 				logger.Info("Smart bank sync finished. Next sync scheduled.", "at", nextSync.Format(time.RFC3339))
 			}
 
@@ -322,6 +353,7 @@ func main() {
 
 	handler.WithUserService(userSvc)
 	handler.WithTransactionService(transactionSvc)
+	handler.WithNotificationService(notificationSvc)
 	handler.WithReconciliationService(reconciliationSvc)
 	handler.WithBankService(bankSvc)
 	handler.WithBankStatementRepository(bankStmtRepo)
@@ -377,7 +409,13 @@ func envOrDefault(key, def string) string {
 	return def
 }
 
-func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, logger *slog.Logger) {
+func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, userRepo port.UserRepository, logger *slog.Logger) {
+	admin, _ := userRepo.FindByUsername(ctx, "admin")
+	adminID := uuid.Nil
+	if admin.ID != uuid.Nil {
+		adminID = admin.ID
+	}
+
 	defaults := map[string]string{
 		"llm_api_url":                    envOrDefault("OLLAMA_URL", "http://localhost:11434"),
 		"llm_api_token":                  "",
@@ -396,9 +434,12 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, lo
 		"bank_sync_enabled":                         "true",
 		"bank_sync_interval":                        "1h",
 		"bank_sync_next_run":                        "",
-		"gocardless_secret_id":                      envOrDefault("GOCARDLESS_SECRET_ID", ""),
-		"gocardless_secret_key":                     envOrDefault("GOCARDLESS_SECRET_KEY", ""),
 		"enablebanking_app_id":                      envOrDefault("ENABLEBANKING_APP_ID", ""),
+		"smtp_host":                                 envOrDefault("SMTP_HOST", ""),
+		"smtp_port":                                 envOrDefault("SMTP_PORT", "587"),
+		"smtp_user":                                 envOrDefault("SMTP_USER", ""),
+		"smtp_password":                             envOrDefault("SMTP_PASSWORD", ""),
+		"smtp_from_email":                           envOrDefault("SMTP_FROM_EMAIL", "noreply@cognicash.local"),
 	}
 
 	envOverrideKeys := map[string]string{
@@ -406,15 +447,20 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, lo
 		"payslip_import_interval":  "PAYSLIP_IMPORT_INTERVAL",
 		"import_dir":               "IMPORT_DIR",
 		"import_interval":          "IMPORT_INTERVAL",
+		"smtp_host":                "SMTP_HOST",
+		"smtp_port":                "SMTP_PORT",
+		"smtp_user":                "SMTP_USER",
+		"smtp_password":            "SMTP_PASSWORD",
+		"smtp_from_email":          "SMTP_FROM_EMAIL",
 	}
 
 	for k, v := range defaults {
-		existing, _ := repo.Get(ctx, k)
+		existing, _ := repo.Get(ctx, k, adminID)
 
 		if envKey, ok := envOverrideKeys[k]; ok {
 			envVal, envSet := os.LookupEnv(envKey)
 			if envSet && envVal != existing {
-				if err := repo.Set(ctx, k, envVal); err != nil {
+				if err := repo.Set(ctx, k, envVal, adminID); err != nil {
 					logger.Warn("Failed to sync env setting to DB", "key", k, "error", err)
 				}
 			}
@@ -422,15 +468,15 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, lo
 		}
 
 		if existing == "" {
-			if err := repo.Set(ctx, k, v); err != nil {
+			if err := repo.Set(ctx, k, v, adminID); err != nil {
 				logger.Warn("Failed to set default setting", "key", k, "error", err)
 			}
 		}
 	}
 }
 
-func runImport(ctx context.Context, svc *service.BankStatementService, dir string, logger *slog.Logger) {
-	count, errs := svc.ImportFromDirectory(ctx, dir)
+func runImport(ctx context.Context, svc *service.BankStatementService, userID uuid.UUID, dir string, logger *slog.Logger) {
+	count, errs := svc.ImportFromDirectory(ctx, userID, dir)
 	if len(errs) > 0 {
 		logger.Error("Directory import completed with errors", "imported_count", count, "errors_count", len(errs))
 		for _, err := range errs {
@@ -441,8 +487,8 @@ func runImport(ctx context.Context, svc *service.BankStatementService, dir strin
 	}
 }
 
-func runPayslipJSONImport(ctx context.Context, svc *service.PayslipService, jsonPath string, logger *slog.Logger) {
-	imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, jsonPath)
+func runPayslipJSONImport(ctx context.Context, svc *service.PayslipService, userID uuid.UUID, jsonPath string, logger *slog.Logger) {
+	imported, skipped, errs, fatalErr := svc.ImportFromJSONFile(ctx, userID, jsonPath)
 	if fatalErr != nil {
 		logger.Error("Payslip JSON import: fatal error", "file", jsonPath, "error", fatalErr)
 		return
@@ -551,9 +597,10 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 	catMap := make(map[string]uuid.UUID)
 	for _, c := range categories {
 		cat, _ := catRepo.Save(ctx, entity.Category{
-			ID:    uuid.New(),
-			Name:  c.name,
-			Color: c.color,
+			ID:     uuid.New(),
+			UserID: adminID,
+			Name:   c.name,
+			Color:  c.color,
 		})
 		catMap[c.name] = cat.ID
 	}
@@ -564,7 +611,7 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 		UserID:          adminID,
 		InstitutionID:   "SANDBOX_ID",
 		InstitutionName: "Sandbox Bank",
-		Provider:        "gocardless",
+		Provider:        "enablebanking",
 		Status:          entity.StatusLinked,
 	}
 	_ = bankRepo.CreateConnection(ctx, &conn)

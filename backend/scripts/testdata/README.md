@@ -28,15 +28,16 @@ personal data is present.
 1. Import **both** files via the Import page (or `POST /api/v1/bank-statements/import`).
 2. On the Import page, note the **statement UUID** shown under the Amazon Visa XLS result.
 3. Open the **Transactions** page, filter to the Girokonto March statement, and copy the
-   `ContentHash` of the `14.03.2026 − −2.500,00` row (hover the row or use the API).
+   `ContentHash` of the `14.03.2026  −2.500,00` row. Do the same for the **Credit Card** statement
+   and copy its `ContentHash` (they should both exist in the `transactions` table).
 4. Reconcile:
    ```bash
    curl -X POST http://localhost:8080/api/v1/reconciliations \
      -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" \
      -d '{
-       "settlement_tx_hash":      "<content_hash from step 3>",
-       "credit_card_statement_id": "<uuid from step 2>"
+       "settlement_tx_hash": "<settlement content_hash>",
+       "target_tx_hash":     "<target content_hash>"
      }'
    ```
 5. The Girokonto settlement row is now flagged **Reconciled** (amber badge in the UI)

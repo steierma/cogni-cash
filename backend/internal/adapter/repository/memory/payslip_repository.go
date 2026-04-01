@@ -47,43 +47,45 @@ func (r *PayslipRepository) Save(ctx context.Context, payslip *entity.Payslip) e
 	return nil
 }
 
-func (r *PayslipRepository) ExistsByHash(ctx context.Context, hash string) (bool, error) {
+func (r *PayslipRepository) ExistsByHash(ctx context.Context, hash string, userID uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, p := range r.payslips {
-		if p.ContentHash == hash {
+		if p.ContentHash == hash && p.UserID == userID {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (r *PayslipRepository) ExistsByOriginalFileName(ctx context.Context, originalFileName string) (bool, error) {
+func (r *PayslipRepository) ExistsByOriginalFileName(ctx context.Context, originalFileName string, userID uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, p := range r.payslips {
-		if p.OriginalFileName == originalFileName {
+		if p.OriginalFileName == originalFileName && p.UserID == userID {
 			return true, nil
 		}
 	}
 	return false, nil
 }
 
-func (r *PayslipRepository) FindAll(ctx context.Context) ([]entity.Payslip, error) {
+func (r *PayslipRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Payslip, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var payslips []entity.Payslip
 	for _, p := range r.payslips {
-		payslips = append(payslips, p)
+		if p.UserID == userID {
+			payslips = append(payslips, p)
+		}
 	}
 	return payslips, nil
 }
 
-func (r *PayslipRepository) FindByID(ctx context.Context, id string) (entity.Payslip, error) {
+func (r *PayslipRepository) FindByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	p, ok := r.payslips[id]
-	if !ok {
+	if !ok || p.UserID != userID {
 		return entity.Payslip{}, entity.ErrPayslipNotFound
 	}
 	return p, nil
@@ -92,28 +94,30 @@ func (r *PayslipRepository) FindByID(ctx context.Context, id string) (entity.Pay
 func (r *PayslipRepository) Update(ctx context.Context, payslip *entity.Payslip) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.payslips[payslip.ID]; !ok {
+	old, ok := r.payslips[payslip.ID]
+	if !ok || old.UserID != payslip.UserID {
 		return entity.ErrPayslipNotFound
 	}
 	r.payslips[payslip.ID] = *payslip
 	return nil
 }
 
-func (r *PayslipRepository) Delete(ctx context.Context, id string) error {
+func (r *PayslipRepository) Delete(ctx context.Context, id string, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.payslips[id]; !ok {
+	p, ok := r.payslips[id]
+	if !ok || p.UserID != userID {
 		return entity.ErrPayslipNotFound
 	}
 	delete(r.payslips, id)
 	return nil
 }
 
-func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string) ([]byte, string, string, error) {
+func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, userID uuid.UUID) ([]byte, string, string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	p, ok := r.payslips[id]
-	if !ok {
+	if !ok || p.UserID != userID {
 		return nil, "", "", entity.ErrPayslipNotFound
 	}
 	return p.OriginalFileContent, p.OriginalFileMime, p.OriginalFileName, nil

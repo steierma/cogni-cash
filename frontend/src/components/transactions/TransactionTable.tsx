@@ -1,9 +1,9 @@
 import { useTranslation } from 'react-i18next';
-import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin } from 'lucide-react';
+import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User } from 'lucide-react';
 import type { Category, Transaction } from '../../api/types';
 import { fmtCurrency, fmtDate } from '../../utils/formatters';
 
-export type TxColKey = 'date' | 'description' | 'location' | 'reference' | 'category' | 'amount';
+export type TxColKey = 'date' | 'description' | 'counterparty' | 'location' | 'reference' | 'category' | 'amount';
 export type SortKey = 'booking_date' | 'description' | 'location' | 'amount';
 export type SortDir = 'asc' | 'desc';
 
@@ -36,8 +36,10 @@ export default function TransactionTable({
                                          }: TransactionTableProps) {
     const { t } = useTranslation();
 
-    const SortIcon = ({ k }: { k: SortKey }) =>
-        sortKey === k ? (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null;
+    const renderSortIcon = (k: SortKey) => {
+        if (sortKey !== k) return null;
+        return sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />;
+    };
 
     return (
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden relative">
@@ -57,19 +59,31 @@ export default function TransactionTable({
 
                         {visibleCols.date && (
                             <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none whitespace-nowrap" onClick={() => onSort('booking_date')}>
-                                <span className="inline-flex items-center gap-1">{t('transactions.table.date', 'Date')} <SortIcon k="booking_date" /></span>
+                                <span className="inline-flex items-center gap-1">{t('transactions.table.date', 'Date')} {renderSortIcon('booking_date')}</span>
                             </th>
                         )}
 
-                        {visibleCols.description && (
-                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none" onClick={() => onSort('description')}>
-                                <span className="inline-flex items-center gap-1">{t('transactions.table.description', 'Description')} <SortIcon k="description" /></span>
+                        {(visibleCols.description || visibleCols.counterparty) && (
+                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none align-top"
+                                onClick={() => onSort('description')}
+                            >
+                                <div className="flex flex-col gap-0.5">
+                                    <span className="inline-flex items-center gap-1">
+                                        {t('transactions.table.description', 'Description')}
+                                        {renderSortIcon('description')}
+                                    </span>
+                                    {visibleCols.counterparty && (
+                                        <span className="text-xs font-normal text-gray-500 dark:text-gray-400 normal-case">
+                                            {t('transactions.table.counterparty', 'Counterparty')}
+                                        </span>
+                                    )}
+                                </div>
                             </th>
                         )}
 
                         {visibleCols.location && (
                             <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none" onClick={() => onSort('location')}>
-                                <span className="inline-flex items-center gap-1">{t('transactions.table.location', 'Location')} <SortIcon k="location" /></span>
+                                <span className="inline-flex items-center gap-1">{t('transactions.table.location', 'Location')} {renderSortIcon('location')}</span>
                             </th>
                         )}
 
@@ -83,7 +97,7 @@ export default function TransactionTable({
 
                         {visibleCols.amount && (
                             <th className="px-4 py-3 text-right cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none" onClick={() => onSort('amount')}>
-                                <span className="inline-flex items-center gap-1 justify-end">{t('transactions.table.amount', 'Amount')} <SortIcon k="amount" /></span>
+                                <span className="inline-flex items-center gap-1 justify-end">{t('transactions.table.amount', 'Amount')} {renderSortIcon('amount')}</span>
                             </th>
                         )}
                         <th className="px-4 py-3 text-right w-20">{t('common.actions', 'Actions')}</th>
@@ -96,7 +110,7 @@ export default function TransactionTable({
 
                         return (
                             <tr key={tx.content_hash} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''} ${tx.is_reconciled ? 'opacity-60' : ''}`}>
-                                <td className="px-4 py-3">
+                                <td className="px-4 py-3 align-top pt-4">
                                     <button
                                         type="button"
                                         onClick={() => onToggleSelect(tx.content_hash)}
@@ -107,34 +121,51 @@ export default function TransactionTable({
                                 </td>
 
                                 {visibleCols.date && (
-                                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
+                                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap align-top pt-4">
                                         {fmtDate(tx.booking_date)}
                                     </td>
                                 )}
 
-                                {visibleCols.description && (
-                                    <td className="px-4 py-3 text-gray-800 dark:text-gray-200 max-w-xs truncate" title={tx.description}>
-                                            <span className="flex items-center gap-1.5">
-                                                {!tx.reviewed && (
-                                                    <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 animate-pulse" title={t('transactions.table.unreviewed', 'New / Unreviewed')} />
-                                                )}
-                                                {tx.is_reconciled && (
-                                                    <span title={t('transactions.table.reconciled')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 shrink-0">
-                                                        <Unlink size={9} /> {t('transactions.table.reconciled')}
+                                {visibleCols.description  && (
+                                    <td className="px-4 py-3 align-top pt-3.5 max-w-xs">
+                                        <div className="flex flex-col gap-1">
+                                            {visibleCols.description && (
+                                                <span className="flex items-center gap-1.5 text-gray-800 dark:text-gray-200 truncate" title={tx.description}>
+                                                    {!tx.reviewed && (
+                                                        <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 animate-pulse" title={t('transactions.table.unreviewed', 'New / Unreviewed')} />
+                                                    )}
+                                                    {tx.is_reconciled && (
+                                                        <span title={t('transactions.table.reconciled')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 shrink-0">
+                                                            <Unlink size={9} /> {t('transactions.table.reconciled')}
+                                                        </span>
+                                                    )}
+                                                    {!tx.bank_statement_id && (
+                                                        <span title={t('transactions.table.liveFeed')} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0">
+                                                            {t('transactions.table.liveFeed')}
+                                                        </span>
+                                                    )}
+                                                    <span className="truncate">{tx.description}</span>
+                                                </span>
+                                            )}
+                                            <span className="text-gray-500 dark:text-gray-400 text-xs truncate max-w-[12rem]"
+                                                  title={[tx.counterparty_name, tx.counterparty_iban, tx.bank_transaction_code].filter(Boolean).join(' · ')}>
+                                                {tx.counterparty_name ? (
+                                                    <span className="flex items-center gap-1">
+                                                        <User size={12} className="opacity-70 shrink-0" />
+                                                        <span className="truncate">{tx.counterparty_name}</span>
                                                     </span>
+                                                ) : tx.bank_transaction_code ? (
+                                                    <span className="opacity-60 italic">{tx.bank_transaction_code}</span>
+                                                ) : (
+                                                    <span className="opacity-50">—</span>
                                                 )}
-                                                {!tx.bank_statement_id && (
-                                                    <span title={t('transactions.table.liveFeed')} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0">
-                                                        {t('transactions.table.liveFeed')}
-                                                    </span>
-                                                )}
-                                                {tx.description}
                                             </span>
+                                        </div>
                                     </td>
                                 )}
 
                                 {visibleCols.location && (
-                                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs max-w-[10rem] truncate" title={tx.location}>
+                                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs max-w-[10rem] truncate align-top pt-4" title={tx.location}>
                                         {tx.location ? (
                                             <span className="flex items-center gap-1">
                                                     <MapPin size={12} className="opacity-70" /> {tx.location}
@@ -146,7 +177,7 @@ export default function TransactionTable({
                                 )}
 
                                 {visibleCols.reference && (
-                                    <td className="px-4 py-3 text-gray-400 dark:text-gray-500 text-xs max-w-[10rem] truncate" title={tx.reference}>
+                                    <td className="px-4 py-3 text-gray-400 dark:text-gray-500 text-xs max-w-[10rem] truncate align-top pt-4" title={tx.reference}>
                                         <div className="flex items-center justify-between gap-2">
                                             <span className="truncate">{tx.reference || '—'}</span>
                                             <button type="button" onClick={() => navigator.clipboard.writeText(tx.content_hash)} className="text-gray-300 dark:text-gray-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0">
@@ -157,7 +188,7 @@ export default function TransactionTable({
                                 )}
 
                                 {visibleCols.category && (
-                                    <td className="px-4 py-3">
+                                    <td className="px-4 py-3 align-top pt-3.5">
                                         <select
                                             value={currentCat?.id ?? ''}
                                             onChange={(e) => onCategoryChange(tx.content_hash, e.target.value)}
@@ -173,14 +204,14 @@ export default function TransactionTable({
                                 )}
 
                                 {visibleCols.amount && (
-                                    <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap ${tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                                    <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
                                             <span className="inline-flex items-center gap-1 justify-end w-full">
                                                 {tx.amount >= 0 ? <TrendingUp size={11} className="text-green-500 dark:text-green-400" /> : <TrendingDown size={11} className="text-red-400 dark:text-red-500" />}
                                                 {fmtCurrency(tx.amount, tx.currency)}
                                             </span>
                                     </td>
                                 )}
-                                <td className="px-4 py-3 text-right">
+                                <td className="px-4 py-3 text-right align-top pt-3.5">
                                     {!tx.reviewed && (
                                         <button
                                             onClick={() => onMarkReviewed?.(tx.content_hash)}

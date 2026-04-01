@@ -10,19 +10,21 @@ import (
 // BankStatementRepository defines the storage operations for Bank Statements.
 type BankStatementRepository interface {
 	Save(ctx context.Context, stmt entity.BankStatement) error
-	FindByID(ctx context.Context, id uuid.UUID) (entity.BankStatement, error)
-	FindAll(ctx context.Context) ([]entity.BankStatement, error)
+	FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.BankStatement, error)
+	FindAll(ctx context.Context, userID uuid.UUID) ([]entity.BankStatement, error)
 
-	FindSummaries(ctx context.Context) ([]entity.BankStatementSummary, error)
+	FindSummaries(ctx context.Context, userID uuid.UUID) ([]entity.BankStatementSummary, error)
 	FindTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
 
 	SearchTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
-	GetCategorizationExamples(ctx context.Context, examplesPerCategory int) ([]entity.CategorizationExample, error)
-	UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID) error
-	MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID) error
-	MarkTransactionReviewed(ctx context.Context, contentHash string) error
+	GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesPerCategory int) ([]entity.CategorizationExample, error)
+	UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
+	MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error
+	MarkTransactionReviewed(ctx context.Context, contentHash string, userID uuid.UUID) error
+
+	LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error
 
 	CreateTransactions(ctx context.Context, txns []entity.Transaction) error
 
-	Delete(ctx context.Context, id uuid.UUID) error
+	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 }

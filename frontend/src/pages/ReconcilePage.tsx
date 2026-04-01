@@ -88,8 +88,9 @@ const ReconciliationRow = memo(({ suggestion, isSelected, onToggle, t }: Reconci
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">
                         <p><span className="font-medium">{t('reconcile.date')}</span> {fmtDate(source.booking_date, 'short')}</p>
-                        <p className="truncate" title={source.description}>
-                            <span className="font-medium">{t('reconcile.ref')}</span> {source.description}
+                        <p className="truncate mt-1" title={[source.counterparty_name, source.description].filter(Boolean).join(' · ')}>
+                            {source.counterparty_name && <span className="font-bold text-gray-900 dark:text-gray-100 mr-1.5">{source.counterparty_name}</span>}
+                            <span className="font-medium text-gray-500">{t('reconcile.ref')}</span> {source.description}
                         </p>
                     </div>
                 </div>
@@ -113,8 +114,9 @@ const ReconciliationRow = memo(({ suggestion, isSelected, onToggle, t }: Reconci
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">
                         <p><span className="font-medium">{t('reconcile.date')}</span> {fmtDate(target.booking_date, 'short')}</p>
-                        <p className="truncate" title={target.description}>
-                            <span className="font-medium">{t('reconcile.ref')}</span> {target.description}
+                        <p className="truncate mt-1" title={[target.counterparty_name, target.description].filter(Boolean).join(' · ')}>
+                            {target.counterparty_name && <span className="font-bold text-gray-900 dark:text-gray-100 mr-1.5">{target.counterparty_name}</span>}
+                            <span className="font-medium text-gray-500">{t('reconcile.ref')}</span> {target.description}
                         </p>
                     </div>
                 </div>
@@ -200,11 +202,14 @@ export default function ReconcilePage() {
         const lowerTerm = searchTerm.toLowerCase();
         return activeSuggestions.filter(sugg => {
             const sourceDesc = (sugg.source_transaction.description || '').toLowerCase();
+            const sourceCp = (sugg.source_transaction.counterparty_name || '').toLowerCase();
             const targetDesc = (sugg.target_transaction.description || '').toLowerCase();
+            const targetCp = (sugg.target_transaction.counterparty_name || '').toLowerCase();
             const sourceRef = (sugg.source_transaction.reference || '').toLowerCase();
             const targetRef = (sugg.target_transaction.reference || '').toLowerCase();
             const sourceAmt = Math.abs(sugg.source_transaction.amount).toString();
             return sourceDesc.includes(lowerTerm) || targetDesc.includes(lowerTerm) ||
+                sourceCp.includes(lowerTerm) || targetCp.includes(lowerTerm) ||
                 sourceRef.includes(lowerTerm) || targetRef.includes(lowerTerm) || sourceAmt.includes(lowerTerm);
         });
     }, [activeSuggestions, searchTerm]);
@@ -268,9 +273,10 @@ export default function ReconcilePage() {
             if (appliedManualFilters.search) {
                 const term = appliedManualFilters.search;
                 const desc = (tx.description || '').toLowerCase();
+                const cp = (tx.counterparty_name || '').toLowerCase();
                 const ref = (tx.reference || '').toLowerCase();
                 const amt = Math.abs(tx.amount).toString();
-                if (!desc.includes(term) && !ref.includes(term) && !amt.includes(term)) return false;
+                if (!desc.includes(term) && !cp.includes(term) && !ref.includes(term) && !amt.includes(term)) return false;
             }
             return true;
         });
@@ -371,11 +377,21 @@ export default function ReconcilePage() {
                                     <ReconciliationRow key={`${sugg.source_transaction.content_hash}-${sugg.target_transaction.content_hash}`} suggestion={sugg} isSelected={!deselectedHashes[sugg.source_transaction.content_hash]} onToggle={(hash) => setDeselectedHashes(prev => ({ ...prev, [hash]: !prev[hash] }))} t={t} />
                                 ))}
                             </div>
-                            <button onClick={() => reconcileBatchMutation.mutate(pairsToLink)} disabled={pairsToLink.length === 0 || reconcileBatchMutation.isPending} className="w-full flex justify-center items-center gap-2 text-sm font-medium px-4 py-3 rounded-xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-sm">
-                                <Link2 size={18} />
-                                {reconcileBatchMutation.isPending ? t('reconcile.updating') : t('reconcile.linkCount', { count: pairsToLink.length })}
-                                {searchTerm && pairsToLink.length > visibleSelectedCount && (<span className="opacity-75 text-xs ml-2">({t('reconcile.includesHidden')})</span>)}
-                            </button>
+
+                            {/* Floating Bulk Link Button */}
+                            {pairsToLink.length > 0 && (
+                                <div className="fixed bottom-6 left-1/2 -translate-x-1/2 z-50 animate-in fade-in slide-in-from-bottom-4 duration-300 w-[95%] sm:w-auto">
+                                    <button
+                                        onClick={() => reconcileBatchMutation.mutate(pairsToLink)}
+                                        disabled={reconcileBatchMutation.isPending}
+                                        className="w-full flex justify-center items-center gap-2 text-sm font-bold px-8 py-4 rounded-2xl bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-40 disabled:cursor-not-allowed transition-all shadow-2xl shadow-indigo-500/20 border border-indigo-500/50 hover:-translate-y-1 active:scale-95"
+                                    >
+                                        <Link2 size={18} />
+                                        {reconcileBatchMutation.isPending ? t('reconcile.updating') : t('reconcile.linkCount', { count: pairsToLink.length })}
+                                        {searchTerm && pairsToLink.length > visibleSelectedCount && (<span className="opacity-75 text-xs ml-2">({t('reconcile.includesHidden')})</span>)}
+                                    </button>
+                                </div>
+                            )}
                         </div>
                     )}
                 </div>
@@ -463,8 +479,15 @@ export default function ReconcilePage() {
                                                 <span className="font-mono font-bold text-gray-900 dark:text-gray-100">{fmtCurrency(tx.amount, tx.currency)}</span>
                                                 <span className="text-xs text-gray-500">{fmtDate(tx.booking_date, 'short')}</span>
                                             </div>
-                                            <div className="flex items-center gap-2 mb-1"><AccountBadge type={tx.statement_type} t={t} /></div>
-                                            <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2" title={tx.description}>{tx.description}</p>
+                                            <div className="flex items-center gap-2 mb-2"><AccountBadge type={tx.statement_type} t={t} /></div>
+                                            <div>
+                                                {tx.counterparty_name && (
+                                                    <div className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate mb-0.5" title={tx.counterparty_name}>
+                                                        {tx.counterparty_name}
+                                                    </div>
+                                                )}
+                                                <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2" title={tx.description}>{tx.description}</p>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>
@@ -484,8 +507,15 @@ export default function ReconcilePage() {
                                                 <span className="font-mono font-bold text-emerald-600 dark:text-emerald-400">+{fmtCurrency(tx.amount, tx.currency)}</span>
                                                 <span className="text-xs text-gray-500">{fmtDate(tx.booking_date, 'short')}</span>
                                             </div>
-                                            <div className="flex items-center gap-2 mb-1"><AccountBadge type={tx.statement_type} t={t} /></div>
-                                            <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2" title={tx.description}>{tx.description}</p>
+                                            <div className="flex items-center gap-2 mb-2"><AccountBadge type={tx.statement_type} t={t} /></div>
+                                            <div>
+                                                {tx.counterparty_name && (
+                                                    <div className="text-xs font-bold text-gray-900 dark:text-gray-100 truncate mb-0.5" title={tx.counterparty_name}>
+                                                        {tx.counterparty_name}
+                                                    </div>
+                                                )}
+                                                <p className="text-xs text-gray-600 dark:text-gray-400 line-clamp-2" title={tx.description}>{tx.description}</p>
+                                            </div>
                                         </div>
                                     ))}
                                 </div>

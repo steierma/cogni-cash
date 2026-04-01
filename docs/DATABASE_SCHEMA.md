@@ -1,4 +1,4 @@
-# Database Schema
+~~~~# Database Schema
 
 > **Host:** configured via `DATABASE_HOST` / `DATABASE_PORT` in `backend/.env`
 > **Database:** configured via `POSTGRES_DB` in `backend/.env`
@@ -22,11 +22,11 @@
     - [payslip_bonuses](#payslip_bonuses)
     - [bank_connections](#bank_connections)
     - [bank_accounts](#bank_accounts)
+    - [password_reset_tokens](#password_reset_tokens)
 3. [Indexes & Constraints](#indexes--constraints)
-4. [Triggers](#triggers)
-5. [Deduplication via Content Hash](#deduplication-via-content-hash)
-6. [Reconciliation](#reconciliation)
-7. [Migration History](#migration-history)
+4. [Deduplication via Content Hash](#deduplication-via-content-hash)
+5. [Reconciliation](#reconciliation)
+6. [Migration History](#migration-history)
 
 ---
 
@@ -37,6 +37,7 @@
 │       categories        │          │         bank_statements          │
 ├─────────────────────────┤          ├──────────────────────────────────┤
 │ id (PK)                 │          │ id (PK)                          │
+│ user_id (FK)            │          │ user_id (FK)                     │
 │ name                    │          │ account_holder                   │
 │ color                   │          │ iban                             │
 │ created_at              │          │ bic                              │
@@ -48,20 +49,24 @@
              │                       │ source_file                      │
              │                       │ content_hash (UQ)                │
              │                       │ statement_type                   │
-             │                       │ is_reconciled                    │
              │                       │ bank_account_id (FK)             │
-             │                       │ created_at                       │
+             │                       │ imported_at                      │
              │                       └─────────────────┬────────────────┘
              │                                         │ (1:N)
              │ (1:N)                 ┌─────────────────▼────────────────┐
              │                       │           transactions           │
              │                       ├──────────────────────────────────┤
              │                       │ id (PK)                          │
+             │                       │ user_id (FK)                     │
              │                       │ bank_statement_id (FK)           │
              │                       │ bank_account_id (FK)             │
              │                       │ booking_date                     │
              │                       │ valuta_date                      │
              │                       │ description                      │
+             │                       │ counterparty_name                │
+             │                       │ counterparty_iban                │
+             │                       │ bank_transaction_code            │
+             │                       │ mandate_reference                │
              │                       │ location                         │
              │                       │ amount                           │
              │                       │ currency                         │
@@ -73,13 +78,13 @@
              │                       │ reconciliation_id (FK)           │
              │                       │ reviewed                         │
              │                       │ statement_type                   │
-             │                       │ created_at                       │
              │                       └─────────────────┬────────────────┘
              │                                         │
              │ (1:N)                 ┌─────────────────▼────────────────┐
              │                       │          reconciliations         │
              ├───────────────────────┤──────────────────────────────────┤
              │                       │ id (PK)                          │
+             │                       │ user_id (FK)                     │
              │                       │ settlement_transaction_hash (FK)  │
              │                       │ target_transaction_hash (FK)      │
              │                       │ amount                           │
@@ -90,6 +95,7 @@
              │                       │             invoices             │
              ├───────────────────────┤──────────────────────────────────┤
              │                       │ id (PK)                          │
+             │                       │ user_id (FK)                     │
              │                       │ vendor                           │
              │                       │ category_id (FK)                 │
              │                       │ amount                           │
@@ -109,6 +115,7 @@
              │                       │             payslips             │
              └───────────────────────┤──────────────────────────────────┤
                                      │ id (PK)                          │
+                                     │ user_id (FK)                     │
                                      │ source_file                      │
                                      │ original_file_name               │
                                      │ original_file_mime               │
@@ -118,6 +125,7 @@
                                      │ period_month_num                 │
                                      │ period_year                      │
                                      │ employee_name                    │
+                                     │ employer_name                    │
                                      │ tax_class                        │
                                      │ tax_id                           │
                                      │ gross_pay                        │
@@ -140,9 +148,9 @@
 ┌─────────────────────────┐          ┌─────────────────────────┐
 │          users          │          │        settings         │
 ├─────────────────────────┤          ├─────────────────────────┤
-│ id (PK)                 │          │ key (PK)                │
-│ username (UQ)           │          │ value                   │
-│ password_hash           │          │ updated_at              │
+│ id (PK)                 │          │ key (PK, part)          │
+│ username (UQ)           │          │ user_id (PK, FK)        │
+│ password_hash           │          │ value                   │
 │ email (UQ)              │          └─────────────────────────┘
 │ full_name               │
 │ address                 │
@@ -151,8 +159,18 @@
 └────────────┬────────────┘
              │
              │ (1:N)                 ┌──────────────────────────────────┐
+             │                       │      password_reset_tokens       │
+             ├───────────────────────┤──────────────────────────────────┤
+             │                       │ id (PK)                          │
+             │                       │ user_id (FK)                     │
+             │                       │ token_hash (UQ)                  │
+             │                       │ expires_at                       │
+             │                       │ created_at                       │
+             │                       └──────────────────────────────────┘
+             │
+             │ (1:N)                 ┌──────────────────────────────────┐
              │                       │         bank_connections         │
-             └───────────────────────┤──────────────────────────────────┤
+             └───────────────────────┤──────────────────────────────────┘
                                      │ id (PK)                          │
                                      │ user_id (FK)                     │
                                      │ institution_id                   │
@@ -177,6 +195,7 @@
                                      │ balance                          │
                                      │ last_synced_at                   │
                                      │ account_type                     │
+                                     │ last_sync_error                  │
                                      └──────────────────────────────────┘
 ```
 
@@ -207,14 +226,17 @@ Manages system access, authentication (JWT), and role-based permissions (RBAC).
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
 ### `categories`
-Stores classification tags used across the application.
+Stores classification tags used across the application. Per-user namespace.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
-| `name` | `TEXT` | `NOT NULL`, `UNIQUE` | The category name (e.g., 'Groceries') |
+| `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `name` | `TEXT` | `NOT NULL` | The category name (e.g., 'Groceries') |
 | `color` | `TEXT` | `NOT NULL`, `DEFAULT '#6366f1'` | Hex color code for UI badges |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+
+**Constraints:** `UNIQUE (name, user_id)`
 
 ### `bank_statements`
 Represents imported bank statement files (PDF, CSV, XLS).
@@ -222,6 +244,7 @@ Represents imported bank statement files (PDF, CSV, XLS).
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `account_holder`| `TEXT` | `NOT NULL` | Name on the account |
 | `iban` | `TEXT` | `NOT NULL` | Standardized account number |
 | `bic` | `TEXT` | `NOT NULL` | Bank identifier code |
@@ -233,9 +256,8 @@ Represents imported bank statement files (PDF, CSV, XLS).
 | `source_file` | `TEXT` | `NOT NULL` | Original filename |
 | `content_hash` | `VARCHAR(64)` | `NOT NULL`, `UNIQUE` | SHA-256 hash for deduplication |
 | `statement_type`| `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'giro'` | 'giro', 'credit_card', or 'extra_account' |
-| `is_reconciled` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | True if all balance transfers are settled |
 | `bank_account_id`| `UUID` | `FK (bank_accounts.id)`, `ON DELETE SET NULL` | Parent bank account (API connection) |
-| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+| `imported_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
 ### `transactions`
 Contains both file-imported and API-synced financial transactions.
@@ -243,7 +265,8 @@ Contains both file-imported and API-synced financial transactions.
 | Column | Type | Constraints | Description |
 | :--- | :--- | :--- | :--- |
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
-| `bank_statement_id`| `UUID` | `FK (bank_statements.id)`, `ON DELETE CASCADE` | Parent statement (for file imports) |
+| `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `bank_statement_id`| `UUID` | `FK (bank_statements.id)`, `ON DELETE CASCADE` | Parent statement (nullable for API syncs) |
 | `bank_account_id`| `UUID` | `FK (bank_accounts.id)`, `ON DELETE SET NULL` | Parent bank account (for API syncs) |
 | `booking_date` | `DATE` | `NOT NULL` | Date transaction was booked |
 | `valuta_date` | `DATE` | `NOT NULL` | Value date |
@@ -258,8 +281,7 @@ Contains both file-imported and API-synced financial transactions.
 | `is_reconciled` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | True if part of an internal transfer |
 | `reconciliation_id` | `UUID` | `FK (reconciliations.id)`, `ON DELETE SET NULL` | Linked reconciliation record |
 | `reviewed` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | True if user has acknowledged the transaction |
-| `statement_type`| `TEXT` | `NOT NULL`, `DEFAULT 'giro'` | 'giro', 'credit_card', or 'extra_account' |
-| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+| `statement_type`| `TEXT` | | 'giro', 'credit_card', or 'extra_account' |
 
 ### `reconciliations`
 Links a settlement payment (from a Giro account) to a target transaction (Credit Card or Extra Account) via content hashes.
@@ -267,6 +289,7 @@ Links a settlement payment (from a Giro account) to a target transaction (Credit
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `settlement_transaction_hash` | `TEXT` | `NOT NULL`, `UNIQUE` | The hash of the debit transaction |
 | `target_transaction_hash` | `TEXT` | `UNIQUE` | The hash of the credit transaction |
 | `amount` | `NUMERIC(15,2)`| `NOT NULL` | The absolute transferred amount |
@@ -278,6 +301,7 @@ Stores parsed and auto-categorized invoices.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `vendor` | `TEXT` | `NOT NULL` | Vendor or company name extracted by LLM |
 | `category_id` | `UUID` | `FK (categories.id)`, `ON DELETE SET NULL` | Assigned category |
 | `amount` | `NUMERIC(12,2)`| `NOT NULL` | Total invoice amount |
@@ -293,13 +317,15 @@ Stores parsed and auto-categorized invoices.
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
 ### `settings`
-Key-value store for application configuration (e.g., LLM prompts, import intervals).
+Key-value store for application configuration. Per-user settings.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
-| `key` | `TEXT` | `PK` | The setting identifier string |
+| `key` | `TEXT` | `PK` (part) | The setting identifier string |
+| `user_id` | `UUID` | `PK`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `value` | `TEXT` | `NOT NULL` | The configured value |
-| `updated_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Timestamp of last change |
+
+**Constraints:** `PRIMARY KEY (key, user_id)`
 
 ### `payslips`
 Structured payroll information parsed from HR documents.
@@ -307,6 +333,7 @@ Structured payroll information parsed from HR documents.
 | Column | Type | Constraints | Description |
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `source_file` | `VARCHAR(255)`| | Name or path of the original file |
 | `original_file_name` | `VARCHAR(255)`| `NOT NULL` | Stored filename |
 | `original_file_mime` | `VARCHAR(100)`| | MIME type of the stored document |
@@ -316,6 +343,7 @@ Structured payroll information parsed from HR documents.
 | `period_month_num` | `INT` | | 1-12 representing the payroll month |
 | `period_year` | `INT` | `NOT NULL` | Payroll year |
 | `employee_name` | `VARCHAR(100)`| `NOT NULL` | Extracted employee name |
+| `employer_name` | `VARCHAR(100)`| `NOT NULL`, `DEFAULT 'Unknown'` | Extracted employer name |
 | `tax_class` | `VARCHAR(10)` | | E.g., '1', '3', '4' |
 | `tax_id` | `VARCHAR(50)` | | Tax identification number |
 | `gross_pay` | `NUMERIC(12,2)`| `NOT NULL` | Total gross salary |
@@ -323,6 +351,8 @@ Structured payroll information parsed from HR documents.
 | `payout_amount` | `NUMERIC(12,2)`| `NOT NULL` | Final transferred amount to bank account |
 | `custom_deductions`| `NUMERIC(12,2)`| `NOT NULL`, `DEFAULT 0` | E.g., Leasing rates |
 | `created_at` | `TIMESTAMPTZ` | `DEFAULT CURRENT_TIMESTAMP` | Record creation timestamp |
+
+**Constraints:** `UNIQUE (user_id, period_month_num, period_year, employer_name)`
 
 ### `payslip_bonuses`
 Variable compensation components extracted from payslips.
@@ -365,6 +395,18 @@ Stores individual accounts under a connection.
 | `balance` | `NUMERIC(15,2)`| `NOT NULL`, `DEFAULT 0` | Cached balance |
 | `last_synced_at` | `TIMESTAMPTZ` | | Last successful data fetch |
 | `account_type` | `TEXT` | `NOT NULL`, `DEFAULT 'giro'` | 'giro', 'credit_card', or 'extra_account' |
+| `last_sync_error` | `TEXT` | | Error message from last failed sync |
+
+### `password_reset_tokens`
+Stores temporary, hashed security tokens for the "Forgot Password" flow.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `NOT NULL`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `token_hash` | `TEXT` | `NOT NULL`, `UNIQUE` | SHA-256 hash of the random token |
+| `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Token expiration timestamp |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
 ---
 
@@ -372,7 +414,7 @@ Stores individual accounts under a connection.
 
 To ensure data integrity and optimal query performance:
 
-- **Primary Keys:** Every table uses a `UUID` generated via `gen_random_uuid()` (except `settings` which uses a TEXT key).
+- **Primary Keys:** Every table uses a `UUID` generated via `gen_random_uuid()` (except `settings` which uses a composite key of `key` and `user_id`).
 - **Foreign Keys:**
     - `transactions.bank_statement_id` -> `bank_statements(id)` (`ON DELETE CASCADE`)
     - `transactions.bank_account_id` -> `bank_accounts(id)` (`ON DELETE SET NULL`)
@@ -383,23 +425,19 @@ To ensure data integrity and optimal query performance:
     - `transactions.category_id` -> `categories(id)` (`ON DELETE SET NULL`)
     - `invoices.category_id` -> `categories(id)` (`ON DELETE SET NULL`)
     - `transactions.reconciliation_id` -> `reconciliations(id)` (`ON DELETE SET NULL`)
+    - All tenant-specific tables point to `users(id)` (`ON DELETE CASCADE`).
 - **Uniqueness:**
     - `users.username` and `users.email`
-    - `categories.name`
+    - `categories(name, user_id)` composite uniqueness
     - `content_hash` on `bank_statements`, `transactions`, `invoices`, and `payslips`
     - `reconciliations.settlement_transaction_hash` and `reconciliations.target_transaction_hash`
-    - `payslips(period_month_num, period_year, employee_name)` composite unique constraint.
+    - `payslips(user_id, period_month_num, period_year, employer_name)` composite unique constraint.
 - **Performance Indexes:**
     - `idx_transactions_date_amt` on `transactions(booking_date, amount)`
     - `idx_payslips_period` on `payslips(period_year, period_month_num)`
     - `idx_transactions_bank_account_id` on `transactions(bank_account_id)`
     - `idx_bank_statements_bank_account_id` on `bank_statements(bank_account_id)`
-
----
-
-## Triggers
-
-1. **`trg_update_settings_updated_at`**: Automatically fires before any `UPDATE` on the `settings` table to set the `updated_at` column to `NOW()`.
+    - `idx_reset_tokens_hash` on `password_reset_tokens(token_hash)`
 
 ---
 
@@ -422,19 +460,7 @@ Reconciliation prevents internal transfers from inflating analytics metrics.
 
 1. **Pairing**: A `reconciliations` record links a debit from a `giro` account (e.g., settling a credit card bill) to a credit on a `credit_card` account using their unique `content_hash`.
 2. **Transaction State**: Both transactions have their `is_reconciled` flag set to `TRUE` and their `reviewed` flag set to `TRUE`. The transactions are linked to the reconciliation record via `reconciliation_id`.
-3. **Statement State**: When a `credit_card` or `extra_account` statement has all of its incoming settlement payments linked, its `is_reconciled` flag can be set to `TRUE`, effectively marking it "done" and hiding it from the pending reconciliation wizard.
-
----
-
-## Bank Integration (PSD2 / GoCardless)
-
-The system supports real-time bank synchronization through aggregators.
-
-### `bank_connections`
-Table for storing external bank API authorization state (e.g., GoCardless Requisitions).
-
-### `bank_accounts`
-Table for storing individual accounts under a connection.
+3. **Statement State**: When a `credit_card` or `extra_account` statement has all of its incoming settlement payments linked, its `is_reconciled` flag can be set to `TRUE`.
 
 ---
 
@@ -442,10 +468,14 @@ Table for storing individual accounts under a connection.
 
 Migrations are plain SQL files in `backend/migrations/`, applied in lexicographic order.
 
-1.  **`001_initial_schema.sql`**: Baseline schema containing all tables, constraints, triggers, and indices.
+1.  **`001_initial_schema.sql`**: Baseline schema containing all initial tables, constraints, and indices.
 2.  **`002_add_invoice_content_hash.sql`**: Adds file storage fields, `description`, and `content_hash` to the `invoices` table.
 3.  **`003_add_bank_integration.sql`**: Adds `bank_connections` and `bank_accounts` tables. Modifies `transactions` and `bank_statements` to support linking to live accounts.
 4.  **`004_add_bank_provider.sql`**: Adds `provider` column to `bank_connections` for multi-aggregator support.
 5.  **`005_add_bank_account_type.sql`**: Adds `account_type` to `bank_accounts` table and `statement_type` to `transactions`.
 6.  **`006_add_transaction_location.sql`**: Adds `location` column to `transactions` table.
 7.  **`007_add_transaction_reviewed.sql`**: Adds `reviewed` boolean column to `transactions` table for user acknowledgement.
+8.  **`008_add_password_reset_tokens.sql`**: Adds `password_reset_tokens` table for the secure forgot-password flow.
+9.  **`009_add_bank_account_sync_error.sql`**: Adds `last_sync_error` to `bank_accounts` table for transparent error reporting.
+10. **`010_add_user_tenancy.sql`**: Implements multi-tenancy by adding `user_id` to all relevant tables and updating constraints.
+10. **`011_enrich_transactions.sql`**: Adds `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and `mandate_reference` to transactions for improved categorization and reconciliation.

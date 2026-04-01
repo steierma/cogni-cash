@@ -22,6 +22,7 @@ type BankStatementRepository struct {
 	stmtOrder    []uuid.UUID
 	transactions map[string]entity.Transaction // keyed by ContentHash
 	txOrder      []string                      // for standalone transactions
+	categoryRepo port.CategoryRepository
 }
 
 func NewBankStatementRepository() *BankStatementRepository {
@@ -31,6 +32,12 @@ func NewBankStatementRepository() *BankStatementRepository {
 		transactions: make(map[string]entity.Transaction),
 		txOrder:      make([]string, 0, maxTransactions),
 	}
+}
+
+func (r *BankStatementRepository) WithCategoryRepository(catRepo port.CategoryRepository) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.categoryRepo = catRepo
 }
 
 func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStatement) error {
@@ -68,41 +75,45 @@ func (r *BankStatementRepository) deleteStatement(id uuid.UUID) {
 	}
 }
 
-func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID) (entity.BankStatement, error) {
+func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.BankStatement, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	stmt, ok := r.statements[id]
-	if !ok {
+	if !ok || stmt.UserID != userID {
 		return entity.BankStatement{}, entity.ErrBankStatementNotFound
 	}
 	return stmt, nil
 }
 
-func (r *BankStatementRepository) FindAll(ctx context.Context) ([]entity.BankStatement, error) {
+func (r *BankStatementRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.BankStatement, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var stmts []entity.BankStatement
 	for _, stmt := range r.statements {
-		stmts = append(stmts, stmt)
+		if stmt.UserID == userID {
+			stmts = append(stmts, stmt)
+		}
 	}
 	return stmts, nil
 }
 
-func (r *BankStatementRepository) FindSummaries(ctx context.Context) ([]entity.BankStatementSummary, error) {
+func (r *BankStatementRepository) FindSummaries(ctx context.Context, userID uuid.UUID) ([]entity.BankStatementSummary, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var summaries []entity.BankStatementSummary
 	for _, stmt := range r.statements {
-		summaries = append(summaries, entity.BankStatementSummary{
-			ID:               stmt.ID,
-			StatementNo:      stmt.StatementNo,
-			IBAN:             stmt.IBAN,
-			Currency:         stmt.Currency,
-			NewBalance:       stmt.NewBalance,
-			TransactionCount: len(stmt.Transactions),
-			StatementType:    stmt.StatementType,
-			HasOriginalFile:  len(stmt.OriginalFile) > 0,
-		})
+		if stmt.UserID == userID {
+			summaries = append(summaries, entity.BankStatementSummary{
+				ID:               stmt.ID,
+				StatementNo:      stmt.StatementNo,
+				IBAN:             stmt.IBAN,
+				Currency:         stmt.Currency,
+				NewBalance:       stmt.NewBalance,
+				TransactionCount: len(stmt.Transactions),
+				StatementType:    stmt.StatementType,
+				HasOriginalFile:  len(stmt.OriginalFile) > 0,
+			})
+		}
 	}
 	return summaries, nil
 }
@@ -112,7 +123,7 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 	defer r.mu.RUnlock()
 	var txns []entity.Transaction
 	for _, tx := range r.transactions {
-		if r.matchFilter(tx, filter) {
+		if tx.UserID == filter.UserID && r.matchFilter(tx, filter) {
 			txns = append(txns, tx)
 		}
 	}
@@ -123,62 +134,67 @@ func (r *BankStatementRepository) SearchTransactions(ctx context.Context, filter
 	return r.FindTransactions(ctx, filter)
 }
 
-func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, examplesPerCategory int) ([]entity.CategorizationExample, error) {
+func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesPerCategory int) ([]entity.CategorizationExample, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
-	// Use a map to track unique descriptions per category
-	// map[categoryID]map[description]bool
-	catExamples := make(map[uuid.UUID]map[string]bool)
+	// map[categoryID][]entity.CategorizationExample
+	catExamples := make(map[uuid.UUID][]entity.CategorizationExample)
 
 	for _, tx := range r.transactions {
-		if tx.CategoryID == nil {
+		if tx.CategoryID == nil || tx.UserID != userID {
 			continue
 		}
 
 		if _, ok := catExamples[*tx.CategoryID]; !ok {
-			catExamples[*tx.CategoryID] = make(map[string]bool)
+			catExamples[*tx.CategoryID] = make([]entity.CategorizationExample, 0)
 		}
 
 		if len(catExamples[*tx.CategoryID]) < examplesPerCategory {
-			catExamples[*tx.CategoryID][tx.Description] = true
+			// Check for uniqueness based on description + reference
+			isDuplicate := false
+			for _, existing := range catExamples[*tx.CategoryID] {
+				if existing.Description == tx.Description && existing.Reference == tx.Reference {
+					isDuplicate = true
+					break
+				}
+			}
+			if !isDuplicate {
+				catExamples[*tx.CategoryID] = append(catExamples[*tx.CategoryID], entity.CategorizationExample{
+					Description:         tx.Description,
+					Reference:           tx.Reference,
+					CounterpartyName:    tx.CounterpartyName,
+					CounterpartyIban:    tx.CounterpartyIban,
+					BankTransactionCode: tx.BankTransactionCode,
+					MandateReference:    tx.MandateReference,
+				})
+			}
 		}
 	}
 
 	var examples []entity.CategorizationExample
-	// To get the category names, we would ideally need access to catRepo or have them in the transaction.
-	// Since port.BankStatementRepository doesn't have category names, and we are in the adapter,
-	// we have a slight architectural constraint.
-	// However, most Transactions in memory mode are seeded with a category name in the description? No.
-	// Let's assume for the mock that we just return what we have if we can map it.
-	// Actually, let's just return descriptions and a placeholder if we don't have the name,
-	// but wait, the port expects category name.
+	for catID, exList := range catExamples {
+		catName := catID.String()
+		if r.categoryRepo != nil {
+			if c, err := r.categoryRepo.FindByID(ctx, catID, userID); err == nil {
+				catName = c.Name
+			}
+		}
 
-	// I will use a simple trick: if I don't have the category name here, I'll return the ID string
-	// and let the service handle it if needed, but better:
-	// I'll update the Memory repository to store category names if possible? No.
-
-	// Re-evaluating: In Memory mode, we know the names because we seed them.
-	// But the repo itself doesn't know them.
-	// Let's just return what we can.
-
-	for catID, descs := range catExamples {
-		for d := range descs {
-			examples = append(examples, entity.CategorizationExample{
-				Category:    catID.String(), // Fallback to ID string
-				Description: d,
-			})
+		for _, ex := range exList {
+			ex.Category = catName
+			examples = append(examples, ex)
 		}
 	}
 
 	return examples, nil
 }
 
-func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID) error {
+func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tx, ok := r.transactions[hash]
-	if !ok {
+	if !ok || tx.UserID != userID {
 		return entity.ErrTransactionNotFound
 	}
 	tx.CategoryID = categoryID
@@ -186,11 +202,11 @@ func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context,
 	return nil
 }
 
-func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, hash string) error {
+func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tx, ok := r.transactions[hash]
-	if !ok {
+	if !ok || tx.UserID != userID {
 		return entity.ErrTransactionNotFound
 	}
 	tx.Reviewed = true
@@ -198,11 +214,11 @@ func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, h
 	return nil
 }
 
-func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID) error {
+func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tx, ok := r.transactions[contentHash]
-	if !ok {
+	if !ok || tx.UserID != userID {
 		return entity.ErrTransactionNotFound
 	}
 	tx.ReconciliationID = &reconciliationID
@@ -210,6 +226,19 @@ func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context,
 	tx.Reviewed = true
 	r.transactions[contentHash] = tx
 	return nil
+}
+
+func (r *BankStatementRepository) LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for hash, tx := range r.transactions {
+		if tx.ID == id && tx.UserID == userID {
+			tx.BankStatementID = &statementID
+			r.transactions[hash] = tx
+			return nil
+		}
+	}
+	return entity.ErrTransactionNotFound
 }
 
 func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns []entity.Transaction) error {
@@ -230,10 +259,11 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 	return nil
 }
 
-func (r *BankStatementRepository) Delete(ctx context.Context, id uuid.UUID) error {
+func (r *BankStatementRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.statements[id]; !ok {
+	stmt, ok := r.statements[id]
+	if !ok || stmt.UserID != userID {
 		return entity.ErrBankStatementNotFound
 	}
 

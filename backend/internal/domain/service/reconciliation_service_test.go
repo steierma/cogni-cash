@@ -28,7 +28,7 @@ func TestReconciliationService_DeleteReconciliation_Success(t *testing.T) {
 	}
 	reconcRepo.saved = append(reconcRepo.saved, rec)
 
-	err := svc.DeleteReconciliation(context.Background(), rec.ID)
+	err := svc.DeleteReconciliation(context.Background(), rec.ID, uuid.New())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -37,7 +37,7 @@ func TestReconciliationService_DeleteReconciliation_Success(t *testing.T) {
 func TestReconciliationService_DeleteReconciliation_NilRepo(t *testing.T) {
 	svc := service.NewReconciliationService(&mockRepo{}, nil, setupLogger())
 
-	err := svc.DeleteReconciliation(context.Background(), uuid.New())
+	err := svc.DeleteReconciliation(context.Background(), uuid.New(), uuid.New())
 	if err == nil {
 		t.Error("expected error when reconciliation repo is nil")
 	}
@@ -47,7 +47,7 @@ func TestReconciliationService_DeleteReconciliation_RepoError(t *testing.T) {
 	reconcRepo := &mockReconciliationRepo{err: errors.New("db error")}
 	svc := service.NewReconciliationService(&mockRepo{}, reconcRepo, setupLogger())
 
-	err := svc.DeleteReconciliation(context.Background(), uuid.New())
+	err := svc.DeleteReconciliation(context.Background(), uuid.New(), uuid.New())
 	if err == nil {
 		t.Error("expected error when repo returns error")
 	}
@@ -75,7 +75,7 @@ func TestReconcileStatements_SameAccount(t *testing.T) {
 	reconcRepo := &mockReconciliationRepo{}
 	svc := service.NewReconciliationService(repo, reconcRepo, setupLogger())
 
-	_, err := svc.ReconcileStatements(context.Background(), "giro1", "giro2")
+	_, err := svc.ReconcileStatements(context.Background(), uuid.New(), "giro1", "giro2")
 	if !errors.Is(err, service.ErrSameAccount) {
 		t.Errorf("expected ErrSameAccount, got %v", err)
 	}
@@ -84,7 +84,7 @@ func TestReconcileStatements_SameAccount(t *testing.T) {
 func TestReconcileStatements_NilReconciliationRepo(t *testing.T) {
 	svc := service.NewReconciliationService(&mockRepo{}, nil, setupLogger())
 
-	_, err := svc.ReconcileStatements(context.Background(), "hash1", "hash2")
+	_, err := svc.ReconcileStatements(context.Background(), uuid.New(), "hash1", "hash2")
 	if err == nil {
 		t.Error("expected error when reconciliation repo is nil")
 	}
@@ -102,7 +102,7 @@ func TestReconcileStatements_TargetNotFound(t *testing.T) {
 	reconcRepo := &mockReconciliationRepo{}
 	svc := service.NewReconciliationService(repo, reconcRepo, setupLogger())
 
-	_, err := svc.ReconcileStatements(context.Background(), "exists", "missing")
+	_, err := svc.ReconcileStatements(context.Background(), uuid.New(), "exists", "missing")
 	if err == nil {
 		t.Error("expected error for missing target transaction")
 	}
@@ -118,7 +118,7 @@ func TestReconciliationService_SuggestReconciliations_DefaultWindow(t *testing.T
 	}
 	svc := service.NewReconciliationService(repo, nil, setupLogger())
 
-	suggestions, err := svc.SuggestReconciliations(context.Background(), 0)
+	suggestions, err := svc.SuggestReconciliations(context.Background(), uuid.New(), 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -138,7 +138,7 @@ func TestReconciliationService_SuggestReconciliations_SkipsSameAccount(t *testin
 	}
 	svc := service.NewReconciliationService(repo, nil, setupLogger())
 
-	suggestions, err := svc.SuggestReconciliations(context.Background(), 7)
+	suggestions, err := svc.SuggestReconciliations(context.Background(), uuid.New(), 7)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -150,7 +150,7 @@ func TestReconciliationService_SuggestReconciliations_SkipsSameAccount(t *testin
 func TestReconciliationService_NilLogger(t *testing.T) {
 	// Should not panic with nil logger
 	svc := service.NewReconciliationService(&mockRepo{}, &mockReconciliationRepo{}, nil)
-	_, err := svc.SuggestReconciliations(context.Background(), 7)
+	_, err := svc.SuggestReconciliations(context.Background(), uuid.New(), 7)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

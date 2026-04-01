@@ -26,14 +26,16 @@ type mockParser struct {
 	err    error
 }
 
-func (m *mockParser) Parse(_ context.Context, _ string) (entity.BankStatement, error) {
+func (m *mockParser) Parse(_ context.Context, _ uuid.UUID, _ string) (entity.BankStatement, error) {
 	return m.result, m.err
 }
 
 type mockRepo struct {
-	saveErr      error
-	saved        []entity.BankStatement
-	existingTxns []entity.Transaction
+	saveErr       error
+	saved         []entity.BankStatement
+	existingTxns  []entity.Transaction
+	linkedTxIDs   []uuid.UUID
+	linkedStmtIDs []uuid.UUID
 }
 
 func (m *mockRepo) Save(_ context.Context, stmt entity.BankStatement) error {
@@ -44,7 +46,7 @@ func (m *mockRepo) Save(_ context.Context, stmt entity.BankStatement) error {
 	return nil
 }
 
-func (m *mockRepo) FindByID(_ context.Context, id uuid.UUID) (entity.BankStatement, error) {
+func (m *mockRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.BankStatement, error) {
 	if len(m.saved) == 0 {
 		return entity.BankStatement{ID: id}, nil
 	}
@@ -56,11 +58,11 @@ func (m *mockRepo) FindByID(_ context.Context, id uuid.UUID) (entity.BankStateme
 	return entity.BankStatement{}, errors.New("not found")
 }
 
-func (m *mockRepo) FindAll(_ context.Context) ([]entity.BankStatement, error) {
+func (m *mockRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.BankStatement, error) {
 	return m.saved, nil
 }
 
-func (m *mockRepo) FindSummaries(_ context.Context) ([]entity.BankStatementSummary, error) {
+func (m *mockRepo) FindSummaries(_ context.Context, _ uuid.UUID) ([]entity.BankStatementSummary, error) {
 	return nil, nil
 }
 
@@ -75,7 +77,7 @@ func (m *mockRepo) FindTransactions(_ context.Context, f entity.TransactionFilte
 	return result, nil
 }
 
-func (m *mockRepo) Delete(_ context.Context, _ uuid.UUID) error {
+func (m *mockRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
@@ -83,11 +85,11 @@ func (m *mockRepo) SearchTransactions(_ context.Context, _ entity.TransactionFil
 	return m.existingTxns, nil
 }
 
-func (m *mockRepo) GetCategorizationExamples(_ context.Context, _ int) ([]entity.CategorizationExample, error) {
+func (m *mockRepo) GetCategorizationExamples(_ context.Context, _ uuid.UUID, _ int) ([]entity.CategorizationExample, error) {
 	return nil, nil
 }
 
-func (m *mockRepo) UpdateTransactionCategory(_ context.Context, hash string, categoryID *uuid.UUID) error {
+func (m *mockRepo) UpdateTransactionCategory(_ context.Context, hash string, categoryID *uuid.UUID, _ uuid.UUID) error {
 	for i, tx := range m.existingTxns {
 		if tx.ContentHash == hash {
 			m.existingTxns[i].CategoryID = categoryID
@@ -97,15 +99,20 @@ func (m *mockRepo) UpdateTransactionCategory(_ context.Context, hash string, cat
 	return errors.New("transaction not found")
 }
 
-func (m *mockRepo) MarkTransactionReconciled(_ context.Context, _ string, _ uuid.UUID) error {
+func (m *mockRepo) MarkTransactionReconciled(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
-func (m *mockRepo) MarkTransactionReviewed(_ context.Context, _ string) error {
+func (m *mockRepo) MarkTransactionReviewed(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }
 
-// Added missing method to satisfy port.BankStatementRepository
+func (m *mockRepo) LinkTransactionToStatement(_ context.Context, id uuid.UUID, statementID uuid.UUID, _ uuid.UUID) error {
+	m.linkedTxIDs = append(m.linkedTxIDs, id)
+	m.linkedStmtIDs = append(m.linkedStmtIDs, statementID)
+	return nil
+}
+
 func (m *mockRepo) CreateTransactions(_ context.Context, txns []entity.Transaction) error {
 	m.existingTxns = append(m.existingTxns, txns...)
 	return nil
@@ -132,11 +139,11 @@ func (m *mockCategoryRepo) Save(_ context.Context, cat entity.Category) (entity.
 	return cat, nil
 }
 
-func (m *mockCategoryRepo) FindAll(_ context.Context) ([]entity.Category, error) {
+func (m *mockCategoryRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Category, error) {
 	return m.saved, nil
 }
 
-func (m *mockCategoryRepo) FindByID(_ context.Context, id uuid.UUID) (entity.Category, error) {
+func (m *mockCategoryRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.Category, error) {
 	for _, c := range m.saved {
 		if c.ID == id {
 			return c, nil
@@ -149,7 +156,7 @@ func (m *mockCategoryRepo) Update(_ context.Context, cat entity.Category) (entit
 	return cat, nil
 }
 
-func (m *mockCategoryRepo) Delete(_ context.Context, _ uuid.UUID) error {
+func (m *mockCategoryRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
@@ -159,7 +166,7 @@ type mockCategorizer struct {
 	calls   int
 }
 
-func (m *mockCategorizer) CategorizeBatch(ctx context.Context, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
+func (m *mockCategorizer) CategorizeBatch(ctx context.Context, _ uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
 	m.calls++
 	if m.err != nil {
 		return nil, m.err
@@ -213,7 +220,8 @@ func TestBankStatementService_ImportFromDirectory(t *testing.T) {
 	}}
 	svc := setupTestBankStatementService(parser, repo)
 
-	count, errs := svc.ImportFromDirectory(context.Background(), tempDir)
+	dummyUserID := uuid.New()
+	count, errs := svc.ImportFromDirectory(context.Background(), dummyUserID, tempDir)
 
 	if len(errs) > 0 {
 		t.Fatalf("unexpected errors: %v", errs)
@@ -235,8 +243,9 @@ func TestBankStatementService_ImportFromFile_HappyPath(t *testing.T) {
 		},
 	}
 
+	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: expected}, &mockRepo{})
-	stmt, err := svc.ImportFromFile(context.Background(), tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -281,9 +290,10 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicates(t *testing.T) {
 		},
 	}
 
+	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
 
-	stmt, err := svc.ImportFromFile(context.Background(), tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -322,9 +332,10 @@ func TestBankStatementService_ImportFromFile_DoesNotSkipSameDateAmountDifferentT
 		},
 	}
 
+	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
 
-	stmt, err := svc.ImportFromFile(context.Background(), tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -366,9 +377,10 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicatesWithNormalizedText(t
 		},
 	}
 
+	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
 
-	stmt, err := svc.ImportFromFile(context.Background(), tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -388,9 +400,61 @@ func TestBankStatementService_DeleteStatement(t *testing.T) {
 	repo := &mockRepo{}
 	svc := service.NewBankStatementService(repo, setupLogger())
 
-	err := svc.DeleteStatement(context.Background(), uuid.New())
+	err := svc.DeleteStatement(context.Background(), uuid.New(), uuid.New())
 	if err != nil {
 		t.Fatalf("unexpected error on delete: %v", err)
+	}
+}
+
+func TestBankStatementService_ImportFromFile_LinksExistingTransactions(t *testing.T) {
+	existingTxID := uuid.New()
+	repo := &mockRepo{
+		existingTxns: []entity.Transaction{
+			{
+				ID:          existingTxID,
+				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+				Amount:      -50.0,
+				Description: "AMAZON   EU S.A.R.L.",
+			},
+		},
+	}
+
+	parsedStmt := entity.BankStatement{
+		AccountHolder: "John Doe",
+		IBAN:          "DE12345678901234567890",
+		StatementDate: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC),
+		Transactions: []entity.Transaction{
+			{
+				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+				Amount:      -50.0,
+				Description: "amazon eu sarl", // Fuzzy match
+			},
+		},
+	}
+
+	dummyUserID := uuid.New()
+	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
+
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	if len(stmt.Transactions) != 0 {
+		t.Errorf("expected 0 new transactions, got %d", len(stmt.Transactions))
+	}
+	if len(stmt.SkippedTransactions) != 1 {
+		t.Errorf("expected 1 skipped transaction, got %d", len(stmt.SkippedTransactions))
+	}
+
+	if len(repo.linkedTxIDs) != 1 {
+		t.Fatalf("expected 1 linking call, got %d", len(repo.linkedTxIDs))
+	}
+	if repo.linkedTxIDs[0] != existingTxID {
+		t.Errorf("expected linked tx ID %s, got %s", existingTxID, repo.linkedTxIDs[0])
+	}
+	if repo.linkedStmtIDs[0] != stmt.ID {
+		t.Errorf("expected linked stmt ID %s, got %s", stmt.ID, repo.linkedStmtIDs[0])
 	}
 }
 
@@ -399,7 +463,7 @@ type mockReconciliationRepo struct {
 	err   error
 }
 
-func (m *mockReconciliationRepo) Delete(_ context.Context, _ uuid.UUID) error {
+func (m *mockReconciliationRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return m.err
 }
 
@@ -414,7 +478,7 @@ func (m *mockReconciliationRepo) Save(_ context.Context, r entity.Reconciliation
 	return r, nil
 }
 
-func (m *mockReconciliationRepo) FindBySettlementTx(_ context.Context, hash string) (entity.Reconciliation, error) {
+func (m *mockReconciliationRepo) FindBySettlementTx(_ context.Context, hash string, _ uuid.UUID) (entity.Reconciliation, error) {
 	for _, r := range m.saved {
 		if r.SettlementTransactionHash == hash {
 			return r, nil
@@ -423,7 +487,7 @@ func (m *mockReconciliationRepo) FindBySettlementTx(_ context.Context, hash stri
 	return entity.Reconciliation{}, errors.New("not found")
 }
 
-func (m *mockReconciliationRepo) FindByTargetTx(_ context.Context, hash string) (entity.Reconciliation, error) {
+func (m *mockReconciliationRepo) FindByTargetTx(_ context.Context, hash string, _ uuid.UUID) (entity.Reconciliation, error) {
 	for _, r := range m.saved {
 		if r.TargetTransactionHash == hash {
 			return r, nil
@@ -432,7 +496,7 @@ func (m *mockReconciliationRepo) FindByTargetTx(_ context.Context, hash string) 
 	return entity.Reconciliation{}, errors.New("not found")
 }
 
-func (m *mockReconciliationRepo) FindAll(_ context.Context) ([]entity.Reconciliation, error) {
+func (m *mockReconciliationRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Reconciliation, error) {
 	return m.saved, nil
 }
 
@@ -457,7 +521,8 @@ func TestReconcileStatements_Success(t *testing.T) {
 
 	svc := service.NewReconciliationService(repo, reconcRepo, setupLogger())
 
-	rec, err := svc.ReconcileStatements(context.Background(), "settlementhash123", "targethash456")
+	dummyUserID := uuid.New()
+	rec, err := svc.ReconcileStatements(context.Background(), dummyUserID, "settlementhash123", "targethash456")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -479,8 +544,10 @@ func TestReconcileStatements_TransactionNotFound(t *testing.T) {
 
 	svc := service.NewReconciliationService(repo, reconcRepo, setupLogger())
 
-	_, err := svc.ReconcileStatements(context.Background(), "nonexistenthash", "nonexistenttarget")
-	if !errors.Is(err, service.ErrTransactionNotFound) {
+	dummyUserID := uuid.New()
+	_, err := svc.ReconcileStatements(context.Background(), dummyUserID, "nonexistenthash", "nonexistenttarget")
+
+	if !errors.Is(err, entity.ErrTransactionNotFound) {
 		t.Errorf("expected ErrTransactionNotFound, got %v", err)
 	}
 }
@@ -532,7 +599,8 @@ func TestReconciliationService_SuggestReconciliations_FindsMatches(t *testing.T)
 	}
 	svc := service.NewReconciliationService(repo, nil, setupLogger())
 
-	suggestions, err := svc.SuggestReconciliations(context.Background(), 7)
+	dummyUserID := uuid.New()
+	suggestions, err := svc.SuggestReconciliations(context.Background(), dummyUserID, 7)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -554,7 +622,8 @@ func TestReconciliationService_SuggestReconciliations_OutsideWindow(t *testing.T
 	}
 	svc := service.NewReconciliationService(repo, nil, setupLogger())
 
-	suggestions, err := svc.SuggestReconciliations(context.Background(), 7)
+	dummyUserID := uuid.New()
+	suggestions, err := svc.SuggestReconciliations(context.Background(), dummyUserID, 7)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -596,7 +665,9 @@ func TestStartAutoCategorizeAsync_Success(t *testing.T) {
 
 	svc := service.NewTransactionService(repo, catRepo, nil, llm, setupLogger())
 
-	err := svc.StartAutoCategorizeAsync(context.Background(), 10)
+	dummyUserID := uuid.New()
+	err := svc.StartAutoCategorizeAsync(context.Background(), dummyUserID, 10)
+
 	if err != nil {
 		t.Fatalf("expected no error starting async job, got: %v", err)
 	}

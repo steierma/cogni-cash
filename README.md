@@ -1,6 +1,19 @@
-# Local AI Financial Manager
+# 💰 CogniCash: Your Private AI Financial Center
 
-A self-hosted personal finance application that imports bank statements (PDF, CSV, XLS), stores structured transactions in PostgreSQL, and uses a local LLM (Ollama / Llama 3) to categorize invoice documents and transactions — wired together with **Hexagonal Architecture** and **TDD**.
+CogniCash is a **privacy-first, self-hosted** financial engine that transforms raw banking data and documents into actionable insights. By combining **Strict Hexagonal Architecture** with **Local AI (Ollama)**, it provides a high-integrity platform for managing your entire financial life without ever leaking data to the cloud.
+
+### 🌟 Why CogniCash?
+
+*   **🧠 Local-First AI Intelligence:** Leverage local LLMs (like Llama 3 via Ollama) to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Your financial secrets stay on *your* hardware.
+*   **🏦 Seamless Bank Integration:** Synchronize directly with real-world bank accounts via **Enable Banking (PSD2)** or import files from major providers like **ING, Amazon Visa, and VW/CARIAD**.
+*   **📊 Precision Analytics & Review:** Master your cash flow with deep-dive analytics, a dedicated **Review Mode (Inbox)** for new transactions, and a smart **Reconciliation Wizard** to link internal transfers and prevent double-counting.
+*   **👥 Multi-Tenant by Design:** Built up for **Full User Tenancy**, allowing multiple users to manage their isolated financial data on a single instance.
+
+## Intro Video
+
+https://github.com/user-attachments/assets/44a99551-3589-4b79-b353-bb4d597fd291
+
+-----
 
 ## Table of Contents
 
@@ -17,10 +30,6 @@ A self-hosted personal finance application that imports bank statements (PDF, CS
 - [Database](#database)
 
 -----
-
-## Intro Video
-
-https://github.com/user-attachments/assets/44a99551-3589-4b79-b353-bb4d597fd291
 
 ## Architecture
 
@@ -57,7 +66,7 @@ The project follows **Strict Hexagonal (Ports and Adapters)** architecture. The 
    │  • File upload      │                          │  • VW / CARIAD Parser  │
    │  • JSON cron        │                          │  • AI Fallback Parser  │
    │  • CLI tools        │                          │  • Invoice PDF Parser  │
-   │                     │                          │  • GoCardless (PSD2)   │
+   │                     │                          │                        │
    └─────────────────────┘                          └────────────────────────┘
    ┌─────────────────────┐
    │  Reverse Proxy      │
@@ -66,7 +75,7 @@ The project follows **Strict Hexagonal (Ports and Adapters)** architecture. The 
    └─────────────────────┘
 ```
 
-All feature code is written **test-first (TDD)**. Domain logic is tested with mocks — no database or network connection needed to run the unit tests. Domain service test coverage is **81 %**.
+All feature code is written **test-first (TDD)**. Domain logic is tested with mocks — no database or network connection needed to run the unit tests. The CI pipeline strictly enforces a **filtered logic coverage of >36.8%** (excluding non-logic files) and a targeted **domain service coverage of >68.4%**.
 
 -----
 
@@ -83,9 +92,9 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 | **Frontend** | React 19 + TypeScript + Vite                  |
 | **Styling** | Tailwind CSS v4                               |
 | **Data fetching** | TanStack Query v5 + Axios                     |
-| **Charts** | Recharts 3                                    |
-| **Icons** | Lucide React                                  |
-| **Routing** | React Router v7                               |
+| **Charts** | Recharts 3 (Web)                              |
+| **Icons** | Lucide React (Web)                            |
+| **Routing** | React Router v7 (Web)                         |
 | **i18n** | `i18next` + `react-i18next` + `i18next-browser-languagedetector` |
 | **Database** | PostgreSQL 16 (Docker container)              |
 | **Reverse proxy** | Caddy 2 (production HTTPS) / Nginx (SPA container) |
@@ -126,14 +135,18 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 │   │       │   └── payslip/         # cariad/, ai/
 │   │       └── repository/
 │   │           └── postgres/  # pgx-based repository implementations
-│   ├── migrations/            # Versioned SQL files applied in lexicographic order
-│   │   ├── 001_initial_schema.sql              # Consolidated base schema
-│   │   ├── 002_add_invoice_content_hash.sql    # File storage + dedup columns on invoices
-│   │   ├── 003_add_bank_integration.sql        # Bank API connection tables
-│   │   ├── 004_add_bank_provider.sql           # Multi-provider support
-│   │   ├── 005_add_bank_account_type.sql       # Account type configuration
-│   │   └── 006_add_transaction_location.sql    # Extracted location column
-│   ├── balance/               # Sample bank statement files for testing
+├── migrations/            # Versioned SQL files applied in lexicographic order
+│   ├── 001_initial_schema.sql              # Consolidated base schema
+│   ├── 002_add_invoice_content_hash.sql    # File storage + dedup columns on invoices
+│   ├── 003_add_bank_integration.sql        # Bank API connection tables
+│   ├── 004_add_bank_provider.sql           # Multi-provider support
+│   ├── 005_add_bank_account_type.sql       # Account type configuration
+│   ├── 006_add_transaction_location.sql    # Extracted location column
+│   ├── 007_add_transaction_reviewed.sql    # Transaction review status (Inbox)
+│   ├── 008_add_password_reset_tokens.sql   # Secure forgot-password flow
+│   ├── 009_add_bank_account_sync_error.sql # Transparent sync error reporting
+│   └── 010_add_user_tenancy.sql            # Full multi-tenant isolation
+├── balance/               # Sample bank statement files for testing
 │   ├── payslips/              # Local drop-zone (default PAYSLIP_HOST_DIR)
 │   │   ├── payslips_import.json   # Drop here to trigger JSON bulk import
 │   │   └── history/               # Permanent archive, organised by year
@@ -312,12 +325,13 @@ The React frontend has been built to provide deep analytics and efficient batch 
 | `/invoices`        | **Invoices** | Full invoice management. **Drag & Drop / click-to-upload** PDF import with automatic LLM categorization. Submit raw text directly via the categorize panel. Sortable, searchable table with filters for category, date range, and amount. Inline **edit** of vendor, category, amount, currency, date, and description. **Download** the original uploaded file. **Batch delete** with multi-select. Visual analytics panel showing total invoice spend, top vendors chart, and monthly invoice trend. |
 | `/categories`      | **Categories** | Centralized category management. Create, rename, or delete categories and assign custom hexadecimal colors used across charts and badges.                                                                                                                                                                    |
 | `/bank-statements` | **Statements** | List all imported files with integrated **Drag & Drop file upload** for PDF, CSV, and XLS statements. Distinguishes visually between Giro, Credit Card, and Extra Account statements. View transaction counts and period balances. |
-| `/bank-connections` | **Connections** | Manage live bank API connections. Search for and link banks via **GoCardless (Nordigen)** or **Enable Banking**. View linked accounts and their **real-time balances**. Configure **Account Types** (Giro, Credit Card, Extra Account) per account for accurate reconciliation. Sync all accounts in background. |
+| `/bank-connections` | **Connections** | Manage live bank API connections. Search for and link banks via **Enable Banking**. View linked accounts with **real-time balances**, human-readable institution names, and **transparent sync error reporting (tooltips)**. Configure **Account Types** (Giro, Credit Card, Extra Account) per account for accurate reconciliation. Sync all accounts in background. |
 | `/payslips`        | **Payslips** | Full HR document management. **Quick drag-and-drop** single PDF upload with a **Force AI Parsing** toggle and a **Manual Override modal** to force-correct any field. **Batch upload** of multiple PDFs at once. **PDF preview** inline in-browser and **download** of the stored original. View/Edit modal for all structured fields including bonuses. KPI cards for latest gross/net/adjusted net with month-over-month trend. Cumulative income growth chart (Gross, Total Net, Adjusted Net, Payout lines) with configurable **bonus exclusion** and **leasing add-back** controls. Filterable by period range, employee, and tax class. Column visibility persisted to settings. Payslips imported via JSON manifest show a grayed-out preview/download button. |
-| `/reconcile`       | **Reconcile** | Dedicated 1:1 transaction reconciliation wizard. Globally scans all pending accounts to find exact matching internal transfers (where a debit and credit sum to zero) and links them to prevent double-counting in analytics. Supports both statement-based and **Live Feed** transactions. |
+| `/reconcile`       | **Reconcile** | Dedicated 1:1 transaction reconciliation wizard. Globally scans all pending accounts to find exact matching internal transfers (where a debit and credit sum to zero) and links them to prevent double-counting in analytics. Supports both statement-based and **Live Feed** transactions with a **floating action button** for rapid batch linking. |
 | `/users`           | **Users** | Manage system access and profiles. View user details, create new users, modify roles (Admin or Manager), and delete accounts. This route is strictly protected via RBAC (Admins only). |
 | `/settings`        | **Settings** | Configure LLM parameters, edit system prompts, manage background auto-import/categorization intervals, change themes, **select UI language**, update passwords, and persist UI preferences. |
 | `/login`           | **Login** | JWT-based authentication. Redirects to Dashboard on success. |
+
 
 -----
 
@@ -517,8 +531,11 @@ Migrations are plain SQL files in `backend/migrations/`, applied in lexicographi
 | `004_add_bank_provider.sql` | Adds `provider` column to `bank_connections` to support multiple aggregators. |
 | `005_add_bank_account_type.sql` | Adds `account_type` to `bank_accounts` and `statement_type` to `transactions` table to support cross-account reconciliation for API feeds. |
 | `006_add_transaction_location.sql` | Adds `location` column to `transactions` table. |
-| `007_add_transaction_reviewed.sql` | Adds `reviewed` boolean column to `transactions` table. |
-
+| `007_add_transaction_reviewed.sql` | Adds `reviewed` boolean column to `transactions` table to support the "Inbox" workflow. |
+| `008_add_password_reset_tokens.sql` | Adds `password_reset_tokens` table for the secure forgot-password flow. |
+| `009_add_bank_account_sync_error.sql` | Adds `last_sync_error` column to `bank_accounts` for UI visibility. |
+| `010_add_user_tenancy.sql` | Implements **Full User Tenancy** (Isolation) across all tables and entities. |
+| `011_enrich_transactions.sql` | Adds `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and `mandate_reference` to transactions for improved categorization and reconciliation. |
 
 -----
 
@@ -528,49 +545,56 @@ Migrations are plain SQL files in `backend/migrations/`, applied in lexicographi
 
 Pre-built Docker images are published to GHCR (`ghcr.io/steierma/cogni-cash-backend`, `ghcr.io/steierma/cogni-cash-frontend`) via the CI/CD pipeline. The production `docker-compose.yml` pulls these images directly — no local build tools required.
 
+* [x] **Targeted Deployment:** Optimized CI/CD to only sync `docker-compose.yml` and pull latest images, preserving all server-side state like `.env` and `docker-compose.override.yml`.
+* [x] **State Preservation:** Eliminated `rsync --delete` to ensure manually managed keys (e.g., Enable Banking PEMs) are never accidentally removed.
+
 ### 2. External Security & HTTPS (Caddy Proxy) ✅
 
 The stack includes a bundled Caddy reverse proxy that handles automatic HTTPS via Let's Encrypt. The `DOMAIN_NAME` environment variable controls the certificate domain. For local development, `docker-compose.override.yml` disables Caddy so it doesn't conflict with your own proxy. Both the Nginx SPA container and the Go backend enforce security headers (CSP, HSTS, X-Frame-Options, etc.).
 
 ### 3. Complete Invoice Use Case ✅
 
-> Promotes the invoice domain from a thin LLM-categorization stub to a fully-formed hexagonal use case with file import, deduplication, CRUD, and file download. Also fixes a long-standing bug where the `description` field was present in the Go entity but missing from the database schema and SQL statements.
-
-* [x] **Entity separation:** `Category`, `Vendor` extracted into dedicated files (`entity/category.go`, `entity/vendor.go`); `Invoice` entity extended with file-storage fields (`ContentHash`, `OriginalFileName`, `OriginalFileMime`, `OriginalFileSize`, `OriginalFileContent`).
+* [x] **Entity separation:** `Category`, `Vendor` extracted into dedicated files.
 * [x] **Errors:** `ErrInvoiceDuplicate` and `ErrInvoiceNotFound` added to `entity/errors.go`.
-* [x] **Port:** `InvoiceParser` output port (`port/invoice_parser.go`) for pluggable file-to-text extraction.
-* [x] **Port:** `InvoiceUseCase` driving-side port replaces the narrow `InvoiceCategorizationUseCase` — covers `ImportFromFile`, `CategorizeDocument`, `GetAll`, `GetByID`, `Update`, `Delete`, `GetOriginalFile`.
-* [x] **Port:** `InvoiceRepository` expanded with `Update`, `ExistsByContentHash`, `GetOriginalFile`.
-* [x] **Service:** `InvoiceService` replaces `CategorizationService` — orchestrates SHA-256 dedup, text extraction, LLM categorization, CRUD, and original-file retrieval.
-* [x] **Parser adapter:** `adapter/parser/invoice/parser.go` — PDF text extractor using `ledongthuc/pdf`.
-* [x] **Postgres adapter:** `InvoiceRepository` fully implements the new port (all file-storage columns, `Update`, `ExistsByContentHash`, `GetOriginalFile`).
-* [x] **HTTP handler:** `invoice_handler.go` — seven endpoints (`GET /`, `GET /:id`, `POST /import`, `POST /categorize`, `PUT /:id`, `DELETE /:id`, `GET /:id/download`); `description` field uses `*string` so it can be intentionally cleared.
-* [x] **Migration:** `002_add_invoice_content_hash.sql` — file-storage and dedup columns on `invoices`.
-* [x] **Migration:** `003_invoice_description.sql` — adds the missing `description` column to `invoices`.
-* [x] **Bug fix:** `description` was silently discarded on every `UPDATE` because the column was absent from the SQL statement and the schema. Fixed in repo + migration.
-* [x] **Frontend:** `InvoicesPage` rewritten — drag-and-drop import, sortable/filterable table, inline edit modal (all fields including description), batch delete, download button, analytics visuals panel. Standalone `CategorizePage` removed (its raw-text panel lives inside `InvoicesPage`).
-* [x] **TDD:** 11 unit tests in `invoice_service_test.go`; 9 integration sub-tests in `invoice_repository_test.go`.
+* [x] **Port:** `InvoiceParser` output port for pluggable file-to-text extraction.
+* [x] **Port:** `InvoiceUseCase` driving-side port — covers `ImportFromFile`, `CategorizeDocument`, `GetAll`, `GetByID`, `Update`, `Delete`, `GetOriginalFile`.
+* [x] **Service:** `InvoiceService` — orchestrates SHA-256 dedup, text extraction, LLM categorization, CRUD, and original-file retrieval.
+* [x] **Postgres adapter:** `InvoiceRepository` fully implements the new port with binary storage support.
+* [x] **Frontend:** `InvoicesPage` rewritten — drag-and-drop import, sortable/filterable table, inline edit modal, batch delete, analytics visuals panel.
 
 ### 4. Real Bank API Integration (PSD2 / Multi-Provider) ✅
 
 * [x] **Entity:** `BankConnection` and `BankAccount` domain entities.
 * [x] **Port:** `BankProvider` interface for PSD2 aggregators.
-* [x] **Adapter:** GoCardless (Nordigen) implementation.
 * [x] **Adapter:** Enable Banking implementation (multi-provider support).
 * [x] **Service:** `BankService` for connection management and background transaction syncing.
 * [x] **UI:** `BankConnectionsPage` with institution search and OAuth redirect flow.
 * [x] **UI:** Settings-backed provider configuration.
 * [x] **Deduplication:** Automatic `ContentHash` generation for synced transactions.
+* [x] **Metadata Enrichment:** Extraction and storage of `counterparty_name`, `counterparty_iban`, `bank_transaction_code`, and `mandate_reference` for all synced transactions.
+* [x] **Smarter AI:** Automatically passing all enriched metadata to the LLM for significantly higher categorization accuracy.
 
-### 5. Email & Notifications (SMTP) 🚧
+### 5. Email & Notifications (SMTP) ✅
 
-SMTP configuration variables (`SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`) are defined in `.env.example` but the email service is not yet implemented.
+SMTP integration is fully implemented for automated user notifications and system alerts. Configuration can be managed via environment variables for initial seeding or directly through the Web UI Settings page.
 
-* [ ] Implement an `SMTPService` interface in the Go backend.
-* [ ] Build the "Forgot Password" and secure token reset flow in both the backend API and the React frontend.
-* [ ] Monthly financial summary report emails.
+* [x] Implement `EmailProvider` port and `SMTPAdapter` (using `net/smtp`).
+* [x] Create `NotificationUseCase` and `NotificationService` for domain-level alerts.
+* [x] **Welcome Emails:** Automatically sent asynchronously upon new user creation.
+* [x] **Password Reset:**
+    * [x] **Architecture & Design:** Token-based flow documented in `docs/PASSWORD_RESET_CONCEPT.md`.
+    * [x] **Database:** Implementation of `password_reset_tokens` table (Migration `008`).
+    * [x] **Backend:** Secure token generation (CSPRNG), SHA-256 hashing, and verification.
+    * [x] **Frontend:** `ForgotPasswordPage` and `ResetPasswordPage` UI with token validation.
+* [x] **UI Configuration:** SMTP host, port, credentials, and sender email managed via `/settings`.
+* [x] **i18n:** Fully translated across EN, DE, ES, and FR.
 
-### 5. Resilient Backup Strategy (Proxmox + rclone)
+### 6. Full User Tenancy ✅
+
+* [x] **Database Isolation:** Migration `010` adds `user_id` to all data-owning tables.
+* [x] **Backend Tenancy:** All repositories and services filtered by `UserID`.
+
+### 7. Resilient Backup Strategy (Proxmox + rclone)
 
 * [ ] Implement off-site encrypted backups of PostgreSQL dumps and the `payslips` directory to Google Drive via `rclone`.
 * [ ] Document local manual backup procedures and enforce manual Proxmox snapshots prior to major upgrades.

@@ -11,6 +11,7 @@ import (
 type UserRepository interface {
 	FindByUsername(ctx context.Context, username string) (entity.User, error)
 	FindByID(ctx context.Context, id uuid.UUID) (entity.User, error)
+	GetAdminID(ctx context.Context) (uuid.UUID, error)
 	FindAll(ctx context.Context, search string) ([]entity.User, error)
 	Create(ctx context.Context, user entity.User) error
 	Update(ctx context.Context, user entity.User) error

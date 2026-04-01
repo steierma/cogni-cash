@@ -18,6 +18,7 @@ export function ViewPayslipModal({ payslip, onClose }: { payslip: Payslip, onClo
                     <div className="grid grid-cols-2 gap-y-4 gap-x-6 text-sm">
                         <div><p className="text-gray-500 dark:text-gray-400 mb-1">{t('payslips.modals.period')}</p><p className="font-medium text-gray-900 dark:text-gray-100">{formatYearMonth(payslip.period_year, payslip.period_month_num)}</p></div>
                         <div><p className="text-gray-500 dark:text-gray-400 mb-1">{t('payslips.modals.employee')}</p><p className="font-medium text-gray-900 dark:text-gray-100">{payslip.employee_name}</p></div>
+                        <div><p className="text-gray-500 dark:text-gray-400 mb-1">{t('payslips.modals.employer')}</p><p className="font-medium text-gray-900 dark:text-gray-100">{payslip.employer_name}</p></div>
                         <div><p className="text-gray-500 dark:text-gray-400 mb-1">{t('payslips.modals.taxClass')}</p><p className="font-medium text-gray-900 dark:text-gray-100">{payslip.tax_class || '-'}</p></div>
                         <div><p className="text-gray-500 dark:text-gray-400 mb-1">{t('payslips.modals.taxId')}</p><p className="font-medium text-gray-900 dark:text-gray-100">{payslip.tax_id || '-'}</p></div>
                     </div>
@@ -77,6 +78,7 @@ export function ImportPayslipModal({ isOpen, onClose, currentUser, onImport, isP
         const monthNum = formData.get('period_month_num') as string; if (monthNum) overrides.period_month_num = Number(monthNum);
         const year = formData.get('period_year') as string; if (year) overrides.period_year = Number(year);
         const empName = formData.get('employee_name') as string; if (empName) overrides.employee_name = empName;
+        const employerName = formData.get('employer_name') as string; if (employerName) overrides.employer_name = employerName;
         const taxClass = formData.get('tax_class') as string; if (taxClass) overrides.tax_class = taxClass;
         const taxId = formData.get('tax_id') as string; if (taxId) overrides.tax_id = taxId;
         const gross = formData.get('gross_pay') as string; if (gross) overrides.gross_pay = Number(gross);
@@ -113,7 +115,8 @@ export function ImportPayslipModal({ isOpen, onClose, currentUser, onImport, isP
                     </div>
                     <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-100 dark:border-blue-900/50 p-3 rounded-xl text-sm text-blue-800 dark:text-blue-300"><strong>{t('payslips.modals.optionalOverrides')}</strong> {t('payslips.modals.optionalOverridesDesc')}</div>
                     <div className="grid grid-cols-2 gap-4">
-                        <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.empName')}</label><input name="employee_name" defaultValue={currentUser?.full_name || ''} placeholder="e.g. John Doe" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" /></div>
+                        <div className="col-span-2 sm:col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.empName')}</label><input name="employee_name" defaultValue={currentUser?.full_name || ''} placeholder="e.g. John Doe" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" /></div>
+                        <div className="col-span-2 sm:col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.employer')}</label><input name="employer_name" defaultValue="Unknown" placeholder="e.g. Acme Corp" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" /></div>
                         <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.month')}</label><input name="period_month_num" type="number" min="1" max="12" placeholder="e.g. 3" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" /></div>
                         <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.year')}</label><input name="period_year" type="number" placeholder="2024" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" /></div>
                         <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.taxClass')}</label><input name="tax_class" placeholder="e.g. 1" className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" /></div>
@@ -172,6 +175,7 @@ export function EditPayslipModal({ payslip, onClose, onUpdate, isPending }: { pa
             period_month_num: Number(formData.get('period_month_num')),
             period_year: Number(formData.get('period_year')),
             employee_name: formData.get('employee_name') as string,
+            employer_name: formData.get('employer_name') as string,
             tax_class: formData.get('tax_class') as string,
             tax_id: formData.get('tax_id') as string,
             gross_pay: Number(formData.get('gross_pay')),
@@ -216,7 +220,8 @@ export function EditPayslipModal({ payslip, onClose, onUpdate, isPending }: { pa
                         </div>
                     )}
                     <div className="grid grid-cols-2 gap-4">
-                        <div className="col-span-2"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.empName')}</label><input name="employee_name" defaultValue={payslip.employee_name} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" required /></div>
+                        <div className="col-span-2 sm:col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.empName')}</label><input name="employee_name" defaultValue={payslip.employee_name} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" required /></div>
+                        <div className="col-span-2 sm:col-span-1"><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.employer')}</label><input name="employer_name" defaultValue={payslip.employer_name} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" required /></div>
                         <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.month')}</label><input name="period_month_num" type="number" min="1" max="12" defaultValue={payslip.period_month_num} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" required /></div>
                         <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.year')}</label><input name="period_year" type="number" defaultValue={payslip.period_year} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" required /></div>
                         <div><label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.taxClass')}</label><input name="tax_class" defaultValue={payslip.tax_class} className="w-full px-3 py-2 border rounded-lg dark:bg-gray-800 dark:border-gray-700" /></div>

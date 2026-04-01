@@ -41,6 +41,15 @@ func (m *mockUserRepoForUserSvc) FindByID(_ context.Context, id uuid.UUID) (enti
 	return entity.User{}, errors.New("not found")
 }
 
+func (m *mockUserRepoForUserSvc) GetAdminID(_ context.Context) (uuid.UUID, error) {
+	for _, u := range m.users {
+		if u.Username == "admin" {
+			return u.ID, nil
+		}
+	}
+	return uuid.Nil, errors.New("admin not found")
+}
+
 func (m *mockUserRepoForUserSvc) FindAll(_ context.Context, search string) ([]entity.User, error) {
 	var result []entity.User
 	for _, u := range m.users {

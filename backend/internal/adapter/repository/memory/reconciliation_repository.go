@@ -47,42 +47,45 @@ func (r *ReconciliationRepository) Save(ctx context.Context, rec entity.Reconcil
 	return rec, nil
 }
 
-func (r *ReconciliationRepository) FindBySettlementTx(ctx context.Context, hash string) (entity.Reconciliation, error) {
+func (r *ReconciliationRepository) FindBySettlementTx(ctx context.Context, hash string, userID uuid.UUID) (entity.Reconciliation, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, rec := range r.reconciliations {
-		if rec.SettlementTransactionHash == hash {
+		if rec.SettlementTransactionHash == hash && rec.UserID == userID {
 			return rec, nil
 		}
 	}
 	return entity.Reconciliation{}, entity.ErrReconciliationNotFound
 }
 
-func (r *ReconciliationRepository) FindByTargetTx(ctx context.Context, hash string) (entity.Reconciliation, error) {
+func (r *ReconciliationRepository) FindByTargetTx(ctx context.Context, hash string, userID uuid.UUID) (entity.Reconciliation, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, rec := range r.reconciliations {
-		if rec.TargetTransactionHash == hash {
+		if rec.TargetTransactionHash == hash && rec.UserID == userID {
 			return rec, nil
 		}
 	}
 	return entity.Reconciliation{}, entity.ErrReconciliationNotFound
 }
 
-func (r *ReconciliationRepository) FindAll(ctx context.Context) ([]entity.Reconciliation, error) {
+func (r *ReconciliationRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Reconciliation, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var recs []entity.Reconciliation
 	for _, rec := range r.reconciliations {
-		recs = append(recs, rec)
+		if rec.UserID == userID {
+			recs = append(recs, rec)
+		}
 	}
 	return recs, nil
 }
 
-func (r *ReconciliationRepository) Delete(ctx context.Context, id uuid.UUID) error {
+func (r *ReconciliationRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	if _, ok := r.reconciliations[id]; !ok {
+	rec, ok := r.reconciliations[id]
+	if !ok || rec.UserID != userID {
 		return entity.ErrReconciliationNotFound
 	}
 	delete(r.reconciliations, id)

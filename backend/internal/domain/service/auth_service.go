@@ -3,9 +3,12 @@ package service
 import (
 	"cogni-cash/internal/domain/entity"
 	"context"
+	"crypto/rand"
+	"crypto/sha256"
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"cogni-cash/internal/domain/port"
@@ -18,17 +21,27 @@ import (
 var ErrInvalidCredentials = entity.ErrInvalidCredentials
 
 type AuthService struct {
-	repo      port.UserRepository
-	jwtSecret []byte
-	logger    *slog.Logger
+	repo            port.UserRepository
+	resetRepo       port.PasswordResetRepository
+	notificationSvc port.NotificationUseCase
+	settingsRepo    port.SettingsRepository
+	jwtSecret       []byte
+	logger          *slog.Logger
 }
 
-func NewAuthService(repo port.UserRepository, secret string, logger *slog.Logger) *AuthService {
+func NewAuthService(repo port.UserRepository, resetRepo port.PasswordResetRepository, notificationSvc port.NotificationUseCase, settingsRepo port.SettingsRepository, secret string, logger *slog.Logger) *AuthService {
 	return &AuthService{
-		repo:      repo,
-		jwtSecret: []byte(secret),
-		logger:    logger,
+		repo:            repo,
+		resetRepo:       resetRepo,
+		notificationSvc: notificationSvc,
+		settingsRepo:    settingsRepo,
+		jwtSecret:       []byte(secret),
+		logger:          logger,
 	}
+}
+
+func (s *AuthService) GetRepo_ForTest() any {
+	return s.repo
 }
 
 // Login verifies credentials and returns a signed JWT.
@@ -177,4 +190,134 @@ func (s *AuthService) EnsureAdminUser(ctx context.Context, username, plainPasswo
 
 	s.logger.Info("Admin user created", "username", username)
 	return nil
+}
+
+// RequestPasswordReset initiates the reset flow for a given email.
+func (s *AuthService) RequestPasswordReset(ctx context.Context, email string) error {
+	// 1. Find the user by email
+	users, err := s.repo.FindAll(ctx, email) // FindAll supports search
+	if err != nil {
+		s.logger.Error("Failed to search for user during reset request", "email", email, "error", err)
+		return nil // Generic success to prevent enumeration
+	}
+
+	var targetUser *entity.User
+	for _, u := range users {
+		if u.Email == email {
+			targetUser = &u
+			break
+		}
+	}
+
+	if targetUser == nil {
+		s.logger.Warn("Password reset requested for non-existent email", "email", email)
+		return nil // Generic success to prevent enumeration
+	}
+
+	// 2. Generate a secure random token
+	tokenBytes := make([]byte, 32)
+	if _, err := cryptoRandRead(tokenBytes); err != nil {
+		return fmt.Errorf("failed to generate secure token: %w", err)
+	}
+	plainToken := fmt.Sprintf("%x", tokenBytes)
+	tokenHash := s.hashToken(plainToken)
+
+	// 3. Store the token hash
+	// First, invalidate old tokens
+	_ = s.resetRepo.DeleteByUserID(ctx, targetUser.ID)
+
+	resetToken := entity.PasswordResetToken{
+		ID:        uuid.New(),
+		UserID:    targetUser.ID,
+		TokenHash: tokenHash,
+		ExpiresAt: time.Now().Add(1 * time.Hour),
+		CreatedAt: time.Now(),
+	}
+
+	if err := s.resetRepo.Create(ctx, resetToken); err != nil {
+		s.logger.Error("Failed to store reset token", "user_id", targetUser.ID, "error", err)
+		return fmt.Errorf("internal server error")
+	}
+
+	// 4. Send the email
+	admin, _ := s.repo.FindByUsername(ctx, "admin")
+	adminID := admin.ID
+
+	domain, _ := s.settingsRepo.Get(ctx, "domain_name", adminID)
+	if domain == "" {
+		domain = "localhost"
+	}
+	resetURL := fmt.Sprintf("http://%s/reset-password?token=%s", domain, plainToken)
+	if strings.Contains(domain, "localhost") {
+		resetURL = fmt.Sprintf("http://localhost:3000/reset-password?token=%s", plainToken)
+	}
+
+	if err := s.notificationSvc.SendPasswordResetEmail(ctx, *targetUser, resetURL); err != nil {
+		s.logger.Error("Failed to send reset email", "email", email, "error", err)
+		// We still return nil to the user as the process started
+	}
+
+	s.logger.Info("Password reset link sent", "user_id", targetUser.ID)
+	return nil
+}
+
+func (s *AuthService) ValidateResetToken(ctx context.Context, token string) (bool, error) {
+	tokenHash := s.hashToken(token)
+	t, err := s.resetRepo.FindByHash(ctx, tokenHash)
+	if err != nil {
+		if errors.Is(err, entity.ErrResetTokenInvalid) {
+			return false, nil
+		}
+		return false, err
+	}
+
+	if t.IsExpired() {
+		_ = s.resetRepo.Delete(ctx, t.ID)
+		return false, nil
+	}
+
+	return true, nil
+}
+
+func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token string, newPassword string) error {
+	tokenHash := s.hashToken(token)
+	t, err := s.resetRepo.FindByHash(ctx, tokenHash)
+	if err != nil {
+		return entity.ErrResetTokenInvalid
+	}
+
+	if t.IsExpired() {
+		_ = s.resetRepo.Delete(ctx, t.ID)
+		return entity.ErrResetTokenInvalid
+	}
+
+	// Hash the new password
+	newHash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("failed to hash password: %w", err)
+	}
+
+	// Update user password
+	if err := s.repo.UpdatePassword(ctx, t.UserID, string(newHash)); err != nil {
+		return fmt.Errorf("failed to update user password: %w", err)
+	}
+
+	// Delete the used token
+	_ = s.resetRepo.Delete(ctx, t.ID)
+
+	s.logger.Info("Password reset confirmed successfully", "user_id", t.UserID)
+	return nil
+}
+
+func (s *AuthService) hashToken(token string) string {
+	h := sha256.New()
+	h.Write([]byte(token))
+	return fmt.Sprintf("%x", h.Sum(nil))
+}
+
+// cryptoRandRead is a mockable wrapper for crypto/rand.Read
+var cryptoRandRead = cryptoRandReadFunc
+
+func cryptoRandReadFunc(b []byte) (n int, err error) {
+	return rand.Read(b)
 }

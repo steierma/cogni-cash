@@ -17,19 +17,20 @@ func NewMockBankProvider() *MockBankProvider {
 	return &MockBankProvider{}
 }
 
-func (m *MockBankProvider) GetInstitutions(ctx context.Context, countryCode string, isSandbox bool) ([]entity.BankInstitution, error) {
+func (m *MockBankProvider) GetInstitutions(ctx context.Context, userID uuid.UUID, countryCode string, isSandbox bool) ([]entity.BankInstitution, error) {
 	return []entity.BankInstitution{
 		{ID: "SANDBOX_ID", Name: "Mock Bank DE", Bic: "MOCKDEFF", Country: "DE"},
 		{ID: "SANDBOX_ID_2", Name: "Mock Bank DE 2", Bic: "MOCKDEFF2", Country: "DE"},
 	}, nil
 }
 
-func (m *MockBankProvider) CreateRequisition(ctx context.Context, institutionID, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error) {
+func (m *MockBankProvider) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error) {
 	return &entity.BankConnection{
 		ID:              uuid.New(),
+		UserID:          userID,
 		Provider:        "mock",
 		InstitutionID:   institutionID,
-		InstitutionName: "Mock Bank",
+		InstitutionName: institutionName,
 		RequisitionID:   "mock_requisition_" + uuid.New().String(),
 		ReferenceID:     referenceID,
 		Status:          entity.StatusInitialized,
@@ -37,15 +38,15 @@ func (m *MockBankProvider) CreateRequisition(ctx context.Context, institutionID,
 	}, nil
 }
 
-func (m *MockBankProvider) ExchangeCodeForSession(ctx context.Context, code string) (string, error) {
+func (m *MockBankProvider) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error) {
 	return "mock_session_" + uuid.New().String(), nil
 }
 
-func (m *MockBankProvider) GetRequisitionStatus(ctx context.Context, requisitionID string) (entity.ConnectionStatus, error) {
+func (m *MockBankProvider) GetRequisitionStatus(ctx context.Context, userID uuid.UUID, requisitionID string) (entity.ConnectionStatus, error) {
 	return entity.StatusLinked, nil
 }
 
-func (m *MockBankProvider) FetchAccounts(ctx context.Context, requisitionID string) ([]entity.BankAccount, error) {
+func (m *MockBankProvider) FetchAccounts(ctx context.Context, userID uuid.UUID, requisitionID string) ([]entity.BankAccount, error) {
 	return []entity.BankAccount{
 		{
 			ID:                uuid.New(),
@@ -59,11 +60,12 @@ func (m *MockBankProvider) FetchAccounts(ctx context.Context, requisitionID stri
 	}, nil
 }
 
-func (m *MockBankProvider) FetchTransactions(ctx context.Context, providerAccountID string, dateFrom *time.Time, dateTo *time.Time) ([]entity.Transaction, float64, error) {
+func (m *MockBankProvider) FetchTransactions(ctx context.Context, userID uuid.UUID, providerAccountID string, dateFrom *time.Time, dateTo *time.Time) ([]entity.Transaction, float64, error) {
 	now := time.Now()
 	txns := []entity.Transaction{
 		{
 			ID:            uuid.New(),
+			UserID:        userID,
 			BookingDate:   now.AddDate(0, 0, -1),
 			Description:   "Mock Transaction 1",
 			Amount:        -50.00,

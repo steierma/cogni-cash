@@ -13,6 +13,7 @@ import (
 
 	"log/slog"
 
+	"github.com/google/uuid"
 	"github.com/ledongthuc/pdf"
 )
 
@@ -39,7 +40,7 @@ type Parser struct {
 
 func NewParser(logger *slog.Logger) *Parser { return &Parser{Logger: logger} }
 
-func (p *Parser) Parse(_ context.Context, filePath string) (entity.BankStatement, error) {
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
 	p.Logger.Info("Parsing ING PDF", "filePath", filePath)
 	tokens, raw, err := extractTokens(filePath)
 	if err != nil {
@@ -124,7 +125,7 @@ func extractAccountHolder(tokens []string) string {
 		if !strings.HasPrefix(t, "ING-DiBa AG") {
 			continue
 		}
-		for j := i - 1; j >= 0; j-- {
+		for j := i - 1; j >= 0 && j < len(tokens); j-- {
 			c := strings.TrimSpace(tokens[j])
 			if c == "" {
 				continue
@@ -249,18 +250,30 @@ func parseTransactions(tokens []string) []entity.Transaction {
 		desc := strings.TrimSpace(strings.Join(reg.descTokens, " "))
 		ref := strings.TrimSpace(strings.Join(reg.contTokens, " "))
 
+		// In ING PDFs the first descToken is the booking type (e.g. "Lastschrift",
+		// "Gutschrift", "Überweisung") and subsequent tokens are the counterparty name.
+		var bankTxCode, counterpartyName string
+		if len(reg.descTokens) > 0 {
+			bankTxCode = strings.TrimSpace(reg.descTokens[0])
+		}
+		if len(reg.descTokens) > 1 {
+			counterpartyName = strings.TrimSpace(strings.Join(reg.descTokens[1:], " "))
+		}
+
 		txType := entity.TransactionTypeCredit
 		if amount < 0 {
 			txType = entity.TransactionTypeDebit
 		}
 		txns = append(txns, entity.Transaction{
-			BookingDate: reg.booking,
-			ValutaDate:  reg.valuta,
-			Description: desc,
-			Amount:      amount,
-			Currency:    "EUR",
-			Type:        txType,
-			Reference:   ref,
+			BookingDate:         reg.booking,
+			ValutaDate:          reg.valuta,
+			Description:         desc,
+			BankTransactionCode: bankTxCode,
+			CounterpartyName:    counterpartyName,
+			Amount:              amount,
+			Currency:            "EUR",
+			Type:                txType,
+			Reference:           ref,
 		})
 	}
 	return txns

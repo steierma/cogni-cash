@@ -13,6 +13,8 @@ import (
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
+
+	"github.com/google/uuid"
 )
 
 const defaultModel = "gemini-1.5-flash"
@@ -22,7 +24,7 @@ Use EXACTLY ONE category from: [{{CATEGORIES}}].
 Return ONLY a valid JSON object. Do not include explanations.
 
 JSON Schema:
-{"category_name": "string", "vendor_name": "string", "amount": 12.34, "currency": "EUR", "description": "string"}
+{"category_name": "string", "vendor_name": "string", "amount": 12.34, "currency": "EUR", "invoice_date": "YYYY-MM-DD", "description": "string"}
 
 TEXT:
 {{TEXT}}`
@@ -53,15 +55,17 @@ JSON Schema:
       "booking_date": "YYYY-MM-DD",
       "amount": -12.34,
       "description": "string",
-      "reference": "string"
+      "reference": "string",
+      "counterparty_name": "string",
+      "counterparty_iban": "string",
+      "bank_transaction_code": "string",
+      "mandate_reference": "string"
     }
   ]
 }
 
 TEXT:
 {{TEXT}}`
-
-// Inside your adapter.go ...
 
 const defaultPayslipPromptTemplate = `Role: You are a precise financial data extraction system.
 Task: Extract payroll information from the provided payslip and map it strictly to the JSON schema below.
@@ -83,6 +87,7 @@ JSON Schema Definition:
   "period_month_num": "integer (1-12)",
   "period_year": "integer (YYYY)",
   "employee_name": "string",
+  "employer_name": "string",
   "tax_class": "string",
   "tax_id": "string",
   "gross_pay": "float",
@@ -146,6 +151,7 @@ type llmResponse struct {
 	VendorName   string  `json:"vendor_name"`
 	Amount       float64 `json:"amount"`
 	Currency     string  `json:"currency"`
+	InvoiceDate  string  `json:"invoice_date"`
 	Description  string  `json:"description"`
 }
 
@@ -168,8 +174,8 @@ func NewAdapter(settingsRepo port.SettingsRepository, logger *slog.Logger) *Adap
 	}
 }
 
-func (a *Adapter) getLLMConfig(ctx context.Context) (baseURL, token, model string, err error) {
-	baseURL, err = a.settingsRepo.Get(ctx, "llm_api_url")
+func (a *Adapter) getLLMConfig(ctx context.Context, userID uuid.UUID) (baseURL, token, model string, err error) {
+	baseURL, err = a.settingsRepo.Get(ctx, "llm_api_url", userID)
 	if err != nil {
 		return "", "", "", err
 	}
@@ -177,12 +183,12 @@ func (a *Adapter) getLLMConfig(ctx context.Context) (baseURL, token, model strin
 		return "", "", "", fmt.Errorf("llm_api_url is not configured in settings")
 	}
 
-	token, err = a.settingsRepo.Get(ctx, "llm_api_token")
+	token, err = a.settingsRepo.Get(ctx, "llm_api_token", userID)
 	if err != nil {
 		return "", "", "", err
 	}
 
-	model, _ = a.settingsRepo.Get(ctx, "llm_model")
+	model, _ = a.settingsRepo.Get(ctx, "llm_model", userID)
 	if model == "" {
 		model = defaultModel
 	}
@@ -190,9 +196,9 @@ func (a *Adapter) getLLMConfig(ctx context.Context) (baseURL, token, model strin
 	return strings.TrimRight(baseURL, "/"), token, model, nil
 }
 
-func (a *Adapter) ParseBankStatementText(ctx context.Context, text string) (entity.BankStatement, error) {
-	a.logger.Info("Starting AI bank statement parsing", "text_len", len(text))
-	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_statement_prompt")
+func (a *Adapter) ParseBankStatementText(ctx context.Context, userID uuid.UUID, text string) (entity.BankStatement, error) {
+	a.logger.Info("Starting AI bank statement parsing", "text_len", len(text), "user_id", userID)
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_statement_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
 		promptTemplate = defaultStatementPromptTemplate
 	}
@@ -200,7 +206,7 @@ func (a *Adapter) ParseBankStatementText(ctx context.Context, text string) (enti
 	prompt := strings.ReplaceAll(promptTemplate, "{{TEXT}}", text)
 	a.logger.Info("Sending statement extraction prompt to LLM", "prompt_len", len(prompt))
 
-	rawResp, err := a.doRequest(ctx, prompt)
+	rawResp, err := a.doRequest(ctx, userID, prompt)
 	if err != nil {
 		a.logger.Error("LLM request failed for statement extraction", "error", err)
 		return entity.BankStatement{}, err
@@ -211,10 +217,14 @@ func (a *Adapter) ParseBankStatementText(ctx context.Context, text string) (enti
 
 	// Temporary struct to handle string-based dates from the LLM
 	type llmTx struct {
-		BookingDate string  `json:"booking_date"`
-		Amount      float64 `json:"amount"`
-		Description string  `json:"description"`
-		Reference   string  `json:"reference"`
+		BookingDate         string  `json:"booking_date"`
+		Amount              float64 `json:"amount"`
+		Description         string  `json:"description"`
+		Reference           string  `json:"reference"`
+		CounterpartyName    string  `json:"counterparty_name"`
+		CounterpartyIban    string  `json:"counterparty_iban"`
+		BankTransactionCode string  `json:"bank_transaction_code"`
+		MandateReference    string  `json:"mandate_reference"`
 	}
 
 	var res struct {
@@ -253,10 +263,14 @@ func (a *Adapter) ParseBankStatementText(ctx context.Context, text string) (enti
 			bDate = stmtDate
 		}
 		stmt.Transactions = append(stmt.Transactions, entity.Transaction{
-			BookingDate: bDate,
-			Amount:      tx.Amount,
-			Description: tx.Description,
-			Reference:   tx.Reference,
+			BookingDate:         bDate,
+			Amount:              tx.Amount,
+			Description:         tx.Description,
+			Reference:           tx.Reference,
+			CounterpartyName:    tx.CounterpartyName,
+			CounterpartyIban:    tx.CounterpartyIban,
+			BankTransactionCode: tx.BankTransactionCode,
+			MandateReference:    tx.MandateReference,
 		})
 	}
 
@@ -264,9 +278,9 @@ func (a *Adapter) ParseBankStatementText(ctx context.Context, text string) (enti
 	return stmt, nil
 }
 
-func (a *Adapter) Categorize(ctx context.Context, req port.CategorizationRequest) (port.CategorizationResult, error) {
-	a.logger.Info("Starting single categorization", "categories", req.Categories, "text_len", len(req.RawText))
-	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_single_prompt")
+func (a *Adapter) Categorize(ctx context.Context, userID uuid.UUID, req port.CategorizationRequest) (port.CategorizationResult, error) {
+	a.logger.Info("Starting single categorization", "categories", req.Categories, "text_len", len(req.RawText), "user_id", userID)
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_single_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
 		promptTemplate = defaultSinglePromptTemplate
 	}
@@ -275,7 +289,7 @@ func (a *Adapter) Categorize(ctx context.Context, req port.CategorizationRequest
 	prompt = strings.ReplaceAll(prompt, "{{TEXT}}", req.RawText)
 	a.logger.Info("Sending single categorization prompt to LLM", "prompt", prompt)
 
-	rawResp, err := a.doRequest(ctx, prompt)
+	rawResp, err := a.doRequest(ctx, userID, prompt)
 	if err != nil {
 		a.logger.Error("LLM request failed for single categorization", "error", err)
 		return port.CategorizationResult{}, err
@@ -295,13 +309,14 @@ func (a *Adapter) Categorize(ctx context.Context, req port.CategorizationRequest
 		VendorName:   strings.TrimSpace(res.VendorName),
 		Amount:       res.Amount,
 		Currency:     res.Currency,
+		InvoiceDate:  res.InvoiceDate,
 		Description:  res.Description,
 	}, nil
 }
 
-func (a *Adapter) CategorizeBatch(ctx context.Context, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
-	a.logger.Info("Starting batch categorization", "txn_count", len(txns), "categories_count", len(categories), "examples_count", len(examples))
-	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_batch_prompt")
+func (a *Adapter) CategorizeBatch(ctx context.Context, userID uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
+	a.logger.Info("Starting batch categorization", "txn_count", len(txns), "categories_count", len(categories), "examples_count", len(examples), "user_id", userID)
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_batch_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
 		promptTemplate = defaultBatchPromptTemplate
 	}
@@ -315,7 +330,7 @@ func (a *Adapter) CategorizeBatch(ctx context.Context, txns []port.TransactionTo
 
 	a.logger.Info("Sending batch categorization prompt to LLM", "prompt", prompt)
 
-	rawResp, err := a.doRequest(ctx, prompt)
+	rawResp, err := a.doRequest(ctx, userID, prompt)
 	if err != nil {
 		a.logger.Error("LLM request failed for batch categorization", "error", err)
 		return nil, err
@@ -355,8 +370,8 @@ func (a *Adapter) CategorizeBatch(ctx context.Context, txns []port.TransactionTo
 	return results, nil
 }
 
-func (a *Adapter) doRequest(ctx context.Context, prompt string) (string, error) {
-	baseURL, token, model, err := a.getLLMConfig(ctx)
+func (a *Adapter) doRequest(ctx context.Context, userID uuid.UUID, prompt string) (string, error) {
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return "", err
 	}
@@ -398,9 +413,9 @@ func (a *Adapter) doGeminiRequest(ctx context.Context, url, token, model, prompt
 	return "", fmt.Errorf("empty response from gemini")
 }
 
-func (a *Adapter) ParsePayslipText(ctx context.Context, text string) (entity.Payslip, error) {
-	a.logger.Info("Starting AI payslip text parsing", "text_len", len(text))
-	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_payslip_prompt")
+func (a *Adapter) ParsePayslipText(ctx context.Context, userID uuid.UUID, text string) (entity.Payslip, error) {
+	a.logger.Info("Starting AI payslip text parsing", "text_len", len(text), "user_id", userID)
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_payslip_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
 		promptTemplate = defaultPayslipPromptTemplate
 	}
@@ -408,7 +423,7 @@ func (a *Adapter) ParsePayslipText(ctx context.Context, text string) (entity.Pay
 	prompt := strings.ReplaceAll(promptTemplate, "{{TEXT}}", text)
 	a.logger.Info("Sending payslip extraction prompt to LLM", "prompt_len", len(prompt))
 
-	rawResp, err := a.doRequest(ctx, prompt)
+	rawResp, err := a.doRequest(ctx, userID, prompt)
 	if err != nil {
 		a.logger.Error("LLM request failed for payslip extraction", "error", err)
 		return entity.Payslip{}, err
@@ -421,14 +436,14 @@ func (a *Adapter) ParsePayslipText(ctx context.Context, text string) (entity.Pay
 // ParsePayslipDocument satisfies the LLMPayslipParser interface used by the AI payslip parser.
 // For Gemini, it sends the raw document bytes as a multimodal (inline_data) request.
 // For Ollama (text-only), it falls back to the prompt-based text approach with a placeholder.
-func (a *Adapter) ParsePayslipDocument(ctx context.Context, mimeType string, data []byte) (entity.Payslip, error) {
-	a.logger.Info("Starting AI payslip document parsing (multimodal)", "mime_type", mimeType, "data_len", len(data))
-	baseURL, token, model, err := a.getLLMConfig(ctx)
+func (a *Adapter) ParsePayslipDocument(ctx context.Context, userID uuid.UUID, mimeType string, data []byte) (entity.Payslip, error) {
+	a.logger.Info("Starting AI payslip document parsing (multimodal)", "mime_type", mimeType, "data_len", len(data), "user_id", userID)
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return entity.Payslip{}, err
 	}
 
-	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_payslip_prompt")
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_payslip_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
 		promptTemplate = defaultPayslipPromptTemplate
 	}
@@ -500,6 +515,7 @@ func (a *Adapter) unmarshalPayslip(rawResp string) (entity.Payslip, error) {
 		PeriodMonthNum   int     `json:"period_month_num"`
 		PeriodYear       int     `json:"period_year"`
 		EmployeeName     string  `json:"employee_name"`
+		EmployerName     string  `json:"employer_name"` // Added EmployerName to the struct
 		TaxClass         string  `json:"tax_class"`
 		TaxID            string  `json:"tax_id"`
 		GrossPay         float64 `json:"gross_pay"`
@@ -521,6 +537,7 @@ func (a *Adapter) unmarshalPayslip(rawResp string) (entity.Payslip, error) {
 		PeriodMonthNum:   res.PeriodMonthNum,
 		PeriodYear:       res.PeriodYear,
 		EmployeeName:     res.EmployeeName,
+		EmployerName:     res.EmployerName, // Mapped the extracted value
 		TaxClass:         res.TaxClass,
 		TaxID:            res.TaxID,
 		GrossPay:         res.GrossPay,

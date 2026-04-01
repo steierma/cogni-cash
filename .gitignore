@@ -45,3 +45,11 @@ backend/.env
 /backups/*
 /*.pem
 /tmp.txt
+/tmp.json
+/LOCAL_SECRETS.md
+/pentest/
+/docs/SECURITY.md
+/mobile/deploy_android.sh
+/mobile/install_wireless.sh
+/mobile/run_wireless.sh
+/mobile/run_ios.sh

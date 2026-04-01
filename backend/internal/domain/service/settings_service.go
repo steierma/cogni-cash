@@ -5,6 +5,8 @@ import (
 	"log/slog"
 
 	"cogni-cash/internal/domain/port"
+
+	"github.com/google/uuid"
 )
 
 type SettingsService struct {
@@ -22,19 +24,19 @@ func NewSettingsService(repo port.SettingsRepository, logger *slog.Logger) *Sett
 	}
 }
 
-func (s *SettingsService) GetAll(ctx context.Context) (map[string]string, error) {
-	return s.repo.GetAll(ctx)
+func (s *SettingsService) GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
+	return s.repo.GetAll(ctx, userID)
 }
 
-func (s *SettingsService) Get(ctx context.Context, key string) (string, error) {
-	return s.repo.Get(ctx, key)
+func (s *SettingsService) Get(ctx context.Context, key string, userID uuid.UUID) (string, error) {
+	return s.repo.Get(ctx, key, userID)
 }
 
-func (s *SettingsService) UpdateMultiple(ctx context.Context, settings map[string]string) error {
+func (s *SettingsService) UpdateMultiple(ctx context.Context, settings map[string]string, userID uuid.UUID) error {
 	for key, value := range settings {
-		s.logger.Info("Updating setting", "key", key, "value_len", len(value))
-		if err := s.repo.Set(ctx, key, value); err != nil {
-			s.logger.Error("Failed to update setting", "key", key, "error", err)
+		s.logger.Info("Updating setting", "key", key, "value_len", len(value), "user_id", userID)
+		if err := s.repo.Set(ctx, key, value, userID); err != nil {
+			s.logger.Error("Failed to update setting", "key", key, "user_id", userID, "error", err)
 			return err
 		}
 	}

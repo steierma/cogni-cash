@@ -1,4 +1,4 @@
-# Gemini CLI Foundational Mandates: Cogni-Cash
+# Gemini CLI Foundational Mandates: CogniCash
 
 These instructions are foundational mandates for Gemini CLI. They take absolute precedence over general workflows and tool defaults.
 
@@ -38,10 +38,35 @@ These instructions are foundational mandates for Gemini CLI. They take absolute 
 - **Formatting:** Use `fmtCurrency` and `fmtDate` from `frontend/src/utils/formatters.ts`. These must respect `i18n.language` for locale-aware output.
 - **Persistence:** UI language is stored in the `settings` table as `ui_language` and applied via `i18n.changeLanguage`.
 
-## 5. Duplicate Detection
-- **SHA-256 Content Hashing:** Mandatory for both bank statements and payslips to prevent re-importing identical payloads.
+## 5. Mobile Development (Flutter)
+- **Layered Integrity:** Strictly maintain `core/`, `data/`, `domain/`, and `features/` (UI/Controllers) layers.
+- **Manual Entity Mapping:** Due to library instability, `fromJson` and `toJson` MUST be implemented manually. Avoid using code generators for entities until further notice.
+- **Resilient Models:** Factories MUST handle `null` values from the API gracefully using default values (e.g., `?? 0.0`) to prevent runtime crashes.
+- **Dio Provider:** All network calls MUST flow through the central `dioProvider` to inherit JWT and base URL configuration.
+- **State Management:** Use Riverpod `StateNotifier` for all business logic.
 
-## 7. Operational Maintenance & Memory
+## 6. Duplicate Detection
+- **SHA-256 Content Hashing:** Mandatory for bank statements, transactions, payslips, and invoices to prevent re-importing identical payloads.
+
+## 7. Security & Identity
+- **Secure Password Resets:**
+  - Tokens must be generated using CSPRNG (`crypto/rand`).
+  - Tokens must be **hashed (SHA-256)** at rest.
+  - Reset flow must be idempotent and short-lived (max 1 hour).
+  - Use generic response messages for "Forgot Password" to prevent email enumeration.
+
+## 8. Email & Notifications
+- **SMTP-First:** All system-generated messages (welcome, reset, alerts) must use the standard SMTP adapter.
+- **Async Delivery:** Outgoing emails must be sent asynchronously to prevent blocking the main request-response cycle.
+
+## 9. Security & Infrastructure
+- **Secret Management:** The application MUST NOT start with default or empty secrets for JWT or bank integrations.
+- **Access Control:** All sensitive system configuration endpoints MUST be protected by strict RBAC (adminMiddleware).
+- **Session & Infrastructure:** Prioritize session security (HttpOnly where possible) and container isolation (restricted port exposure).
+- **Validation:** Use strict schemas and system-level boundaries for all untrusted document or LLM data.
+
+## 10. Operational Maintenance & Memory
+- **Local Reconnaissance:** During initialization, you MUST check if `LOCAL_SECRETS.md` exists and read its content. This file contains local-only configuration that is never committed to git.
 - **Mandatory Synchronization:** After every significant change or feature completion, you MUST:
   1. Update **`MEMORY.md`** with the latest project state and completed tasks.
   2. Sync **`README.md`** to reflect new features or roadmap progress.

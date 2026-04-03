@@ -26,15 +26,19 @@ func pdfPath() string {
 func TestINGParser_ParseRealPDF(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := NewParser(logger)
-	stmt, err := p.Parse(context.Background(), uuid.Nil, pdfPath())
+
+	fileBytes, err := os.ReadFile(pdfPath())
+	if err != nil {
+		t.Fatalf("failed to read test fixture: %v", err)
+	}
+
+	stmt, err := p.Parse(context.Background(), uuid.Nil, fileBytes)
 	if err != nil {
 		t.Fatalf("unexpected parse error: %v", err)
 	}
 
 	t.Logf("Account Holder : %s", stmt.AccountHolder)
 	t.Logf("IBAN           : %s", stmt.IBAN)
-	t.Logf("BIC            : %s", stmt.BIC)
-	t.Logf("Account No     : %s", stmt.AccountNumber)
 	t.Logf("Statement No   : %d", stmt.StatementNo)
 	t.Logf("Statement Date : %s", stmt.StatementDate.Format("02.01.2006"))
 	t.Logf("Old Balance    : %.2f %s", stmt.OldBalance, stmt.Currency)
@@ -68,9 +72,6 @@ func TestINGParser_ParseRealPDF(t *testing.T) {
 	}
 	if stmt.StatementNo != 2 {
 		t.Errorf("expected statement no 2, got %d", stmt.StatementNo)
-	}
-	if stmt.AccountNumber != "0532013000" {
-		t.Errorf("expected account number 0532013000, got %q", stmt.AccountNumber)
 	}
 	if len(stmt.Transactions) == 0 {
 		t.Fatal("expected transactions to be parsed, got 0")

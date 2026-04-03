@@ -8,7 +8,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"path/filepath"
 	"strings"
 
 	"github.com/google/uuid"
@@ -21,25 +20,24 @@ type Parser struct{}
 // NewParser constructs a new invoice file parser.
 func NewParser() *Parser { return &Parser{} }
 
-// Extract reads the file at filePath and returns its plain-text content.
-// mimeType is used as a hint; the file extension takes precedence.
-func (p *Parser) Extract(_ context.Context, _ uuid.UUID, filePath, _ string) (string, error) {
-	ext := strings.ToLower(filepath.Ext(filePath))
-	switch ext {
-	case ".pdf":
-		return extractPDF(filePath)
-	default:
-		return "", fmt.Errorf("invoice parser: unsupported file type %q", ext)
+// Extract reads the file content and returns its plain-text content.
+// mimeType is used as a hint to determine the extraction strategy.
+func (p *Parser) Extract(_ context.Context, _ uuid.UUID, fileBytes []byte, mimeType string) (string, error) {
+	// If it's a PDF, extract text directly
+	if strings.Contains(strings.ToLower(mimeType), "application/pdf") {
+		return extractPDF(fileBytes)
 	}
+
+	return "", fmt.Errorf("invoice parser: unsupported mime type %q", mimeType)
 }
 
-// extractPDF pulls all readable text out of a PDF file using ledongthuc/pdf.
-func extractPDF(filePath string) (string, error) {
-	f, r, err := pdf.Open(filePath)
+// extractPDF pulls all readable text out of a PDF byte slice using ledongthuc/pdf.
+func extractPDF(fileBytes []byte) (string, error) {
+	readerAt := bytes.NewReader(fileBytes)
+	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
 	if err != nil {
-		return "", fmt.Errorf("invoice parser: open pdf: %w", err)
+		return "", fmt.Errorf("invoice parser: create pdf reader: %w", err)
 	}
-	defer f.Close()
 
 	var buf bytes.Buffer
 	totalPage := r.NumPage()

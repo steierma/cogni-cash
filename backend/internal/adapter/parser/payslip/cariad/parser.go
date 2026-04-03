@@ -1,6 +1,7 @@
 package cariad
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"regexp"
@@ -17,7 +18,6 @@ import (
 
 var (
 	rePeriod   = regexp.MustCompile(`Monatsabrechnung für ([A-Za-zäöüÄÖÜß]+) (\d{4})`)
-	reName     = regexp.MustCompile(`Name:\s*([A-Za-zäöüÄÖÜß\ ]+)`)
 	reTaxClass = regexp.MustCompile(`Steuerklasse\s*/\s*Faktor\s*(\d)`)
 
 	// reAmountGlobal finds German-formatted amounts anywhere in a text block, handling trailing minuses
@@ -33,16 +33,15 @@ func NewParser(logger *slog.Logger) *Parser {
 	return &Parser{Logger: logger}
 }
 
-func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.Payslip, error) {
-	p.Logger.Info("Parsing CARIAD Payslip PDF", "filePath", filePath)
-	raw, err := extractRawText(filePath)
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity.Payslip, error) {
+	p.Logger.Info("Parsing CARIAD Payslip PDF")
+	raw, err := extractRawText(fileBytes)
 	if err != nil {
-		p.Logger.Error("Failed to extract text from Payslip", "filePath", filePath, "error", err)
+		p.Logger.Error("Failed to extract text from Payslip", "error", err)
 		return entity.Payslip{}, fmt.Errorf("cariad parser: extract text: %w", err)
 	}
 
 	payslip := entity.Payslip{
-		SourceFile:   filePath,
 		EmployerName: "CARIAD SE", // Default employer for this parser
 	}
 
@@ -50,9 +49,6 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 	if m := rePeriod.FindStringSubmatch(raw); len(m) == 3 {
 		payslip.PeriodMonthNum = parseMonthNameToNum(m[1])
 		payslip.PeriodYear, _ = strconv.Atoi(m[2])
-	}
-	if m := reName.FindStringSubmatch(raw); len(m) == 2 {
-		payslip.EmployeeName = strings.TrimSpace(m[1])
 	}
 	if m := reTaxClass.FindStringSubmatch(raw); len(m) == 2 {
 		payslip.TaxClass = m[1]
@@ -83,12 +79,12 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 
 // ---- text extraction -------------------------------------------------------
 
-func extractRawText(filePath string) (string, error) {
-	f, r, err := pdf.Open(filePath)
+func extractRawText(fileBytes []byte) (string, error) {
+	readerAt := bytes.NewReader(fileBytes)
+	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 
 	var rawBuilder strings.Builder
 	for i := 1; i <= r.NumPage(); i++ {

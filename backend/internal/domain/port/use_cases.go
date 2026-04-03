@@ -38,7 +38,7 @@ type UserUseCase interface {
 // It covers file import (with duplicate detection), raw-text categorization,
 // manual CRUD, and original-file download.
 type InvoiceUseCase interface {
-	ImportFromFile(ctx context.Context, userID uuid.UUID, filePath, fileName, mimeType string, fileBytes []byte, categoryID *uuid.UUID) (entity.Invoice, error)
+	ImportFromFile(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, categoryID *uuid.UUID) (entity.Invoice, error)
 	CategorizeDocument(ctx context.Context, userID uuid.UUID, rawText string) (entity.Invoice, error)
 	GetAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error)
 	GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error)
@@ -49,7 +49,7 @@ type InvoiceUseCase interface {
 
 // BankStatementUseCase covers file import and deletion.
 type BankStatementUseCase interface {
-	ImportFromFile(ctx context.Context, userID uuid.UUID, filePath string, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error)
+	ImportFromFile(ctx context.Context, userID uuid.UUID, fileName string, fileBytes []byte, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error)
 	DeleteStatement(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 }
 
@@ -81,9 +81,12 @@ type SettingsUseCase interface {
 
 // PayslipUseCase covers payslip import, update, and deletion.
 type PayslipUseCase interface {
-	Import(ctx context.Context, userID uuid.UUID, filePath, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error)
+	Import(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error)
+	GetAll(ctx context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error)
+	GetByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error)
 	Update(ctx context.Context, payslip *entity.Payslip) error
 	Delete(ctx context.Context, id string, userID uuid.UUID) error
+	GetOriginalFile(ctx context.Context, id string, userID uuid.UUID) ([]byte, string, string, error)
 }
 
 type BankUseCase interface {

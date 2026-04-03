@@ -4,10 +4,12 @@ CogniCash is a **privacy-first, self-hosted** financial engine that transforms r
 
 ### 🌟 Why CogniCash?
 
-*   **🧠 Local-First AI Intelligence:** Leverage local LLMs (like Llama 3 via Ollama) to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Your financial secrets stay on *your* hardware.
+*   **🧠 Local-First AI Intelligence:** Leverage local LLMs (like Llama 3 via Ollama) to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Includes a **Hybrid Matcher** that first checks for high-confidence (90%+) historical matches in your local database before calling the AI.
 *   **🏦 Seamless Bank Integration:** Synchronize directly with real-world bank accounts via **Enable Banking (PSD2)** or import files from major providers like **ING, Amazon Visa, and VW/CARIAD**.
 *   **📊 Precision Analytics & Review:** Master your cash flow with deep-dive analytics, a dedicated **Review Mode (Inbox)** for new transactions, and a smart **Reconciliation Wizard** to link internal transfers and prevent double-counting.
 *   **👥 Multi-Tenant by Design:** Built up for **Full User Tenancy**, allowing multiple users to manage their isolated financial data on a single instance.
+*   **📱 Offline-First Mobile App:** High-fidelity Flutter app with a **Cache-First (Isar)** architecture and **Mutation Outbox** for seamless financial management without a network connection.
+*   **🥧 Raspberry Pi 5 Ready:** Fully compatible with **ARM64** architectures (tested on Raspberry Pi 5).
 
 ## Intro Video
 
@@ -92,12 +94,12 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 | **Frontend** | React 19 + TypeScript + Vite                  |
 | **Styling** | Tailwind CSS v4                               |
 | **Data fetching** | TanStack Query v5 + Axios                     |
-| **Charts** | Recharts 3 (Web)                              |
-| **Icons** | Lucide React (Web)                            |
-| **Routing** | React Router v7 (Web)                         |
-| **i18n** | `i18next` + `react-i18next` + `i18next-browser-languagedetector` |
-| **Database** | PostgreSQL 16 (Docker container)              |
-| **Reverse proxy** | Caddy 2 (production HTTPS) / Nginx (SPA container) |
+| **Charts** | Recharts 3 (Web) / fl_chart (Mobile)         |
+| **Icons** | Lucide React (Web) / Material Icons (Mobile) |
+| **Routing** | React Router v7 (Web) / GoRouter (Mobile)    |
+| **i18n** | `i18next` (Web) / `L10n` (Mobile)             |
+| **Database** | PostgreSQL 16 (Server) / Isar (Mobile Cache)  |
+| **Offline Sync** | Mutation Outbox Pattern (Mobile)              |
 | **Container runtime** | Docker + Compose                              |
 | **CI/CD** | Forgejo Actions → GHCR                        |
 
@@ -145,7 +147,9 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 │   ├── 007_add_transaction_reviewed.sql    # Transaction review status (Inbox)
 │   ├── 008_add_password_reset_tokens.sql   # Secure forgot-password flow
 │   ├── 009_add_bank_account_sync_error.sql # Transparent sync error reporting
-│   └── 010_add_user_tenancy.sql            # Full multi-tenant isolation
+│   ├── 010_add_user_tenancy.sql            # Full multi-tenant isolation
+│   ├── 011_enrich_transactions.sql         # Transaction enrichment (Counterparty)
+│   └── 012_add_fuzzy_matching.sql          # pg_trgm fuzzy matcher + schema cleanup
 ├── balance/               # Sample bank statement files for testing
 │   ├── payslips/              # Local drop-zone (default PAYSLIP_HOST_DIR)
 │   │   ├── payslips_import.json   # Drop here to trigger JSON bulk import
@@ -172,10 +176,10 @@ All feature code is written **test-first (TDD)**. Domain logic is tested with mo
 │   └── Dockerfile             # node:22-alpine build → nginx:1.27-alpine serve
 ├── caddy/
 │   └── Caddyfile              # Reverse proxy: HTTPS termination → frontend + backend
-├── docs/
-│   └── DATABASE_SCHEMA.md     # Detailed schema documentation
+├── docs/                      # Conceptual design and architecture docs
 ├── scripts/
 │   └── setup-server.sh        # One-command server bootstrap
+├── DATABASE_SCHEMA.md         # Detailed schema documentation
 ├── docker-compose.yml         # Production: pulls pre-built images from GHCR
 ├── docker-compose.override.yml # Local dev: builds from source, exposes ports
 └── Makefile
@@ -210,6 +214,8 @@ make frontend-dev     # Vite dev server on :5173
 
 ```bash
 cp backend/.env.example backend/.env
+# Copy the local build override
+cp docker-compose.override.yml.example docker-compose.override.yml
 # Edit backend/.env — set POSTGRES_PASSWORD and DOMAIN_NAME at minimum
 make build            # builds backend + frontend images locally
 make up               # starts postgres → migrate → backend → frontend → caddy
@@ -326,7 +332,7 @@ The React frontend has been built to provide deep analytics and efficient batch 
 | `/categories`      | **Categories** | Centralized category management. Create, rename, or delete categories and assign custom hexadecimal colors used across charts and badges.                                                                                                                                                                    |
 | `/bank-statements` | **Statements** | List all imported files with integrated **Drag & Drop file upload** for PDF, CSV, and XLS statements. Distinguishes visually between Giro, Credit Card, and Extra Account statements. View transaction counts and period balances. |
 | `/bank-connections` | **Connections** | Manage live bank API connections. Search for and link banks via **Enable Banking**. View linked accounts with **real-time balances**, human-readable institution names, and **transparent sync error reporting (tooltips)**. Configure **Account Types** (Giro, Credit Card, Extra Account) per account for accurate reconciliation. Sync all accounts in background. |
-| `/payslips`        | **Payslips** | Full HR document management. **Quick drag-and-drop** single PDF upload with a **Force AI Parsing** toggle and a **Manual Override modal** to force-correct any field. **Batch upload** of multiple PDFs at once. **PDF preview** inline in-browser and **download** of the stored original. View/Edit modal for all structured fields including bonuses. KPI cards for latest gross/net/adjusted net with month-over-month trend. Cumulative income growth chart (Gross, Total Net, Adjusted Net, Payout lines) with configurable **bonus exclusion** and **leasing add-back** controls. Filterable by period range, employee, and tax class. Column visibility persisted to settings. Payslips imported via JSON manifest show a grayed-out preview/download button. |
+| `/payslips`        | **Payslips** | Full HR document management. **Quick drag-and-drop** single PDF upload with a **Force AI Parsing** toggle and a **Manual Override modal** to force-correct any field. **Batch upload** of multiple PDFs at once. **PDF preview** inline in-browser and **download** of the stored original. View/Edit modal for all structured fields including bonuses. KPI cards for latest gross/net/adjusted net with month-over-month trend. Salary trend and yearly charts (Gross, Total Net, Adjusted Net, Payout lines) with configurable **bonus exclusion** controls. Filterable by period range, employee, and tax class. Column visibility persisted to settings. Payslips imported via JSON manifest show a grayed-out preview/download button. |
 | `/reconcile`       | **Reconcile** | Dedicated 1:1 transaction reconciliation wizard. Globally scans all pending accounts to find exact matching internal transfers (where a debit and credit sum to zero) and links them to prevent double-counting in analytics. Supports both statement-based and **Live Feed** transactions with a **floating action button** for rapid batch linking. |
 | `/users`           | **Users** | Manage system access and profiles. View user details, create new users, modify roles (Admin or Manager), and delete accounts. This route is strictly protected via RBAC (Admins only). |
 | `/settings`        | **Settings** | Configure LLM parameters, edit system prompts, manage background auto-import/categorization intervals, change themes, **select UI language**, update passwords, and persist UI preferences. |
@@ -354,98 +360,9 @@ All pages and components use `useTranslation()` — zero hard-coded user-visible
 
 ## API Reference
 
-The backend exposes a RESTful API under the `/api/v1` namespace. All endpoints except `/health` and `/login` require a valid JWT Bearer token.
+The backend exposes a RESTful API under the `/api/v1` namespace. For a detailed list of all endpoints and parameters, see the [API Reference Documentation](docs/API_REFERENCE.md).
 
-### Public Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | Health check — returns `{"status": "ok"}` |
-| `POST` | `/api/v1/login` | Authenticate and receive a JWT |
-
-### Authenticated Endpoints
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/auth/me` | Get current user profile |
-| `POST` | `/api/v1/auth/change-password` | Change current user's password |
-| `GET` | `/api/v1/system/info` | System info (DB state, storage mode, version) |
-
-### Settings
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/settings/` | Get all settings |
-| `PATCH` | `/api/v1/settings/` | Update settings (key-value pairs) |
-
-### Users (Admin Only)
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/users/` | List users (optional `?q=` search) |
-| `GET` | `/api/v1/users/{id}` | Get user by ID |
-| `POST` | `/api/v1/users/` | Create user |
-| `PUT` | `/api/v1/users/{id}` | Update user |
-| `DELETE` | `/api/v1/users/{id}` | Delete user |
-
-### Invoices
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/invoices/` | List all invoices |
-| `GET` | `/api/v1/invoices/{id}` | Get invoice by ID |
-| `GET` | `/api/v1/invoices/{id}/download` | Download original uploaded file |
-| `POST` | `/api/v1/invoices/import` | Import a file — multipart upload (`file` field); optional `category_id` override. Returns `409` on duplicate. |
-| `POST` | `/api/v1/invoices/categorize` | Submit raw text for LLM categorization (no file) |
-| `PUT` | `/api/v1/invoices/{id}` | Update invoice fields (vendor, category, amount, currency, date, description) |
-| `DELETE` | `/api/v1/invoices/{id}` | Delete invoice |
-
-### Bank Statements
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/bank-statements/` | List all statement summaries |
-| `GET` | `/api/v1/bank-statements/{id}` | Get statement with transactions |
-| `GET` | `/api/v1/bank-statements/{id}/download` | Download original file |
-| `POST` | `/api/v1/bank-statements/import` | Import file(s) — multipart upload |
-| `DELETE` | `/api/v1/bank-statements/{id}` | Delete statement + cascade transactions |
-
-### Transactions
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/transactions/` | List transactions (filterable) |
-| `GET` | `/api/v1/transactions/analytics` | Aggregated analytics (KPIs, time series, top merchants) |
-| `PATCH` | `/api/v1/transactions/{hash}/category` | Update transaction category |
-| `POST` | `/api/v1/transactions/auto-categorize/start` | Start async batch categorization |
-| `GET` | `/api/v1/transactions/auto-categorize/status` | Poll job progress |
-| `POST` | `/api/v1/transactions/auto-categorize/cancel` | Cancel running job |
-
-### Categories
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/categories/` | List all categories |
-| `POST` | `/api/v1/categories/` | Create category |
-| `PUT` | `/api/v1/categories/{id}` | Update category |
-| `DELETE` | `/api/v1/categories/{id}` | Delete category |
-
-### Reconciliations
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/reconciliations/suggestions` | Get matching transaction pairs |
-| `GET` | `/api/v1/reconciliations/` | List all reconciliations |
-| `POST` | `/api/v1/reconciliations/` | Create reconciliation link |
-| `DELETE` | `/api/v1/reconciliations/{id}` | Delete reconciliation link |
-
-### Bank Integration
-
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/api/v1/bank/institutions` | Search for banks by country |
-| `POST` | `/api/v1/bank/connections` | Create a new connection (requisition) |
-| `POST` | `/api/v1/bank/connections/finish` | Finalize a connection after auth |
+-----
 | `GET` | `/api/v1/bank/connections` | List active bank connections (includes nested accounts and balances) |
 | `DELETE` | `/api/v1/bank/connections/{id}` | Delete a bank connection |
 | `POST` | `/api/v1/bank/sync` | Manually trigger background account sync |
@@ -536,6 +453,7 @@ Migrations are plain SQL files in `backend/migrations/`, applied in lexicographi
 | `009_add_bank_account_sync_error.sql` | Adds `last_sync_error` column to `bank_accounts` for UI visibility. |
 | `010_add_user_tenancy.sql` | Implements **Full User Tenancy** (Isolation) across all tables and entities. |
 | `011_enrich_transactions.sql` | Adds `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and `mandate_reference` to transactions for improved categorization and reconciliation. |
+| `012_add_fuzzy_matching.sql` | Enables `pg_trgm` extension and adds GIN indexes for high-performance fuzzy matching. Includes schema cleanup (removes redundant fields across all document tables). |
 
 -----
 
@@ -594,7 +512,15 @@ SMTP integration is fully implemented for automated user notifications and syste
 * [x] **Database Isolation:** Migration `010` adds `user_id` to all data-owning tables.
 * [x] **Backend Tenancy:** All repositories and services filtered by `UserID`.
 
-### 7. Resilient Backup Strategy (Proxmox + rclone)
+### 7. Hybrid AI Categorization ✅
+
+The system uses a sophisticated hybrid approach to transaction categorization that balances speed, cost, and intelligence.
+
+* [x] **DB-First Matching:** Before calling the AI, the system checks the local database for exact or high-confidence (65%+) historical matches using trigram similarity indexes.
+* [x] **Few-Shot Learning:** If no high-confidence match is found, the system calls the local LLM (Ollama), providing a total of 20 unique historical examples from the user's data to improve accuracy.
+* [x] **Performance Optimization:** Implemented `pg_trgm` and GIN indexes to ensure fuzzy matching remains instantaneous as data grows.
+
+### 8. Resilient Backup Strategy (Proxmox + rclone)
 
 * [ ] Implement off-site encrypted backups of PostgreSQL dumps and the `payslips` directory to Google Drive via `rclone`.
 * [ ] Document local manual backup procedures and enforce manual Proxmox snapshots prior to major upgrades.

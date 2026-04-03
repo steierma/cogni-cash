@@ -32,7 +32,7 @@ type mockInvoiceParser struct {
 	err  error
 }
 
-func (m *mockInvoiceParser) Extract(_ context.Context, _ uuid.UUID, _, _ string) (string, error) {
+func (m *mockInvoiceParser) Extract(_ context.Context, _ uuid.UUID, _ []byte, _ string) (string, error) {
 	return m.text, m.err
 }
 
@@ -102,7 +102,7 @@ func (m *mockInvoiceRepo) ExistsByContentHash(_ context.Context, hash string, _ 
 func (m *mockInvoiceRepo) GetOriginalFile(_ context.Context, id uuid.UUID, _ uuid.UUID) ([]byte, string, string, error) {
 	for _, inv := range m.saved {
 		if inv.ID == id {
-			return inv.OriginalFileContent, inv.OriginalFileMime, inv.OriginalFileName, nil
+			return inv.OriginalFileContent, "application/pdf", inv.OriginalFileName, nil
 		}
 	}
 	return nil, "", "", entity.ErrInvoiceNotFound
@@ -242,7 +242,7 @@ func TestImportFromFile_HappyPath(t *testing.T) {
 	svc := newTestInvoiceSvc(llm, repo)
 
 	fileBytes := []byte("fake pdf content")
-	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "invoice.pdf", "application/pdf", fileBytes, nil)
+	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "invoice.pdf", "application/pdf", fileBytes, nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -251,9 +251,6 @@ func TestImportFromFile_HappyPath(t *testing.T) {
 	}
 	if inv.ContentHash == "" {
 		t.Error("expected content hash to be set")
-	}
-	if inv.OriginalFileSize != int64(len(fileBytes)) {
-		t.Errorf("expected file size %d, got %d", len(fileBytes), inv.OriginalFileSize)
 	}
 	if len(repo.saved) != 1 {
 		t.Errorf("expected 1 saved invoice, got %d", len(repo.saved))
@@ -270,11 +267,10 @@ func TestImportFromFile_DuplicateHash_ReturnsError(t *testing.T) {
 	}
 	svc := newTestInvoiceSvc(&mockLLMClient{}, repo)
 
-	// Import once to get the real hash stored
-	_, _ = svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "a.pdf", "application/pdf", fileBytes, nil)
+	_, _ = svc.ImportFromFile(context.Background(), dummyUserID, "a.pdf", "application/pdf", fileBytes, nil)
 
 	// Try to import the exact same bytes again
-	_, err := svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "a.pdf", "application/pdf", fileBytes, nil)
+	_, err := svc.ImportFromFile(context.Background(), dummyUserID, "a.pdf", "application/pdf", fileBytes, nil)
 	if !errors.Is(err, service.ErrInvoiceDuplicate) {
 		t.Errorf("expected ErrInvoiceDuplicate on second import, got %v", err)
 	}
@@ -288,7 +284,7 @@ func TestImportFromFile_CallerCategoryOverridesLLM(t *testing.T) {
 	svc := newTestInvoiceSvc(llm, repo)
 
 	overrideCatID := uuid.New()
-	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "dummy/path", "inv.pdf", "application/pdf", []byte("pdf"), &overrideCatID)
+	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "inv.pdf", "application/pdf", []byte("pdf"), &overrideCatID)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

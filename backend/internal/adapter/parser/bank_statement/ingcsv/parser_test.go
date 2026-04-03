@@ -27,14 +27,19 @@ func csvPath() string {
 func TestINGCSVParser_ParseRealCSV(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := ingcsv.NewParser(logger)
-	stmt, err := p.Parse(context.Background(), uuid.Nil, csvPath())
+
+	fileBytes, err := os.ReadFile(csvPath())
+	if err != nil {
+		t.Fatalf("failed to read test fixture: %v", err)
+	}
+
+	stmt, err := p.Parse(context.Background(), uuid.Nil, fileBytes)
 	if err != nil {
 		t.Fatalf("unexpected parse error: %v", err)
 	}
 
 	t.Logf("Account Holder : %s", stmt.AccountHolder)
 	t.Logf("IBAN           : %s", stmt.IBAN)
-	t.Logf("BIC            : %s", stmt.BIC)
 	t.Logf("New Balance    : %.2f %s", stmt.NewBalance, stmt.Currency)
 	t.Logf("Old Balance    : %.2f %s", stmt.OldBalance, stmt.Currency)
 	t.Logf("Transactions   : %d", len(stmt.Transactions))
@@ -55,9 +60,6 @@ func TestINGCSVParser_ParseRealCSV(t *testing.T) {
 	}
 	if stmt.AccountHolder != "Erika Mustermann" {
 		t.Errorf("expected account holder Erika Mustermann, got %q", stmt.AccountHolder)
-	}
-	if stmt.BIC != "INGDDEFFXXX" {
-		t.Errorf("expected BIC INGDDEFFXXX, got %q", stmt.BIC)
 	}
 	if stmt.NewBalance != -352.76 {
 		t.Errorf("expected new balance -352.76, got %.2f", stmt.NewBalance)

@@ -178,6 +178,7 @@ deploy-up:
 	$(DEPLOY_SSH) $(DEPLOY_USER)@$(DEPLOY_HOST) \
 		"cd $(DEPLOY_PATH) && \
 		 [ -f .env ] || cp backend/.env.example .env && \
+		 export IMAGE_SUFFIX=-internal && \
 		 docker compose pull && \
 		 docker compose up -d --remove-orphans && \
 		 docker compose ps"
@@ -284,10 +285,10 @@ gen-testdata:
 
 # ── Frontend ──────────────────────────────────────────────────────────────────
 frontend-dev:
-	cd $(FRONTEND_DIR) && npm run dev
+	cd $(FRONTEND_DIR) && npx vite --mode development
 
 frontend-dev-prod:
-	cd $(FRONTEND_DIR) && npx vite --mode prod-local
+	cd $(FRONTEND_DIR) && npx vite --mode production
 
 frontend-build:
 	cd $(FRONTEND_DIR) && npm run build

@@ -40,14 +40,6 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv entity.Invoice) error 
 	if inv.OriginalFileName != "" {
 		origName = &inv.OriginalFileName
 	}
-	var origMime *string
-	if inv.OriginalFileMime != "" {
-		origMime = &inv.OriginalFileMime
-	}
-	var origSize *int64
-	if inv.OriginalFileSize > 0 {
-		origSize = &inv.OriginalFileSize
-	}
 	var origContent []byte
 	if len(inv.OriginalFileContent) > 0 {
 		origContent = inv.OriginalFileContent
@@ -56,13 +48,12 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv entity.Invoice) error 
 	r.Logger.Info("Saving invoice", "id", inv.ID, "user_id", inv.UserID)
 	_, err := r.pool.Exec(ctx, `
 		INSERT INTO invoices (
-			id, user_id, raw_text, category_id, vendor, amount, currency, invoice_date,
+			id, user_id, category_id, vendor, amount, currency, invoice_date,
 			description,
-			content_hash, original_file_name, original_file_mime, original_file_size, original_file_content
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13, $14)
+			content_hash, original_file_name, original_file_content
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
 		ON CONFLICT (id) DO UPDATE SET
 			user_id              = EXCLUDED.user_id,
-			raw_text             = EXCLUDED.raw_text,
 			category_id          = EXCLUDED.category_id,
 			vendor               = EXCLUDED.vendor,
 			amount               = EXCLUDED.amount,
@@ -71,12 +62,10 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv entity.Invoice) error 
 			description          = EXCLUDED.description,
 			content_hash         = COALESCE(EXCLUDED.content_hash, invoices.content_hash),
 			original_file_name   = COALESCE(EXCLUDED.original_file_name, invoices.original_file_name),
-			original_file_mime   = COALESCE(EXCLUDED.original_file_mime, invoices.original_file_mime),
-			original_file_size   = COALESCE(EXCLUDED.original_file_size, invoices.original_file_size),
 			original_file_content= COALESCE(EXCLUDED.original_file_content, invoices.original_file_content)`,
-		inv.ID, inv.UserID, inv.RawText, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt,
+		inv.ID, inv.UserID, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt,
 		inv.Description,
-		contentHash, origName, origMime, origSize, origContent,
+		contentHash, origName, origContent,
 	)
 	if err != nil {
 		r.Logger.Error("Failed to save invoice", "id", inv.ID, "user_id", inv.UserID, "error", err)
@@ -96,15 +85,14 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 	r.Logger.Info("Updating invoice", "id", inv.ID, "user_id", inv.UserID)
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE invoices SET
-			raw_text     = $2,
-			category_id  = $3,
-			vendor       = $4,
-			amount       = $5,
-			currency     = $6,
-			invoice_date = $7,
-			description  = $8
-		WHERE id = $1 AND user_id = $9`,
-		inv.ID, inv.RawText, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt, inv.Description, inv.UserID,
+			category_id  = $2,
+			vendor       = $3,
+			amount       = $4,
+			currency     = $5,
+			invoice_date = $6,
+			description  = $7
+		WHERE id = $1 AND user_id = $8`,
+		inv.ID, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt, inv.Description, inv.UserID,
 	)
 	if err != nil {
 		return fmt.Errorf("invoice repo: update: %w", err)
@@ -119,8 +107,8 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error) {
 	r.Logger.Info("Finding invoice by ID", "id", id, "user_id", userID)
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, raw_text, category_id, vendor, amount, currency, invoice_date,
-		       content_hash, original_file_name, original_file_mime, original_file_size,
+		SELECT id, user_id, category_id, vendor, amount, currency, invoice_date,
+		       content_hash, original_file_name,
 		       description
 		FROM invoices WHERE id = $1 AND user_id = $2`, id, userID)
 	inv, err := scanInvoice(row)
@@ -137,8 +125,8 @@ func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID u
 func (r *InvoiceRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error) {
 	r.Logger.Info("Finding all invoices", "user_id", userID)
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, raw_text, category_id, vendor, amount, currency, invoice_date,
-		       content_hash, original_file_name, original_file_mime, original_file_size,
+		SELECT id, user_id, category_id, vendor, amount, currency, invoice_date,
+		       content_hash, original_file_name,
 		       description
 		FROM invoices
 		WHERE user_id = $1
@@ -188,10 +176,10 @@ func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string
 // an invoice, or an error when no file was attached.
 func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error) {
 	var content []byte
-	var mime, name *string
+	var name *string
 	err := r.pool.QueryRow(ctx,
-		`SELECT original_file_content, original_file_mime, original_file_name FROM invoices WHERE id = $1 AND user_id = $2`, id, userID).
-		Scan(&content, &mime, &name)
+		`SELECT original_file_content, original_file_name FROM invoices WHERE id = $1 AND user_id = $2`, id, userID).
+		Scan(&content, &name)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", "", entity.ErrInvoiceNotFound
@@ -201,15 +189,11 @@ func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, u
 	if len(content) == 0 {
 		return nil, "", "", fmt.Errorf("invoice repo: no file stored for invoice %s", id)
 	}
-	mimeStr := ""
-	if mime != nil {
-		mimeStr = *mime
-	}
 	nameStr := ""
 	if name != nil {
 		nameStr = *name
 	}
-	return content, mimeStr, nameStr, nil
+	return content, "application/pdf", nameStr, nil
 }
 
 // ── scanner helper ──────────────────────────────────────────────────────────
@@ -222,14 +206,11 @@ func scanInvoice(row scanner) (entity.Invoice, error) {
 		issuedAt    *time.Time
 		contentHash *string
 		origName    *string
-		origMime    *string
-		origSize    *int64
 		description string
 	)
 	err := row.Scan(
 		&inv.ID,
 		&inv.UserID,
-		&inv.RawText,
 		&categoryID,
 		&vendorName,
 		&inv.Amount,
@@ -237,8 +218,6 @@ func scanInvoice(row scanner) (entity.Invoice, error) {
 		&issuedAt,
 		&contentHash,
 		&origName,
-		&origMime,
-		&origSize,
 		&description,
 	)
 	if err != nil {
@@ -256,12 +235,6 @@ func scanInvoice(row scanner) (entity.Invoice, error) {
 	}
 	if origName != nil {
 		inv.OriginalFileName = *origName
-	}
-	if origMime != nil {
-		inv.OriginalFileMime = *origMime
-	}
-	if origSize != nil {
-		inv.OriginalFileSize = *origSize
 	}
 	return inv, nil
 }

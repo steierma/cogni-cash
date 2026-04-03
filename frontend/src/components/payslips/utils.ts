@@ -1,6 +1,6 @@
 import type { Payslip } from '../../api/types';
 
-export type ColKey = 'period' | 'employee' | 'employer' | 'gross' | 'net' | 'adjNet' | 'payout' | 'leasing';
+export type ColKey = 'period' | 'employer' | 'gross' | 'net' | 'adjNet' | 'payout' | 'leasing';
 export type SortDirection = 'asc' | 'desc';
 
 export const formatYearMonth = (year: number, monthNum: number) => {

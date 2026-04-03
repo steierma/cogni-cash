@@ -2,13 +2,13 @@ import {useState, useRef, useMemo, useEffect} from 'react';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
-    Briefcase, Pencil, TrendingUp, Wallet, Filter, Columns, Check, FileUp, ArrowUpRight, ArrowDownRight, BrainCircuit
+    Briefcase, Pencil, TrendingUp, Wallet, Filter, Columns, Check, FileUp, ArrowUpRight, ArrowDownRight, BrainCircuit, BarChart3
 } from 'lucide-react';
 import {
     deletePayslip, fetchPayslips, importPayslip, downloadPayslipFile, updatePayslip,
-    fetchSettings, updateSettings, fetchMe, getPayslipPreviewUrl
+    fetchSettings, updateSettings, getPayslipPreviewUrl, importPayslipsBatch
 } from '../api/client';
-import type {Payslip, User} from '../api/types';
+import type {Payslip} from '../api/types';
 import {fmtCurrency} from '../utils/formatters';
 
 import {type ColKey, type SortDirection, formatYearMonth, getAdjustedNetto} from '../components/payslips/utils';
@@ -18,7 +18,8 @@ import {
     ViewPayslipModal,
     PreviewPayslipModal,
     ImportPayslipModal,
-    EditPayslipModal
+    EditPayslipModal,
+    BatchResultsModal
 } from '../components/payslips/PayslipModals';
 
 export default function PayslipsPage() {
@@ -34,23 +35,25 @@ export default function PayslipsPage() {
     const [isUploadModalOpen, setIsUploadModalOpen] = useState(false);
     const [editingPayslip, setEditingPayslip] = useState<Payslip | null>(null);
     const [viewingPayslip, setViewingPayslip] = useState<Payslip | null>(null);
+    const [previewingPayslip, setPreviewingPayslip] = useState<Payslip | null>(null);
     const [previewUrl, setPreviewUrl] = useState<string | null>(null);
     const [isPreviewLoading, setIsPreviewLoading] = useState<string | null>(null);
+    const [batchResults, setBatchResults] = useState<{ successful: Payslip[], failed: { filename: string, error: string }[] } | null>(null);
 
     // Filter States
     const [selectedStartPeriod, setSelectedStartPeriod] = useState<string>('All');
     const [selectedEndPeriod, setSelectedEndPeriod] = useState<string>('All');
-    const [selectedEmployee, setSelectedEmployee] = useState<string>('All');
+    const [selectedEmployer, setSelectedEmployer] = useState<string>('All');
     const [selectedTaxClass, setSelectedTaxClass] = useState<string>('All');
 
     const [appliedStartPeriod, setAppliedStartPeriod] = useState<string>('All');
     const [appliedEndPeriod, setAppliedEndPeriod] = useState<string>('All');
-    const [appliedEmployee, setAppliedEmployee] = useState<string>('All');
+    const [appliedEmployer, setAppliedEmployer] = useState<string>('All');
     const [appliedTaxClass, setAppliedTaxClass] = useState<string>('All');
 
     // Shared Chart/Table States
     const [excludedBonuses, setExcludedBonuses] = useState<Set<string>>(new Set());
-    const [excludeLeasing, setExcludeLeasing] = useState(true);
+    const [excludeLeasing] = useState(true);
     const [useProportionalMath, setUseProportionalMath] = useState(true);
     const [ignoredPayslipIds, setIgnoredPayslipIds] = useState<Set<string>>(new Set());
     const [initializedBonuses, setInitializedBonuses] = useState(false);
@@ -58,16 +61,24 @@ export default function PayslipsPage() {
     // Table Settings
     const [showColMenu, setShowColMenu] = useState(false);
     const [visibleCols, setVisibleCols] = useState<Record<ColKey, boolean>>({
-        period: true, employee: true, employer: true, gross: true, net: true, adjNet: false, payout: true, leasing: false,
+        period: true, employer: true, gross: true, net: true, adjNet: false, payout: true, leasing: false,
     });
     const [sortConfig, setSortConfig] = useState<{ key: ColKey; direction: SortDirection }>({
         key: 'period', direction: 'desc'
     });
 
     // ── Queries & Mutations ──
-    const {data: payslips, isLoading} = useQuery<Payslip[]>({queryKey: ['payslips'], queryFn: fetchPayslips});
+    const {data: payslips = [], isLoading} = useQuery<Payslip[], Error>({
+        queryKey: ['payslips', appliedEmployer],
+        queryFn: () => fetchPayslips(appliedEmployer === 'All' ? undefined : appliedEmployer)
+    });
+
+    // We need all payslips to populate the filter dropdowns correctly
+    const {data: allPayslips = []} = useQuery<Payslip[], Error>({
+        queryKey: ['payslips', 'all'],
+        queryFn: () => fetchPayslips()
+    });
     const {data: settings} = useQuery({queryKey: ['settings'], queryFn: fetchSettings});
-    const {data: currentUser} = useQuery<User>({queryKey: ['currentUser'], queryFn: fetchMe});
 
     useEffect(() => {
         if (settings?.payslips_visible_cols) {
@@ -87,6 +98,14 @@ export default function PayslipsPage() {
         },
     });
 
+    const batchUploadMutation = useMutation({
+        mutationFn: importPayslipsBatch,
+        onSuccess: (data) => {
+            queryClient.invalidateQueries({queryKey: ['payslips']});
+            setBatchResults(data);
+        },
+    });
+
     const deleteMutation = useMutation({
         mutationFn: deletePayslip,
         onSuccess: () => queryClient.invalidateQueries({queryKey: ['payslips']}),
@@ -100,6 +119,7 @@ export default function PayslipsPage() {
         onSuccess: () => {
             queryClient.invalidateQueries({queryKey: ['payslips']});
             setEditingPayslip(null);
+            setPreviewingPayslip(null);
         },
     });
 
@@ -110,10 +130,17 @@ export default function PayslipsPage() {
 
     // ── Handlers ──
     const handleFiles = (files: FileList | File[]) => {
-        const file = Array.from(files)[0];
-        if (!file) return;
-        uploadMutation.reset();
-        uploadMutation.mutate({file, useAI});
+        const fileList = Array.from(files);
+        if (fileList.length === 0) return;
+
+        if (fileList.length === 1) {
+            uploadMutation.reset();
+            uploadMutation.mutate({file: fileList[0], useAI});
+        } else {
+            batchUploadMutation.reset();
+            batchUploadMutation.mutate(fileList);
+        }
+
         if (inputRef.current) inputRef.current.value = '';
     };
 
@@ -126,7 +153,7 @@ export default function PayslipsPage() {
     const handleApplyFilters = () => {
         setAppliedStartPeriod(selectedStartPeriod);
         setAppliedEndPeriod(selectedEndPeriod);
-        setAppliedEmployee(selectedEmployee);
+        setAppliedEmployer(selectedEmployer);
         setAppliedTaxClass(selectedTaxClass);
     };
 
@@ -145,6 +172,8 @@ export default function PayslipsPage() {
     const handlePreview = async (id: string) => {
         try {
             setIsPreviewLoading(id);
+            const p = payslips.find(ps => ps.id === id);
+            if (p) setPreviewingPayslip(p);
             const url = await getPayslipPreviewUrl(id);
             setPreviewUrl(url);
         } catch (error) {
@@ -159,37 +188,38 @@ export default function PayslipsPage() {
             URL.revokeObjectURL(previewUrl);
         }
         setPreviewUrl(null);
+        setPreviewingPayslip(null);
     };
 
     // ── Data Processing ──
     const uniqueBonuses = useMemo(() => {
         const bonuses = new Set<string>();
-        (payslips || []).forEach(p => p.bonuses?.forEach(sz => bonuses.add(sz.description)));
+        ((allPayslips as Payslip[]) || []).forEach(p => p.bonuses?.forEach(sz => bonuses.add(sz.description)));
         return Array.from(bonuses).sort();
-    }, [payslips]);
+    }, [allPayslips]);
 
     useEffect(() => {
-        if (payslips && payslips.length > 0 && !initializedBonuses && uniqueBonuses.length > 0) {
+        if (allPayslips && (allPayslips as Payslip[]).length > 0 && !initializedBonuses && uniqueBonuses.length > 0) {
             setExcludedBonuses(new Set(uniqueBonuses));
             setInitializedBonuses(true);
         }
-    }, [payslips, uniqueBonuses, initializedBonuses]);
+    }, [allPayslips, uniqueBonuses, initializedBonuses]);
 
-    const {uniquePeriods, uniqueEmployees, uniqueTaxClasses} = useMemo(() => {
-        if (!payslips) return {uniquePeriods: [], uniqueEmployees: [], uniqueTaxClasses: []};
+    const {uniquePeriods, uniqueEmployers, uniqueTaxClasses} = useMemo(() => {
+        if (!allPayslips || (allPayslips as Payslip[]).length === 0) return {uniquePeriods: [], uniqueEmployers: [], uniqueTaxClasses: []};
         return {
-            uniquePeriods: Array.from(new Set(payslips.map(p => formatYearMonth(p.period_year, p.period_month_num)))).sort((a, b) => b.localeCompare(a)),
-            uniqueEmployees: Array.from(new Set(payslips.map(p => p.employee_name).filter(Boolean))).sort(),
-            uniqueTaxClasses: Array.from(new Set(payslips.map(p => p.tax_class).filter(Boolean))).sort(),
+            uniquePeriods: Array.from(new Set((allPayslips as Payslip[]).map(p => formatYearMonth(p.period_year, p.period_month_num)))).sort((a, b) => b.localeCompare(a)),
+            uniqueEmployers: Array.from(new Set((allPayslips as Payslip[]).map(p => p.employer_name).filter(Boolean))).sort(),
+            uniqueTaxClasses: Array.from(new Set((allPayslips as Payslip[]).map(p => p.tax_class).filter(Boolean))).sort(),
         };
-    }, [payslips]);
+    }, [allPayslips]);
 
     const filteredPayslips = useMemo(() => {
-        const filtered = (payslips || []).filter(p => {
+        const filtered = ((payslips as Payslip[]) || []).filter(p => {
             const period = formatYearMonth(p.period_year, p.period_month_num);
             if (appliedStartPeriod !== 'All' && period < appliedStartPeriod) return false;
             if (appliedEndPeriod !== 'All' && period > appliedEndPeriod) return false;
-            if (appliedEmployee !== 'All' && p.employee_name !== appliedEmployee) return false;
+            if (appliedEmployer !== 'All' && p.employer_name !== appliedEmployer) return false;
             if (appliedTaxClass !== 'All' && p.tax_class !== appliedTaxClass) return false;
             return true;
         });
@@ -199,9 +229,6 @@ export default function PayslipsPage() {
             switch (sortConfig.key) {
                 case 'period':
                     comparison = (a.period_year - b.period_year) || ((a.period_month_num || 0) - (b.period_month_num || 0));
-                    break;
-                case 'employee':
-                    comparison = (a.employee_name || '').localeCompare(b.employee_name || '');
                     break;
                 case 'employer':
                     comparison = (a.employer_name || '').localeCompare(b.employer_name || '');
@@ -225,7 +252,17 @@ export default function PayslipsPage() {
             return sortConfig.direction === 'asc' ? comparison : -comparison;
         });
         return filtered;
-    }, [payslips, appliedStartPeriod, appliedEndPeriod, appliedEmployee, appliedTaxClass, sortConfig, excludedBonuses, excludeLeasing, useProportionalMath]);
+    }, [payslips, appliedStartPeriod, appliedEndPeriod, appliedEmployer, appliedTaxClass, sortConfig, excludedBonuses, excludeLeasing, useProportionalMath]);
+
+    const periodTotals = useMemo(() => {
+        return filteredPayslips.reduce((acc, p) => {
+            acc.gross += p.gross_pay || 0;
+            acc.net += p.net_pay || 0;
+            acc.payout += p.payout_amount || 0;
+            acc.bonuses += (p.bonuses || []).reduce((sum, b) => sum + (b.amount || 0), 0);
+            return acc;
+        }, {gross: 0, net: 0, payout: 0, bonuses: 0});
+    }, [filteredPayslips]);
 
     const latestPayslip = [...filteredPayslips].sort((a, b) => (b.period_year - a.period_year) || ((b.period_month_num || 0) - (a.period_month_num || 0)))[0];
     const previousPayslip = [...filteredPayslips].sort((a, b) => (b.period_year - a.period_year) || ((b.period_month_num || 0) - (a.period_month_num || 0)))[1];
@@ -267,7 +304,7 @@ export default function PayslipsPage() {
                         className="p-2 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg text-indigo-600 dark:text-indigo-400">
                         <FileUp size={24}/></div>
                     <div>
-                        {uploadMutation.isPending ?
+                        {uploadMutation.isPending || batchUploadMutation.isPending ?
                             <p className="text-sm font-medium text-gray-900 dark:text-gray-100 animate-pulse">{t('payslips.uploadingParsing')}</p> : <><p
                                 className="text-sm font-medium text-gray-900 dark:text-gray-100"><span
                                 className="text-indigo-600 dark:text-indigo-400">{t('payslips.clickToParse')}</span> {t('bankStatements.import.orDrag')}</p><p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{t('payslips.pdfFormat')}</p></>}
@@ -304,6 +341,8 @@ export default function PayslipsPage() {
             </div>
             {uploadMutation.isError && <div
                 className="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl border border-red-200 dark:border-red-800/50 text-sm">{t('payslips.uploadFailed')}</div>}
+            {batchUploadMutation.isError && <div
+                className="p-4 bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-400 rounded-xl border border-red-200 dark:border-red-800/50 text-sm">{t('payslips.uploadFailed')}</div>}
 
             {/* Filters Bar */}
             <div
@@ -322,10 +361,10 @@ export default function PayslipsPage() {
                             <option value="All">{t('common.to')}</option>
                             {uniquePeriods.map(p => <option key={p} value={p}>{p}</option>)}</select>
                     </div>
-                    <select value={selectedEmployee} onChange={e => setSelectedEmployee(e.target.value)}
+                    <select value={selectedEmployer} onChange={e => setSelectedEmployer(e.target.value)}
                             className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-indigo-500">
-                        <option value="All">{t('payslips.allEmployees')}</option>
-                        {uniqueEmployees.map(e => <option key={e} value={e}>{e}</option>)}</select>
+                        <option value="All">{t('payslips.allEmployers')}</option>
+                        {uniqueEmployers.map(e => <option key={e} value={e}>{e}</option>)}</select>
                     <select value={selectedTaxClass} onChange={e => setSelectedTaxClass(e.target.value)}
                             className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm rounded-lg px-3 py-1.5 outline-none focus:ring-2 focus:ring-indigo-500">
                         <option value="All">{t('payslips.allTaxClasses')}</option>
@@ -346,7 +385,7 @@ export default function PayslipsPage() {
                     {showColMenu && (
                         <div
                             className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-10 overflow-hidden p-2 space-y-1">
-                            {[{key: 'period', label: t('payslips.modals.period')}, {key: 'employee', label: t('payslips.modals.employee')}, {key: 'employer', label: t('payslips.modals.employer')}, {
+                            {[{key: 'period', label: t('payslips.modals.period')}, {key: 'employer', label: t('payslips.modals.employer')}, {
                                 key: 'gross',
                                 label: t('payslips.modals.gross')
                             }, {key: 'net', label: t('payslips.modals.net')}, {
@@ -426,15 +465,39 @@ export default function PayslipsPage() {
                 </div>
             )}
 
-            {/* Injected Chart Component */}
+            {/* Period Summary */}
+            <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm animate-in fade-in slide-in-from-top-2 duration-300">
+                <div className="flex items-center gap-2 mb-4">
+                    <BarChart3 className="text-indigo-500" size={20} />
+                    <h3 className="font-semibold text-gray-900 dark:text-gray-100">{t('payslips.periodSummary.title')}</h3>
+                </div>
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+                    <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('payslips.modals.gross')}</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100 font-mono">{fmtCurrency(periodTotals.gross, 'EUR')}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('payslips.modals.net')}</p>
+                        <p className="text-xl font-bold text-gray-900 dark:text-gray-100 font-mono">{fmtCurrency(periodTotals.net, 'EUR')}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('payslips.modals.payout')}</p>
+                        <p className="text-xl font-bold text-emerald-600 dark:text-emerald-400 font-mono">{fmtCurrency(periodTotals.payout, 'EUR')}</p>
+                    </div>
+                    <div>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('payslips.modals.bonuses')}</p>
+                        <p className="text-xl font-bold text-indigo-600 dark:text-indigo-400 font-mono">{fmtCurrency(periodTotals.bonuses, 'EUR')}</p>
+                    </div>
+                </div>
+            </div>
+
+            {/* Charts Section */}
             <PayslipChart
                 filteredPayslips={filteredPayslips}
                 ignoredPayslipIds={ignoredPayslipIds}
                 uniqueBonuses={uniqueBonuses}
                 excludedBonuses={excludedBonuses}
                 setExcludedBonuses={setExcludedBonuses}
-                excludeLeasing={excludeLeasing}
-                setExcludeLeasing={setExcludeLeasing}
                 useProportionalMath={useProportionalMath}
                 setUseProportionalMath={setUseProportionalMath}
             />
@@ -465,15 +528,24 @@ export default function PayslipsPage() {
 
             {/* Modals */}
             {viewingPayslip && <ViewPayslipModal payslip={viewingPayslip} onClose={() => setViewingPayslip(null)}/>}
-            {previewUrl && <PreviewPayslipModal previewUrl={previewUrl} onClose={closePreview}/>}
+            {previewUrl && previewingPayslip && (
+                <PreviewPayslipModal 
+                    previewUrl={previewUrl} 
+                    payslip={previewingPayslip} 
+                    onClose={closePreview}
+                    onUpdate={(id, data) => updateMutation.mutate({id, data})}
+                    isPending={updateMutation.isPending}
+                />
+            )}
             {isUploadModalOpen &&
-                <ImportPayslipModal isOpen={isUploadModalOpen} onClose={() => setIsUploadModalOpen(false)}
-                                    currentUser={currentUser}
-                                    onImport={(file, overrides) => uploadMutation.mutate({file, overrides})}
-                                    isPending={uploadMutation.isPending}/>}
+                <ImportPayslipModal onClose={() => setIsUploadModalOpen(false)}
+                                    onImport={(file, overrides) => uploadMutation.mutate({file, overrides, useAI})}
+                                    isPending={uploadMutation.isPending}
+                                    useAI={useAI} />}
             {editingPayslip && <EditPayslipModal payslip={editingPayslip} onClose={() => setEditingPayslip(null)}
                                                  onUpdate={(id, payload) => updateMutation.mutate({id, data: payload})}
                                                  isPending={updateMutation.isPending}/>}
+            {batchResults && <BatchResultsModal {...batchResults} onClose={() => setBatchResults(null)} />}
 
         </div>
     );

@@ -51,8 +51,6 @@ type Transaction struct {
 	ReconciliationID   *uuid.UUID      `json:"reconciliation_id,omitempty"`
 	Reviewed           bool            `json:"reviewed"`
 	StatementType      StatementType   `json:"statement_type"`
-	ExchangeRate       float64         `json:"exchange_rate"`
-	AmountBaseCurrency float64         `json:"amount_base_currency"`
 }
 
 // BankStatement is the top-level entity representing one parsed Kontoauszug.
@@ -61,8 +59,6 @@ type BankStatement struct {
 	UserID              uuid.UUID     `json:"user_id"`
 	AccountHolder       string        `json:"account_holder"`
 	IBAN                string        `json:"iban"`
-	BIC                 string        `json:"bic"`
-	AccountNumber       string        `json:"account_number"`
 	StatementDate       time.Time     `json:"statement_date"`
 	StatementNo         int           `json:"statement_no"`
 	OldBalance          float64       `json:"old_balance"`
@@ -71,7 +67,6 @@ type BankStatement struct {
 	StatementType       StatementType `json:"statement_type"` // "giro" | "credit_card" — set by the parser
 	Transactions        []Transaction `json:"transactions"`
 	SkippedTransactions []Transaction `json:"skipped_transactions,omitempty"` // Used to store skipped duplicates for a potential future cleanup table
-	SourceFile          string        `json:"source_file"`
 	OriginalFile        []byte        `json:"-"`            // Exclude from JSON payload
 	ImportedAt          time.Time     `json:"imported_at"`  // set by the DB on insert
 	ContentHash         string        `json:"content_hash"` // SHA-256 over stable statement fields — used to prevent duplicate imports

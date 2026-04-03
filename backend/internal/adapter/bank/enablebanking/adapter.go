@@ -460,8 +460,6 @@ func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, provi
 			Reference:          ref,
 			MandateReference:   mandateRef,
 			CounterpartyName:   counterparty,
-			ExchangeRate:       1.0,
-			AmountBaseCurrency: amt,
 		})
 	}
 

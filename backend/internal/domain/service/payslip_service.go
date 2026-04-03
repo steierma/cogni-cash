@@ -35,7 +35,7 @@ func NewPayslipService(repo port.PayslipRepository, staticParser port.PayslipPar
 	}
 }
 
-func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, filePath, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error) {
+func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error) {
 	hashFunc := sha256.New()
 	hashFunc.Write(fileBytes)
 	contentHash := hex.EncodeToString(hashFunc.Sum(nil))
@@ -53,22 +53,22 @@ func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, filePath,
 
 	if useAI {
 		s.logger.Info("Force AI Parsing requested. Bypassing static parser.", "user_id", userID)
-		payslip, parseErr = s.aiParser.Parse(ctx, userID, filePath)
+		payslip, parseErr = s.aiParser.Parse(ctx, userID, fileBytes)
 		if parseErr != nil {
 			return nil, fmt.Errorf("failed to parse payslip with forced AI: %w", parseErr)
 		}
 	} else {
-		payslip, parseErr = s.staticParser.Parse(ctx, userID, filePath)
+		payslip, parseErr = s.staticParser.Parse(ctx, userID, fileBytes)
 
-		if parseErr != nil || payslip.PeriodMonthNum == 0 || payslip.EmployeeName == "" || payslip.GrossPay == 0 {
+		if parseErr != nil || payslip.PeriodMonthNum == 0 || payslip.GrossPay == 0 {
 
-			canSkipAI := overrides != nil && overrides.PeriodMonthNum != 0 && overrides.EmployeeName != "" && overrides.GrossPay != 0
+			canSkipAI := overrides != nil && overrides.PeriodMonthNum != 0 && overrides.GrossPay != 0
 
 			if !canSkipAI {
 				s.logger.Warn("Static parser failed or returned incomplete data. Triggering AI fallback.", "file", fileName, "static_error", parseErr, "user_id", userID)
 
 				var aiErr error
-				aiPayslip, aiErr := s.aiParser.Parse(ctx, userID, filePath)
+				aiPayslip, aiErr := s.aiParser.Parse(ctx, userID, fileBytes)
 				if aiErr != nil {
 					return nil, fmt.Errorf("failed to parse payslip with AI fallback: %w", aiErr)
 				}
@@ -85,9 +85,6 @@ func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, filePath,
 		}
 		if overrides.PeriodYear != 0 {
 			payslip.PeriodYear = overrides.PeriodYear
-		}
-		if overrides.EmployeeName != "" {
-			payslip.EmployeeName = overrides.EmployeeName
 		}
 		if overrides.EmployerName != "" {
 			payslip.EmployerName = overrides.EmployerName
@@ -117,8 +114,6 @@ func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, filePath,
 
 	payslip.UserID = userID
 	payslip.OriginalFileName = fileName
-	payslip.OriginalFileMime = mimeType
-	payslip.OriginalFileSize = int64(len(fileBytes))
 	payslip.OriginalFileContent = fileBytes
 	payslip.ContentHash = contentHash
 
@@ -126,8 +121,16 @@ func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, filePath,
 		return nil, fmt.Errorf("failed to save payslip: %w", err)
 	}
 
-	s.logger.Info("Successfully imported payslip", "id", payslip.ID, "month", payslip.PeriodMonthNum, "name", payslip.EmployeeName, "user_id", userID)
+	s.logger.Info("Successfully imported payslip", "id", payslip.ID, "month", payslip.PeriodMonthNum, "user_id", userID)
 	return &payslip, nil
+}
+
+func (s *PayslipService) GetAll(ctx context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error) {
+	return s.repo.FindAll(ctx, filter)
+}
+
+func (s *PayslipService) GetByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error) {
+	return s.repo.FindByID(ctx, id, userID)
 }
 
 func (s *PayslipService) Update(ctx context.Context, payslip *entity.Payslip) error {
@@ -154,11 +157,14 @@ func (s *PayslipService) Delete(ctx context.Context, id string, userID uuid.UUID
 	return s.repo.Delete(ctx, id, userID)
 }
 
+func (s *PayslipService) GetOriginalFile(ctx context.Context, id string, userID uuid.UUID) ([]byte, string, string, error) {
+	return s.repo.GetOriginalFile(ctx, id, userID)
+}
+
 // JSONPayslipEntry represents a single record in the payslip bulk-import JSON manifest.
 type JSONPayslipEntry struct {
 	PeriodMonthNum   int            `json:"period_month_num"`
 	PeriodYear       int            `json:"period_year"`
-	EmployeeName     string         `json:"employee_name"`
 	EmployerName     string         `json:"employer_name"`
 	TaxClass         string         `json:"tax_class"`
 	TaxID            string         `json:"tax_id"`
@@ -215,14 +221,10 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, userID uuid.UUI
 		fileBytes, readErr := os.ReadFile(pdfPath)
 
 		var contentHash string
-		var fileMime string
-		var fileSize int64
 
 		if readErr == nil {
 			h := sha256.Sum256(fileBytes)
 			contentHash = hex.EncodeToString(h[:])
-			fileMime = "application/pdf"
-			fileSize = int64(len(fileBytes))
 		} else {
 			hashInput := fmt.Sprintf("json-import:%s:%d-%02d:%s", entry.OriginalFileName, entry.PeriodYear, entry.PeriodMonthNum, userID)
 			h := sha256.Sum256([]byte(hashInput))
@@ -242,13 +244,10 @@ func (s *PayslipService) ImportFromJSONFile(ctx context.Context, userID uuid.UUI
 		payslip := entity.Payslip{
 			UserID:              userID,
 			OriginalFileName:    entry.OriginalFileName,
-			OriginalFileMime:    fileMime,
-			OriginalFileSize:    fileSize,
 			OriginalFileContent: fileBytes,
 			ContentHash:         contentHash,
 			PeriodMonthNum:      entry.PeriodMonthNum,
 			PeriodYear:          entry.PeriodYear,
-			EmployeeName:        entry.EmployeeName,
 			EmployerName:        entry.EmployerName,
 			TaxClass:            entry.TaxClass,
 			TaxID:               entry.TaxID,

@@ -44,8 +44,6 @@ func TestBankStatementRepository_SaveAndFindByID(t *testing.T) {
 				UserID:             userID,
 				Description:        "Rewe",
 				Amount:             -45.50,
-				ExchangeRate:       1.0,
-				AmountBaseCurrency: -45.50,
 				BookingDate:        stmtDate,
 				ValutaDate:         stmtDate,
 				Type:               "debit",
@@ -107,8 +105,8 @@ func TestBankStatementRepository_FindSummaries(t *testing.T) {
 		StatementDate: time.Date(2098, 2, 28, 0, 0, 0, 0, time.UTC),
 		NewBalance:    1500.00,
 		Transactions: []entity.Transaction{
-			{UserID: userID, BookingDate: time.Date(2098, 2, 1, 0, 0, 0, 0, time.UTC), ValutaDate: time.Date(2098, 2, 1, 0, 0, 0, 0, time.UTC), Amount: -500.00, ExchangeRate: 1.0, AmountBaseCurrency: -500.00, Type: "debit", ContentHash: "tx_feb_1_2098"},
-			{UserID: userID, BookingDate: time.Date(2098, 2, 15, 0, 0, 0, 0, time.UTC), ValutaDate: time.Date(2098, 2, 15, 0, 0, 0, 0, time.UTC), Amount: -100.00, ExchangeRate: 1.0, AmountBaseCurrency: -100.00, Type: "debit", ContentHash: "tx_feb_2_2098"},
+			{UserID: userID, BookingDate: time.Date(2098, 2, 1, 0, 0, 0, 0, time.UTC), ValutaDate: time.Date(2098, 2, 1, 0, 0, 0, 0, time.UTC), Amount: -500.00, Type: "debit", ContentHash: "tx_feb_1_2098"},
+			{UserID: userID, BookingDate: time.Date(2098, 2, 15, 0, 0, 0, 0, time.UTC), ValutaDate: time.Date(2098, 2, 15, 0, 0, 0, 0, time.UTC), Amount: -100.00, Type: "debit", ContentHash: "tx_feb_2_2098"},
 		},
 	})
 
@@ -153,8 +151,8 @@ func TestBankStatementRepository_FindTransactionsAndReconciliationFilter(t *test
 		ContentHash:   "giro_stmt_2099",
 		StatementType: entity.StatementType("giro"),
 		Transactions: []entity.Transaction{
-			{UserID: userID, Description: "Salary", Amount: 4000.0, ExchangeRate: 1.0, AmountBaseCurrency: 4000.0, ContentHash: "tx_salary_2099", BookingDate: baseDate, ValutaDate: baseDate, Type: "credit"},
-			{UserID: userID, Description: "Rent", Amount: -1000.0, ExchangeRate: 1.0, AmountBaseCurrency: -1000.0, ContentHash: "tx_rent_2099", BookingDate: baseDate.Add(24 * time.Hour), ValutaDate: baseDate.Add(24 * time.Hour), Type: "debit"},
+			{UserID: userID, Description: "Salary", Amount: 4000.0, ContentHash: "tx_salary_2099", BookingDate: baseDate, ValutaDate: baseDate, Type: "credit"},
+			{UserID: userID, Description: "Rent", Amount: -1000.0, ContentHash: "tx_rent_2099", BookingDate: baseDate.Add(24 * time.Hour), ValutaDate: baseDate.Add(24 * time.Hour), Type: "debit"},
 		},
 	})
 
@@ -163,8 +161,8 @@ func TestBankStatementRepository_FindTransactionsAndReconciliationFilter(t *test
 		ContentHash:   "cc_stmt_2099",
 		StatementType: entity.StatementType("credit_card"),
 		Transactions: []entity.Transaction{
-			{UserID: userID, Description: "CC Payment Income", Amount: 500.0, ExchangeRate: 1.0, AmountBaseCurrency: 500.0, ContentHash: "tx_cc_in_2099", BookingDate: baseDate.Add(48 * time.Hour), ValutaDate: baseDate.Add(48 * time.Hour), Type: "credit"},
-			{UserID: userID, Description: "Amazon", Amount: -50.0, ExchangeRate: 1.0, AmountBaseCurrency: -50.0, ContentHash: "tx_cc_out_2099", BookingDate: baseDate.Add(72 * time.Hour), ValutaDate: baseDate.Add(72 * time.Hour), Type: "debit"},
+			{UserID: userID, Description: "CC Payment Income", Amount: 500.0, ContentHash: "tx_cc_in_2099", BookingDate: baseDate.Add(48 * time.Hour), ValutaDate: baseDate.Add(48 * time.Hour), Type: "credit"},
+			{UserID: userID, Description: "Amazon", Amount: -50.0, ContentHash: "tx_cc_out_2099", BookingDate: baseDate.Add(72 * time.Hour), ValutaDate: baseDate.Add(72 * time.Hour), Type: "debit"},
 		},
 	})
 
@@ -223,7 +221,7 @@ func TestBankStatementRepository_Mutations(t *testing.T) {
 		ContentHash:   "stmt_mutate_1",
 		StatementType: entity.StatementType("giro"),
 		Transactions: []entity.Transaction{
-			{UserID: userID, Description: "Hardware Store", Amount: -100.0, ExchangeRate: 1.0, AmountBaseCurrency: -100.0, ContentHash: targetHash, IsReconciled: false, BookingDate: stmtDate, ValutaDate: stmtDate, Type: "debit"},
+			{UserID: userID, Description: "Hardware Store", Amount: -100.0, ContentHash: targetHash, IsReconciled: false, BookingDate: stmtDate, ValutaDate: stmtDate, Type: "debit"},
 		},
 	}
 	_ = repo.Save(ctx, stmt)
@@ -325,8 +323,6 @@ func TestBankStatementRepository_Delete(t *testing.T) {
 				UserID:             userID,
 				Description:        "Delete Me",
 				Amount:             -10.00,
-				ExchangeRate:       1.0,
-				AmountBaseCurrency: -10.00,
 				BookingDate:        stmtDate,
 				ValutaDate:         stmtDate,
 				Type:               "debit",

@@ -69,12 +69,15 @@ func (r *PayslipRepository) ExistsByOriginalFileName(ctx context.Context, origin
 	return false, nil
 }
 
-func (r *PayslipRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Payslip, error) {
+func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var payslips []entity.Payslip
 	for _, p := range r.payslips {
-		if p.UserID == userID {
+		if p.UserID == filter.UserID {
+			if filter.Employer != "" && p.EmployerName != filter.Employer {
+				continue
+			}
 			payslips = append(payslips, p)
 		}
 	}
@@ -120,7 +123,7 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 	if !ok || p.UserID != userID {
 		return nil, "", "", entity.ErrPayslipNotFound
 	}
-	return p.OriginalFileContent, p.OriginalFileMime, p.OriginalFileName, nil
+	return p.OriginalFileContent, "application/pdf", p.OriginalFileName, nil
 }
 
 var _ port.PayslipRepository = (*PayslipRepository)(nil)

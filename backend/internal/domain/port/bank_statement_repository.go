@@ -17,7 +17,8 @@ type BankStatementRepository interface {
 	FindTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
 
 	SearchTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
-	GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesPerCategory int) ([]entity.CategorizationExample, error)
+	GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesCount int) ([]entity.CategorizationExample, error)
+	FindMatchingCategory(ctx context.Context, userID uuid.UUID, txn TransactionToCategorize) (*uuid.UUID, error)
 	UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReviewed(ctx context.Context, contentHash string, userID uuid.UUID) error

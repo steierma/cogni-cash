@@ -77,8 +77,8 @@ export default function TransactionsPage() {
     });
 
     const { data: allTxns = [], isLoading: isLoadingTxns, isError } = useQuery<Transaction[]>({
-        queryKey: ['transactions', applied.statement, hideReconciled],
-        queryFn: () => fetchTransactions(applied.statement || undefined, hideReconciled),
+        queryKey: ['transactions', applied.statement, hideReconciled, applied.search],
+        queryFn: () => fetchTransactions(applied.statement || undefined, hideReconciled, undefined, undefined, applied.search),
         enabled: hasAppliedOnce,
     });
 
@@ -213,7 +213,11 @@ export default function TransactionsPage() {
             rows = rows.filter((t) =>
                 t.description.toLowerCase().includes(q) ||
                 (t.reference && t.reference.toLowerCase().includes(q)) ||
-                (t.location && t.location.toLowerCase().includes(q))
+                (t.location && t.location.toLowerCase().includes(q)) ||
+                (t.counterparty_name && t.counterparty_name.toLowerCase().includes(q)) ||
+                (t.counterparty_iban && t.counterparty_iban.toLowerCase().includes(q)) ||
+                (t.bank_transaction_code && t.bank_transaction_code.toLowerCase().includes(q)) ||
+                (t.mandate_reference && t.mandate_reference.toLowerCase().includes(q))
             );
         }
 

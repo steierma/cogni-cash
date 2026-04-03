@@ -28,18 +28,15 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 	// 1. Insert the main payslip
 	insertPayslipSQL := `
 		INSERT INTO payslips (
-			user_id, source_file, original_file_name, original_file_mime, original_file_size, original_file_content, content_hash,
-			period_month_num, period_year, employee_name, employer_name, tax_class, tax_id,
+			user_id, original_file_name, original_file_content, content_hash,
+			period_month_num, period_year, employer_name, tax_class, tax_id,
 			gross_pay, net_pay, payout_amount, custom_deductions
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7,
-			$8, $9, $10, $11, $12, $13,
-			$14, $15, $16, $17
+			$1, $2, $3, $4,
+			$5, $6, $7, $8, $9,
+			$10, $11, $12, $13
 		) RETURNING id
 	`
-
-	sourceFile := nullableString(p.SourceFile)
-	fileMime := nullableString(p.OriginalFileMime)
 
 	var fileContent interface{}
 	if len(p.OriginalFileContent) > 0 {
@@ -48,8 +45,8 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 
 	var payslipID string
 	err = tx.QueryRow(ctx, insertPayslipSQL,
-		p.UserID, sourceFile, p.OriginalFileName, fileMime, p.OriginalFileSize, fileContent, p.ContentHash,
-		p.PeriodMonthNum, p.PeriodYear, p.EmployeeName, p.EmployerName, p.TaxClass, p.TaxID,
+		p.UserID, p.OriginalFileName, fileContent, p.ContentHash,
+		p.PeriodMonthNum, p.PeriodYear, p.EmployerName, p.TaxClass, p.TaxID,
 		p.GrossPay, p.NetPay, p.PayoutAmount, p.CustomDeductions,
 	).Scan(&payslipID)
 
@@ -75,13 +72,6 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 	return tx.Commit(ctx)
 }
 
-func nullableString(s string) interface{} {
-	if s == "" {
-		return nil
-	}
-	return s
-}
-
 func (r *PayslipRepository) ExistsByHash(ctx context.Context, hash string, userID uuid.UUID) (bool, error) {
 	var exists bool
 	query := `SELECT EXISTS(SELECT 1 FROM payslips WHERE content_hash = $1 AND user_id = $2)`
@@ -96,16 +86,24 @@ func (r *PayslipRepository) ExistsByOriginalFileName(ctx context.Context, origin
 	return exists, err
 }
 
-func (r *PayslipRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Payslip, error) {
+func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error) {
 	query := `
-		SELECT id, user_id, period_month_num, period_year, employee_name, employer_name, tax_class, tax_id, 
+		SELECT id, user_id, period_month_num, period_year, employer_name, tax_class, tax_id, 
 		       gross_pay, net_pay, payout_amount, custom_deductions, created_at,
-		       original_file_name, COALESCE(original_file_mime, '') AS original_file_mime
+		       original_file_name
 		FROM payslips
 		WHERE user_id = $1
-		ORDER BY period_year DESC, period_month_num DESC, created_at DESC
 	`
-	rows, err := r.db.Query(ctx, query, userID)
+	args := []interface{}{filter.UserID}
+
+	if filter.Employer != "" {
+		query += " AND employer_name = $2"
+		args = append(args, filter.Employer)
+	}
+
+	query += " ORDER BY period_year DESC, period_month_num DESC, created_at DESC"
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -115,9 +113,9 @@ func (r *PayslipRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]en
 	for rows.Next() {
 		var p entity.Payslip
 		err := rows.Scan(
-			&p.ID, &p.UserID, &p.PeriodMonthNum, &p.PeriodYear, &p.EmployeeName, &p.EmployerName, &p.TaxClass, &p.TaxID,
+			&p.ID, &p.UserID, &p.PeriodMonthNum, &p.PeriodYear, &p.EmployerName, &p.TaxClass, &p.TaxID,
 			&p.GrossPay, &p.NetPay, &p.PayoutAmount, &p.CustomDeductions, &p.CreatedAt,
-			&p.OriginalFileName, &p.OriginalFileMime,
+			&p.OriginalFileName,
 		)
 		if err != nil {
 			return nil, err
@@ -154,16 +152,16 @@ func (r *PayslipRepository) findBonuses(ctx context.Context, payslipID string) (
 
 func (r *PayslipRepository) FindByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error) {
 	query := `
-		SELECT id, user_id, period_month_num, period_year, employee_name, employer_name, tax_class, tax_id, 
+		SELECT id, user_id, period_month_num, period_year, employer_name, tax_class, tax_id, 
 		       gross_pay, net_pay, payout_amount, custom_deductions,
-		       original_file_name, COALESCE(original_file_mime, '') AS original_file_mime
+		       original_file_name
 		FROM payslips WHERE id = $1 AND user_id = $2
 	`
 	var p entity.Payslip
 	err := r.db.QueryRow(ctx, query, id, userID).Scan(
-		&p.ID, &p.UserID, &p.PeriodMonthNum, &p.PeriodYear, &p.EmployeeName, &p.EmployerName, &p.TaxClass, &p.TaxID,
+		&p.ID, &p.UserID, &p.PeriodMonthNum, &p.PeriodYear, &p.EmployerName, &p.TaxClass, &p.TaxID,
 		&p.GrossPay, &p.NetPay, &p.PayoutAmount, &p.CustomDeductions,
-		&p.OriginalFileName, &p.OriginalFileMime,
+		&p.OriginalFileName,
 	)
 	if err != nil {
 		return p, err
@@ -182,10 +180,10 @@ func (r *PayslipRepository) Update(ctx context.Context, p *entity.Payslip) error
 
 	_, err = tx.Exec(ctx, `
 		UPDATE payslips
-		SET period_month_num = $1, period_year = $2, employee_name = $3, employer_name = $4, tax_class = $5, tax_id = $6,
-		    gross_pay = $7, net_pay = $8, payout_amount = $9, custom_deductions = $10
-		WHERE id = $11 AND user_id = $12`,
-		p.PeriodMonthNum, p.PeriodYear, p.EmployeeName, p.EmployerName, p.TaxClass, p.TaxID,
+		SET period_month_num = $1, period_year = $2, employer_name = $3, tax_class = $4, tax_id = $5,
+		    gross_pay = $6, net_pay = $7, payout_amount = $8, custom_deductions = $9
+		WHERE id = $10 AND user_id = $11`,
+		p.PeriodMonthNum, p.PeriodYear, p.EmployerName, p.TaxClass, p.TaxID,
 		p.GrossPay, p.NetPay, p.PayoutAmount, p.CustomDeductions,
 		p.ID, p.UserID,
 	)
@@ -196,9 +194,9 @@ func (r *PayslipRepository) Update(ctx context.Context, p *entity.Payslip) error
 	if len(p.OriginalFileContent) > 0 {
 		_, err = tx.Exec(ctx, `
 			UPDATE payslips
-			SET original_file_name = $1, original_file_mime = $2, original_file_size = $3, original_file_content = $4, content_hash = $5
-			WHERE id = $6 AND user_id = $7`,
-			p.OriginalFileName, p.OriginalFileMime, p.OriginalFileSize, p.OriginalFileContent, p.ContentHash,
+			SET original_file_name = $1, original_file_content = $2, content_hash = $3
+			WHERE id = $4 AND user_id = $5`,
+			p.OriginalFileName, p.OriginalFileContent, p.ContentHash,
 			p.ID, p.UserID,
 		)
 		if err != nil {
@@ -229,9 +227,9 @@ func (r *PayslipRepository) Delete(ctx context.Context, id string, userID uuid.U
 
 func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, userID uuid.UUID) ([]byte, string, string, error) {
 	var content []byte
-	var mimeType, filename string
+	var filename string
 
-	query := `SELECT original_file_content, original_file_mime, original_file_name FROM payslips WHERE id = $1 AND user_id = $2`
-	err := r.db.QueryRow(ctx, query, id, userID).Scan(&content, &mimeType, &filename)
-	return content, mimeType, filename, err
+	query := `SELECT original_file_content, original_file_name FROM payslips WHERE id = $1 AND user_id = $2`
+	err := r.db.QueryRow(ctx, query, id, userID).Scan(&content, &filename)
+	return content, "application/pdf", filename, err
 }

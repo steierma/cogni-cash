@@ -70,5 +70,5 @@ These instructions are foundational mandates for Gemini CLI. They take absolute 
 - **Mandatory Synchronization:** After every significant change or feature completion, you MUST:
   1. Update **`MEMORY.md`** with the latest project state and completed tasks.
   2. Sync **`README.md`** to reflect new features or roadmap progress.
-  3. Update **`docs/DATABASE_SCHEMA.md`** after any database migration.
+  3. Update **`DATABASE_SCHEMA.md`** after any database migration.
   4. Update **`backend/balance/dummy-data.sql`** after schema changes to maintain test data integrity.

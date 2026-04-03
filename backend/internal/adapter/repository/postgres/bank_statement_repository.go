@@ -15,6 +15,7 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 
 	"cogni-cash/internal/domain/entity"
+	"cogni-cash/internal/domain/port"
 )
 
 // BankStatementRepository implements port.BankStatementRepository using pgx.
@@ -28,7 +29,7 @@ func NewBankStatementRepository(pool *pgxpool.Pool, logger *slog.Logger) *BankSt
 }
 
 func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStatement) error {
-	r.Logger.Info("Saving bank statement", "content_hash", stmt.ContentHash, "source_file", stmt.SourceFile, "user_id", stmt.UserID)
+	r.Logger.Info("Saving bank statement", "content_hash", stmt.ContentHash, "user_id", stmt.UserID)
 	tx, err := r.pool.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("bank_statement repo: begin tx: %w", err)
@@ -47,13 +48,13 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 
 	_, err = tx.Exec(ctx, `
 		INSERT INTO bank_statements
-			(id, user_id, account_holder, iban, bic, account_number,
+			(id, user_id, account_holder, iban,
 			 statement_date, statement_no,
-			 old_balance, new_balance, currency, source_file, original_file, content_hash, statement_type)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14, $15)`,
-		stmtID, stmt.UserID, stmt.AccountHolder, stmt.IBAN, stmt.BIC, stmt.AccountNumber,
+			 old_balance, new_balance, currency, original_file, content_hash, statement_type)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+		stmtID, stmt.UserID, stmt.AccountHolder, stmt.IBAN,
 		statementDate, stmt.StatementNo, stmt.OldBalance, stmt.NewBalance,
-		stmt.Currency, stmt.SourceFile, stmt.OriginalFile, stmt.ContentHash,
+		stmt.Currency, stmt.OriginalFile, stmt.ContentHash,
 		string(stmt.StatementType),
 	)
 	if err != nil {
@@ -75,9 +76,8 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			INSERT INTO transactions
 			        (id, user_id, bank_statement_id, booking_date, valuta_date,
 			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
-			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference,
-			         exchange_rate, amount_base_currency)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 			ON CONFLICT (content_hash, user_id) DO NOTHING`,
 			uuid.New(),
 			stmt.UserID,
@@ -98,8 +98,6 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			t.CounterpartyIban,
 			t.BankTransactionCode,
 			t.MandateReference,
-			t.ExchangeRate,
-			t.AmountBaseCurrency,
 		)
 	}
 
@@ -134,9 +132,8 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			INSERT INTO transactions
 			        (id, user_id, bank_account_id, booking_date, valuta_date,
 			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
-			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference,
-			         exchange_rate, amount_base_currency)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
 			ON CONFLICT (content_hash, user_id) DO NOTHING`,
 			t.ID,
 			t.UserID,
@@ -157,8 +154,6 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			t.CounterpartyIban,
 			t.BankTransactionCode,
 			t.MandateReference,
-			t.ExchangeRate,
-			t.AmountBaseCurrency,
 		)
 	}
 
@@ -178,8 +173,7 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
 	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference,
-	               COALESCE(t.exchange_rate, 1.0), t.amount_base_currency
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference
 	        FROM transactions t		LEFT JOIN bank_statements b ON t.bank_statement_id = b.id
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
 		WHERE t.user_id = $1`
@@ -263,8 +257,7 @@ func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID u
 	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
 	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference,
-	               COALESCE(t.exchange_rate, 1.0), t.amount_base_currency
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference
 	        FROM transactions t		JOIN bank_statements b ON t.bank_statement_id = b.id
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
 		WHERE t.bank_statement_id = $1 AND t.user_id = $2
@@ -288,72 +281,66 @@ func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID u
 // scanTransaction scans a single transaction row. Shared by FindTransactions
 // and loadTransactions to avoid duplicating the nullable-column logic.
 func scanTransaction(row scanner) (entity.Transaction, error) {
-        var t entity.Transaction
-        var desc, loc, currency, txType, ref, stmtType *string
-        var cpName, cpIban, bankTxCode, mandateRef *string
-        var amountBase *float64
+	var t entity.Transaction
+	var desc, loc, currency, txType, ref, stmtType *string
+	var cpName, cpIban, bankTxCode, mandateRef *string
 
-        if err := row.Scan(
-                &t.ID,
-                &t.UserID,
-                &t.BookingDate,
-                &t.ValutaDate,
-                &desc,
-                &loc,
-                &t.Amount,
-                &currency,
-                &txType,
-                &ref,
-                &t.CategoryID,
-                &t.ContentHash,
-                &t.IsReconciled,
-                &t.ReconciliationID,
-                &stmtType,
-                &t.Reviewed,
-                &cpName,
-                &cpIban,
-                &bankTxCode,
-                &mandateRef,
-                &t.ExchangeRate,
-                &amountBase,
-        ); err != nil {
-                return entity.Transaction{}, err
-        }
+	if err := row.Scan(
+		&t.ID,
+		&t.UserID,
+		&t.BookingDate,
+		&t.ValutaDate,
+		&desc,
+		&loc,
+		&t.Amount,
+		&currency,
+		&txType,
+		&ref,
+		&t.CategoryID,
+		&t.ContentHash,
+		&t.IsReconciled,
+		&t.ReconciliationID,
+		&stmtType,
+		&t.Reviewed,
+		&cpName,
+		&cpIban,
+		&bankTxCode,
+		&mandateRef,
+	); err != nil {
+		return entity.Transaction{}, err
+	}
 
-        if desc != nil {
-                t.Description = *desc
-        }
-        if loc != nil {
-                t.Location = *loc
-        }
-        if currency != nil {
-                t.Currency = *currency
-        }
-        if ref != nil {
-                t.Reference = *ref
-        }
-        if txType != nil {
-                t.Type = entity.TransactionType(*txType)
-        }
-        if stmtType != nil {
-                t.StatementType = entity.StatementType(*stmtType)
-        }
-        if cpName != nil {
-                t.CounterpartyName = *cpName
-        }
-        if cpIban != nil {
-                t.CounterpartyIban = *cpIban
-        }
-        if bankTxCode != nil {
-                t.BankTransactionCode = *bankTxCode
-        }
-        if mandateRef != nil {
-                t.MandateReference = *mandateRef
-        }
-        if amountBase != nil {
-                t.AmountBaseCurrency = *amountBase
-        }
-        return t, nil
+	if desc != nil {
+		t.Description = *desc
+	}
+	if loc != nil {
+		t.Location = *loc
+	}
+	if currency != nil {
+		t.Currency = *currency
+	}
+	if ref != nil {
+		t.Reference = *ref
+	}
+	if txType != nil {
+		t.Type = entity.TransactionType(*txType)
+	}
+	if stmtType != nil {
+		t.StatementType = entity.StatementType(*stmtType)
+	}
+	if cpName != nil {
+		t.CounterpartyName = *cpName
+	}
+	if cpIban != nil {
+		t.CounterpartyIban = *cpIban
+	}
+	if bankTxCode != nil {
+		t.BankTransactionCode = *bankTxCode
+	}
+	if mandateRef != nil {
+		t.MandateReference = *mandateRef
+	}
+	return t, nil
 }
 
 func isDuplicateHashError(err error) bool {
@@ -366,9 +353,9 @@ func isDuplicateHashError(err error) bool {
 
 func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.BankStatement, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, account_holder, iban, bic, account_number,
+		SELECT id, user_id, account_holder, iban,
 		       statement_date, statement_no,
-		       old_balance, new_balance, currency, source_file, original_file, imported_at, statement_type
+		       old_balance, new_balance, currency, original_file, imported_at, statement_type
 		FROM bank_statements WHERE id = $1 AND user_id = $2`, id, userID)
 
 	stmt, err := scanStatement(row)
@@ -385,9 +372,9 @@ func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID, us
 
 func (r *BankStatementRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.BankStatement, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, account_holder, iban, bic, account_number,
+		SELECT id, user_id, account_holder, iban,
 		       statement_date, statement_no,
-		       old_balance, new_balance, currency, source_file, NULL::bytea as original_file, imported_at, statement_type
+		       old_balance, new_balance, currency, NULL::bytea as original_file, imported_at, statement_type
 		FROM bank_statements
 		WHERE user_id = $1
 		ORDER BY statement_date DESC NULLS LAST, imported_at DESC`, userID)
@@ -501,35 +488,38 @@ func (r *BankStatementRepository) SearchTransactions(ctx context.Context, filter
 	return r.FindTransactions(ctx, filter)
 }
 
-func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesPerCategory int) ([]entity.CategorizationExample, error) {
-	// For each category, get N unique transaction combinations.
-	// We use a LATERAL join to perform this per-category.
+func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesCount int) ([]entity.CategorizationExample, error) {
+	// Fetch a total of examplesCount unique transaction combinations across all categories,
+	// prioritizing most recently imported ones.
 	query := `
+		WITH unique_txns AS (
+			SELECT DISTINCT ON (description, counterparty_name, category_id)
+				c.name as category_name,
+				t.description,
+				t.reference,
+				t.counterparty_name,
+				t.counterparty_iban,
+				t.bank_transaction_code,
+				t.mandate_reference,
+				t.booking_date
+			FROM transactions t
+			JOIN categories c ON t.category_id = c.id
+			WHERE t.user_id = $2 AND t.category_id IS NOT NULL
+			ORDER BY description, counterparty_name, category_id, t.booking_date DESC
+		)
 		SELECT 
-			c.name, 
-			t.description, 
-			t.reference, 
-			t.counterparty_name, 
-			t.counterparty_iban, 
-			t.bank_transaction_code, 
-			t.mandate_reference
-		FROM categories c
-		CROSS JOIN LATERAL (
-			SELECT DISTINCT 
-				description, 
-				reference, 
-				counterparty_name, 
-				counterparty_iban, 
-				bank_transaction_code, 
-				mandate_reference
-			FROM transactions
-			WHERE category_id = c.id AND user_id = $2
-			LIMIT $1
-		) t
-		WHERE c.user_id = $2
-		ORDER BY c.name, t.description`
+			category_name, 
+			description, 
+			reference, 
+			counterparty_name, 
+			counterparty_iban, 
+			bank_transaction_code, 
+			mandate_reference
+		FROM unique_txns
+		ORDER BY booking_date DESC
+		LIMIT $1`
 
-	rows, err := r.pool.Query(ctx, query, examplesPerCategory, userID)
+	rows, err := r.pool.Query(ctx, query, examplesCount, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: get examples: %w", err)
 	}
@@ -567,18 +557,55 @@ func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context,
 	return examples, rows.Err()
 }
 
-func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, contentHash string, categoryID *uuid.UUID, userID uuid.UUID) error {
+func (r *BankStatementRepository) FindMatchingCategory(ctx context.Context, userID uuid.UUID, txn port.TransactionToCategorize) (*uuid.UUID, error) {
+	// 1. Try exact match on description + counterparty_name
+	queryExact := `
+		SELECT category_id 
+		FROM transactions 
+		WHERE user_id = $1 AND category_id IS NOT NULL 
+		  AND description = $2 
+		  AND (counterparty_name = $3 OR (counterparty_name IS NULL AND $3 = ''))
+		LIMIT 1`
+
+	var catID uuid.UUID
+	err := r.pool.QueryRow(ctx, queryExact, userID, txn.Description, txn.CounterpartyName).Scan(&catID)
+	if err == nil {
+		return &catID, nil
+	}
+
+	// 2. Try fuzzy match with similarity threshold (e.g., 0.65 as requested)
+	// We prioritize the same counterparty first.
+	queryFuzzy := `
+		SELECT category_id 
+		FROM transactions 
+		WHERE user_id = $1 AND category_id IS NOT NULL 
+		  AND (
+		  	SIMILARITY(description, $2) > 0.65 
+		  	OR (counterparty_name IS NOT NULL AND $3 != '' AND SIMILARITY(counterparty_name, $3) > 0.65)
+		  )
+		ORDER BY SIMILARITY(description, $2) DESC, SIMILARITY(counterparty_name, $3) DESC
+		LIMIT 1`
+
+	err = r.pool.QueryRow(ctx, queryFuzzy, userID, txn.Description, txn.CounterpartyName).Scan(&catID)
+	if err == nil {
+		return &catID, nil
+	}
+
+	return nil, nil // No match found
+}
+
+func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE transactions 
 		SET category_id = $1 
 		WHERE content_hash = $2 AND user_id = $3`,
-		categoryID, contentHash, userID)
+		categoryID, hash, userID)
 
 	if err != nil {
 		return fmt.Errorf("bank_statement repo: update transaction category: %w", err)
 	}
 	if tag.RowsAffected() == 0 {
-		return fmt.Errorf("bank_statement repo: transaction not found: %s", contentHash)
+		return fmt.Errorf("bank_statement repo: transaction not found: %s", hash)
 	}
 	return nil
 }
@@ -652,7 +679,7 @@ func scanStatement(row scanner) (entity.BankStatement, error) {
 		statementDate *time.Time
 		originalFile  []byte
 		// Use pointers to scan safely in case the DB has NULLs (e.g. from tests)
-		accHolder, iban, bic, accNum, currency, srcFile, stmtType *string
+		accHolder, iban, currency, stmtType *string
 	)
 
 	err := row.Scan(
@@ -660,14 +687,11 @@ func scanStatement(row scanner) (entity.BankStatement, error) {
 		&s.UserID,
 		&accHolder,
 		&iban,
-		&bic,
-		&accNum,
 		&statementDate,
 		&s.StatementNo,
 		&s.OldBalance,
 		&s.NewBalance,
 		&currency,
-		&srcFile,
 		&originalFile,
 		&s.ImportedAt,
 		&stmtType,
@@ -682,17 +706,8 @@ func scanStatement(row scanner) (entity.BankStatement, error) {
 	if iban != nil {
 		s.IBAN = *iban
 	}
-	if bic != nil {
-		s.BIC = *bic
-	}
-	if accNum != nil {
-		s.AccountNumber = *accNum
-	}
 	if currency != nil {
 		s.Currency = *currency
-	}
-	if srcFile != nil {
-		s.SourceFile = *srcFile
 	}
 	if stmtType != nil {
 		s.StatementType = entity.StatementType(*stmtType)

@@ -727,7 +727,6 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 			OriginalFileName: fmt.Sprintf("Payslip_%d_%02d.pdf", stmtDate.Year(), stmtDate.Month()),
 			PeriodMonthNum:   int(stmtDate.Month()),
 			PeriodYear:       stmtDate.Year(),
-			EmployeeName:     "Max Mustermann",
 			GrossPay:         5500.00,
 			NetPay:           3500.00,
 			PayoutAmount:     3500.00,

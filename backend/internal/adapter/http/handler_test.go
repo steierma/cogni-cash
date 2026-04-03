@@ -5,8 +5,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"log/slog"
+	"mime/multipart"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -169,6 +171,9 @@ func (m *mockBankStmtRepo) SearchTransactions(_ context.Context, f entity.Transa
 func (m *mockBankStmtRepo) GetCategorizationExamples(_ context.Context, _ uuid.UUID, _ int) ([]entity.CategorizationExample, error) {
 	return nil, nil
 }
+func (m *mockBankStmtRepo) FindMatchingCategory(_ context.Context, _ uuid.UUID, _ port.TransactionToCategorize) (*uuid.UUID, error) {
+	return nil, nil
+}
 func (m *mockBankStmtRepo) UpdateTransactionCategory(_ context.Context, hash string, categoryID *uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
@@ -289,7 +294,7 @@ func TestChangePassword(t *testing.T) {
 
 	// Test successful password change
 	payload := []byte(`{"old_password":"password", "new_password":"newpassword123"}`)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", bytes.NewBuffer(payload))
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password/", bytes.NewBuffer(payload))
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 
@@ -301,7 +306,7 @@ func TestChangePassword(t *testing.T) {
 
 	// Test failed password change (wrong old password)
 	badPayload := []byte(`{"old_password":"wrongpassword", "new_password":"newpassword123"}`)
-	badReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password", bytes.NewBuffer(badPayload))
+	badReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password/", bytes.NewBuffer(badPayload))
 	badReq.Header.Set("Authorization", "Bearer "+token)
 	badRr := httptest.NewRecorder()
 
@@ -336,7 +341,7 @@ func TestGetTransactionAnalytics(t *testing.T) {
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/transactions/analytics?from=2026-01-01&to=2026-01-31", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/transactions/analytics/?from=2026-01-01&to=2026-01-31", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 
@@ -442,7 +447,7 @@ func TestDeleteBankStatement(t *testing.T) {
 	handler.RegisterRoutes(r)
 
 	statementID := uuid.New().String()
-	req := httptest.NewRequest(http.MethodDelete, "/api/v1/bank-statements/"+statementID, nil)
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/bank-statements/"+statementID+"/", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 
@@ -476,9 +481,12 @@ func (m *mockPayslipRepo) ExistsByHash(_ context.Context, _ string, _ uuid.UUID)
 func (m *mockPayslipRepo) ExistsByOriginalFileName(_ context.Context, _ string, _ uuid.UUID) (bool, error) {
 	return false, nil
 }
-func (m *mockPayslipRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Payslip, error) {
+func (m *mockPayslipRepo) FindAll(_ context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error) {
 	result := make([]entity.Payslip, 0, len(m.payslips))
 	for _, p := range m.payslips {
+		if filter.Employer != "" && p.EmployerName != filter.Employer {
+			continue
+		}
 		result = append(result, p)
 	}
 	return result, nil
@@ -490,6 +498,12 @@ func (m *mockPayslipRepo) FindByID(_ context.Context, id string, _ uuid.UUID) (e
 	}
 	return p, nil
 }
+func (m *mockPayslipRepo) GetAll(ctx context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error) {
+	return m.FindAll(ctx, filter)
+}
+func (m *mockPayslipRepo) GetByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error) {
+	return m.FindByID(ctx, id, userID)
+}
 func (m *mockPayslipRepo) Update(_ context.Context, p *entity.Payslip) error {
 	if _, ok := m.payslips[p.ID]; !ok {
 		return errors.New("payslip not found")
@@ -500,6 +514,9 @@ func (m *mockPayslipRepo) Update(_ context.Context, p *entity.Payslip) error {
 func (m *mockPayslipRepo) Delete(_ context.Context, id string, _ uuid.UUID) error {
 	delete(m.payslips, id)
 	return nil
+}
+func (m *mockPayslipRepo) Import(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error) {
+	return nil, nil
 }
 func (m *mockPayslipRepo) GetOriginalFile(_ context.Context, _ string, _ uuid.UUID) ([]byte, string, string, error) {
 	return []byte("pdf"), "application/pdf", "test.pdf", nil
@@ -513,7 +530,6 @@ func TestUpdatePayslip_WithBonuses(t *testing.T) {
 		ID:             uuid.New().String(),
 		PeriodMonthNum: 6,
 		PeriodYear:     2026,
-		EmployeeName:   "Max Mustermann",
 		TaxClass:       "1",
 		GrossPay:       5000.00,
 		NetPay:         3200.00,
@@ -538,7 +554,6 @@ func TestUpdatePayslip_WithBonuses(t *testing.T) {
 	payload, _ := json.Marshal(entity.Payslip{
 		PeriodMonthNum: 6,
 		PeriodYear:     2026,
-		EmployeeName:   "Max Mustermann",
 		TaxClass:       "3",
 		GrossPay:       5000.00,
 		NetPay:         3200.00,
@@ -550,7 +565,7 @@ func TestUpdatePayslip_WithBonuses(t *testing.T) {
 		},
 	})
 
-	req := httptest.NewRequest(http.MethodPut, "/api/v1/payslips/"+existing.ID, bytes.NewBuffer(payload))
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/payslips/"+existing.ID+"/", bytes.NewBuffer(payload))
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 	rr := httptest.NewRecorder()
@@ -597,7 +612,6 @@ func TestGetPayslip_IncludesBonuses(t *testing.T) {
 		ID:             uuid.New().String(),
 		PeriodMonthNum: 3,
 		PeriodYear:     2026,
-		EmployeeName:   "Erika Musterfrau",
 		GrossPay:       6000.00,
 		NetPay:         3800.00,
 		PayoutAmount:   3800.00,
@@ -611,12 +625,13 @@ func TestGetPayslip_IncludesBonuses(t *testing.T) {
 	dummyPinger := func(ctx context.Context) error { return nil }
 	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
-		WithPayslipRepository(repo)
+		WithPayslipRepository(repo).
+		WithPayslipService(repo)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
 
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/payslips/"+p.ID, nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/payslips/"+p.ID+"/", nil)
 	req.Header.Set("Authorization", "Bearer "+token)
 	rr := httptest.NewRecorder()
 
@@ -636,4 +651,71 @@ func TestGetPayslip_IncludesBonuses(t *testing.T) {
 	if result.Bonuses[0].Description != "Urlaubsgeld" {
 		t.Errorf("expected 'Urlaubsgeld', got '%s'", result.Bonuses[0].Description)
 	}
+}
+
+func TestImportPayslipsBatch(t *testing.T) {
+	authSvc, token := setupTestAuth(t)
+	repo := newMockPayslipRepo()
+
+	// Add mock parsers
+	staticParser := &mockPayslipParser{}
+	aiParser := &mockPayslipParser{}
+	payslipSvc := service.NewPayslipService(repo, staticParser, aiParser, setupLogger())
+
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+		WithPayslipService(payslipSvc).
+		WithPayslipRepository(repo)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	body := &bytes.Buffer{}
+	writer := multipart.NewWriter(body)
+
+	// Add two files
+	for i := 1; i <= 2; i++ {
+		part, err := writer.CreateFormFile("files", fmt.Sprintf("payslip%d.pdf", i))
+		if err != nil {
+			t.Fatal(err)
+		}
+		part.Write([]byte(fmt.Sprintf("pdf content %d", i)))
+	}
+	writer.Close()
+
+	req := httptest.NewRequest("POST", "/api/v1/payslips/import/batch/", body)
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+token)
+
+	w := httptest.NewRecorder()
+	r.ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status OK, got %d. Body: %s", w.Code, w.Body.String())
+	}
+
+	var resp struct {
+		Successful []entity.Payslip `json:"successful"`
+		Failed     []interface{}    `json:"failed"`
+	}
+	if err := json.Unmarshal(w.Body.Bytes(), &resp); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(resp.Successful) != 2 {
+		t.Errorf("expected 2 successful imports, got %d. Body: %s", len(resp.Successful), w.Body.String())
+	}
+}
+
+type mockPayslipParser struct{}
+
+func (m *mockPayslipParser) Parse(_ context.Context, _ uuid.UUID, _ []byte) (entity.Payslip, error) {
+	return entity.Payslip{
+		PeriodMonthNum: 3,
+		PeriodYear:     2026,
+		EmployerName:   "Test Corp",
+		GrossPay:       1000,
+		NetPay:         800,
+		PayoutAmount:   800,
+	}, nil
 }

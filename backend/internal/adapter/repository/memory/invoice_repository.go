@@ -110,7 +110,7 @@ func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, u
 	if !ok || inv.UserID != userID {
 		return nil, "", "", entity.ErrInvoiceNotFound
 	}
-	return inv.OriginalFileContent, inv.OriginalFileMime, inv.OriginalFileName, nil
+	return inv.OriginalFileContent, "application/pdf", inv.OriginalFileName, nil
 }
 
 var _ port.InvoiceRepository = (*InvoiceRepository)(nil)

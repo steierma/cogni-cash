@@ -6,6 +6,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strings"
@@ -86,7 +87,6 @@ JSON Schema Definition:
 {
   "period_month_num": "integer (1-12)",
   "period_year": "integer (YYYY)",
-  "employee_name": "string",
   "employer_name": "string",
   "tax_class": "string",
   "tax_id": "string",
@@ -100,7 +100,7 @@ JSON Schema Definition:
 Source Text:
 {{TEXT}}`
 
-// --- Google Gemini Types ---
+// --- Google AI Types ---
 
 type geminiRequest struct {
 	Contents []geminiContent `json:"contents"`
@@ -377,38 +377,47 @@ func (a *Adapter) doRequest(ctx context.Context, userID uuid.UUID, prompt string
 	}
 
 	if strings.Contains(baseURL, "googleapis.com") {
-		return a.doGeminiRequest(ctx, baseURL, token, model, prompt)
+		return a.doAIRequest(ctx, baseURL, token, model, prompt)
 	}
 	return a.doOllamaRequest(ctx, baseURL, token, model, prompt)
 }
 
-func (a *Adapter) doGeminiRequest(ctx context.Context, url, token, model, prompt string) (string, error) {
+func (a *Adapter) doAIRequest(ctx context.Context, url, token, model, prompt string) (string, error) {
 	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", url, model, token)
+	a.logger.Info("making request to gemini", "url", url, "model", model)
 
 	payload, _ := json.Marshal(geminiRequest{
 		Contents: []geminiContent{{Parts: []geminiPart{{Text: prompt}}}},
 	})
+
+	a.logger.Debug("gemini request details", "endpoint", endpoint, "payload", string(payload))
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
 	if err != nil {
+		a.logger.Error("gemini request failed", "error", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	a.logger.Info("gemini response received", "status", resp.StatusCode, "body", string(bodyBytes))
+
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("gemini api error: status %d", resp.StatusCode)
+		return "", fmt.Errorf("gemini api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var gResp geminiResponse
-	if err := json.NewDecoder(resp.Body).Decode(&gResp); err != nil {
-		return "", err
+	if err := json.Unmarshal(bodyBytes, &gResp); err != nil {
+		return "", fmt.Errorf("failed to decode gemini response: %w", err)
 	}
 
 	if len(gResp.Candidates) > 0 && len(gResp.Candidates[0].Content.Parts) > 0 {
-		return gResp.Candidates[0].Content.Parts[0].Text, nil
+		resText := gResp.Candidates[0].Content.Parts[0].Text
+		a.logger.Info("successfully generated gemini response", "response", resText)
+		return resText, nil
 	}
 	return "", fmt.Errorf("empty response from gemini")
 }
@@ -434,7 +443,7 @@ func (a *Adapter) ParsePayslipText(ctx context.Context, userID uuid.UUID, text s
 }
 
 // ParsePayslipDocument satisfies the LLMPayslipParser interface used by the AI payslip parser.
-// For Gemini, it sends the raw document bytes as a multimodal (inline_data) request.
+// For AI, it sends the raw document bytes as a multimodal (inline_data) request.
 // For Ollama (text-only), it falls back to the prompt-based text approach with a placeholder.
 func (a *Adapter) ParsePayslipDocument(ctx context.Context, userID uuid.UUID, mimeType string, data []byte) (entity.Payslip, error) {
 	a.logger.Info("Starting AI payslip document parsing (multimodal)", "mime_type", mimeType, "data_len", len(data), "user_id", userID)
@@ -452,8 +461,8 @@ func (a *Adapter) ParsePayslipDocument(ctx context.Context, userID uuid.UUID, mi
 
 	var rawResp string
 	if strings.Contains(baseURL, "googleapis.com") {
-		a.logger.Info("Sending multimodal payslip extraction request to Gemini")
-		// Gemini multimodal: send text prompt + inline binary document
+		a.logger.Info("Sending multimodal payslip extraction request to AI")
+		// AI multimodal: send text prompt + inline binary document
 		endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", baseURL, model, token)
 		payload, _ := json.Marshal(geminiRequest{
 			Contents: []geminiContent{{
@@ -472,23 +481,25 @@ func (a *Adapter) ParsePayslipDocument(ctx context.Context, userID uuid.UUID, mi
 
 		resp, err := a.client.Do(req)
 		if err != nil {
-			a.logger.Error("Gemini multimodal request failed", "error", err)
+			a.logger.Error("AI multimodal request failed", "error", err)
 			return entity.Payslip{}, err
 		}
 		defer resp.Body.Close()
 
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		a.logger.Info("AI multimodal response received", "status", resp.StatusCode, "body", string(bodyBytes))
+
 		if resp.StatusCode != http.StatusOK {
-			a.logger.Error("Gemini multimodal API error", "status", resp.StatusCode)
-			return entity.Payslip{}, fmt.Errorf("gemini multimodal api error: status %d", resp.StatusCode)
+			return entity.Payslip{}, fmt.Errorf("gemini multimodal api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 		}
 
 		var gResp geminiResponse
-		if err := json.NewDecoder(resp.Body).Decode(&gResp); err != nil {
-			return entity.Payslip{}, err
+		if err := json.Unmarshal(bodyBytes, &gResp); err != nil {
+			return entity.Payslip{}, fmt.Errorf("failed to decode gemini multimodal response: %w", err)
 		}
 		if len(gResp.Candidates) > 0 && len(gResp.Candidates[0].Content.Parts) > 0 {
 			rawResp = gResp.Candidates[0].Content.Parts[0].Text
-			a.logger.Info("Received raw response from Gemini for multimodal payslip extraction", "raw_response", rawResp)
+			a.logger.Info("Received raw response from AI for multimodal payslip extraction", "raw_response", rawResp)
 		} else {
 			return entity.Payslip{}, fmt.Errorf("empty multimodal response from gemini")
 		}
@@ -514,7 +525,6 @@ func (a *Adapter) unmarshalPayslip(rawResp string) (entity.Payslip, error) {
 	var res struct {
 		PeriodMonthNum   int     `json:"period_month_num"`
 		PeriodYear       int     `json:"period_year"`
-		EmployeeName     string  `json:"employee_name"`
 		EmployerName     string  `json:"employer_name"` // Added EmployerName to the struct
 		TaxClass         string  `json:"tax_class"`
 		TaxID            string  `json:"tax_id"`
@@ -536,7 +546,6 @@ func (a *Adapter) unmarshalPayslip(rawResp string) (entity.Payslip, error) {
 	payslip := entity.Payslip{
 		PeriodMonthNum:   res.PeriodMonthNum,
 		PeriodYear:       res.PeriodYear,
-		EmployeeName:     res.EmployeeName,
 		EmployerName:     res.EmployerName, // Mapped the extracted value
 		TaxClass:         res.TaxClass,
 		TaxID:            res.TaxID,
@@ -566,7 +575,10 @@ func (a *Adapter) doOllamaRequest(ctx context.Context, url, token, model, prompt
 		Format: "json",
 	})
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, url+"/api/generate", bytes.NewReader(payload))
+	fullURL := url + "/api/generate"
+	a.logger.Debug("ollama request details", "url", fullURL, "payload", string(payload))
+
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
@@ -574,18 +586,20 @@ func (a *Adapter) doOllamaRequest(ctx context.Context, url, token, model, prompt
 
 	resp, err := a.client.Do(req)
 	if err != nil {
+		a.logger.Error("ollama request failed", "error", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
-	slog.Info("ollama response received", "status", resp.StatusCode)
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	a.logger.Info("ollama response received", "status", resp.StatusCode, "body", string(bodyBytes))
 
 	if resp.StatusCode != http.StatusOK {
-		return "", fmt.Errorf("ollama api error: status %d", resp.StatusCode)
+		return "", fmt.Errorf("ollama api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
 
 	var oResp ollamaGenerateResponse
-	if err := json.NewDecoder(resp.Body).Decode(&oResp); err != nil {
+	if err := json.Unmarshal(bodyBytes, &oResp); err != nil {
 		return "", fmt.Errorf("failed to decode ollama response: %w", err)
 	}
 

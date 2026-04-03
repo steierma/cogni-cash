@@ -13,7 +13,7 @@ type PayslipRepository interface {
 	ExistsByOriginalFileName(ctx context.Context, originalFileName string, userID uuid.UUID) (bool, error)
 
 	// Historical analytics & listing
-	FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Payslip, error)
+	FindAll(ctx context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error)
 	FindByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error)
 
 	// Editing and Deletion

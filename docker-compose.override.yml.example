@@ -1,0 +1,39 @@
+# =============================================================================
+# Local AI Financial Manager — Docker Compose Override (Local Development)
+# =============================================================================
+# Copy this file to 'docker-compose.override.yml' to enable local builds:
+# cp docker-compose.override.yml.example docker-compose.override.yml
+# =============================================================================
+
+services:
+
+  migrate:
+    pull_policy: never
+    image: cogni-cash-backend:latest
+
+  backend:
+    pull_policy: if_not_present
+    image: cogni-cash-backend:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    # MOBILE DEVELOPMENT: Port 8080 is exposed here so the mobile app can reach 
+    # the backend directly on localhost without going through Caddy.
+    ports:
+      - "8080:8080"
+    environment:
+      - DATABASE_HOST=postgres
+      - LOG_LEVEL=debug
+
+  frontend:
+    pull_policy: if_not_present
+    image: cogni-cash-frontend:latest
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        - VITE_ENABLE_SANDBOX=true
+    environment:
+      - VITE_ENABLE_SANDBOX=true
+    ports:
+      - "3000:80"

@@ -26,7 +26,7 @@ services:
 
   # ── Database Migrations (one-shot) ─────────────────────────────────────────
   migrate:
-    image: ghcr.io/steierma/cogni-cash-backend:${TAG:-latest}
+    image: ghcr.io/steierma/cogni-cash-backend${IMAGE_SUFFIX:-}:${TAG:-latest}
     pull_policy: always
     container_name: cogni-cash-migrate
     entrypoint: ["/app/cogni-cash-migrate"]
@@ -43,7 +43,7 @@ services:
 
   # ── Backend ────────────────────────────────────────────────────────────────
   backend:
-    image: ghcr.io/steierma/cogni-cash-backend:${TAG:-latest}
+    image: ghcr.io/steierma/cogni-cash-backend${IMAGE_SUFFIX:-}:${TAG:-latest}
     pull_policy: always
     container_name: cogni-cash-backend
     restart: unless-stopped
@@ -74,7 +74,7 @@ services:
 
   # ── Frontend ───────────────────────────────────────────────────────────────
   frontend:
-    image: ghcr.io/steierma/cogni-cash-frontend:${TAG:-latest}
+    image: ghcr.io/steierma/cogni-cash-frontend${IMAGE_SUFFIX:-}:${TAG:-latest}
     pull_policy: always
     container_name: cogni-cash-frontend
     restart: unless-stopped

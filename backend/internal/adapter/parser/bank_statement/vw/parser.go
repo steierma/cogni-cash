@@ -24,8 +24,8 @@ func NewParser() *Parser {
 	return &Parser{}
 }
 
-func (p *Parser) Parse(ctx context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
-	rawText, err := extractPDFText(filePath)
+func (p *Parser) Parse(ctx context.Context, _ uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
+	rawText, err := extractPDFText(fileBytes)
 	if err != nil {
 		return entity.BankStatement{}, fmt.Errorf("vw parser: failed to read pdf: %w", err)
 	}
@@ -178,12 +178,12 @@ func parseGermanFloat(s string) (float64, error) {
 	return strconv.ParseFloat(s, 64)
 }
 
-func extractPDFText(path string) (string, error) {
-	f, r, err := pdf.Open(path)
+func extractPDFText(fileBytes []byte) (string, error) {
+	readerAt := bytes.NewReader(fileBytes)
+	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
 	if err != nil {
 		return "", err
 	}
-	defer f.Close()
 
 	var buf bytes.Buffer
 	b, err := r.GetPlainText()

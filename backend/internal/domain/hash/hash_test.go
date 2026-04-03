@@ -87,23 +87,6 @@ func TestForBankStatement_IsDeterministic(t *testing.T) {
 	}
 }
 
-func TestForBankStatement_SourceFileDoesNotAffectHash(t *testing.T) {
-	base := entity.BankStatement{
-		IBAN:        "DE2354586224568642550",
-		StatementNo: 3,
-		OldBalance:  2000.00,
-		NewBalance:  3503.82,
-		Currency:    "EUR",
-	}
-	renamed := base
-	renamed.SourceFile = "renamed_file.pdf"
-	base.SourceFile = "original_file.pdf"
-
-	if hash.ForBankStatement(base) != hash.ForBankStatement(renamed) {
-		t.Error("renaming the source file must not change the statement hash")
-	}
-}
-
 func TestForBankStatement_DifferentBalanceProducesDifferentHash(t *testing.T) {
 	stmt1 := entity.BankStatement{IBAN: "DE01", StatementNo: 1, OldBalance: 1000, NewBalance: 1500, Currency: "EUR"}
 	stmt2 := stmt1

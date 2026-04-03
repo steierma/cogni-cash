@@ -153,9 +153,9 @@ export default function DashboardPage() {
     const {t, i18n} = useTranslation();
     const [hideReconciled, setHideReconciled] = useState(true);
 
-    const payslipsQuery = useQuery<Payslip[]>({
+    const payslipsQuery = useQuery<Payslip[], Error>({
         queryKey: ['payslips'],
-        queryFn: fetchPayslips,
+        queryFn: () => fetchPayslips(),
     });
 
     const statementsQuery = useQuery<BankStatementSummary[]>({

@@ -35,7 +35,6 @@ export interface Invoice {
     currency: string;
     issued_at: string;
     description: string;
-    raw_text: string;
 }
 
 export interface Transaction {
@@ -64,15 +63,12 @@ export interface BankStatement {
     id: string;
     account_holder: string;
     iban: string;
-    bic: string;
-    account_number: string;
     statement_date: string;
     statement_no: number;
     old_balance: number;
     new_balance: number;
     currency: string;
     transactions: Transaction[];
-    source_file: string;
     imported_at: string;
     content_hash: string;
     statement_type: 'giro' | 'credit_card' | 'extra_account';
@@ -186,10 +182,8 @@ export interface Bonus {
 export interface Payslip {
     id: string;
     original_file_name: string;
-    original_file_mime?: string;   // empty / absent = JSON-imported, no binary file stored
     period_month_num: number;
     period_year: number;
-    employee_name: string;
     employer_name: string;
     tax_class: string;
     tax_id: string;

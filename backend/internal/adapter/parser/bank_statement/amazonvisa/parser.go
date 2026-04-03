@@ -29,10 +29,10 @@
 package amazonvisa
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -56,19 +56,15 @@ type Parser struct {
 // NewParser returns a new Amazon Visa XLS Parser.
 func NewParser(logger *slog.Logger) *Parser { return &Parser{logger: logger} }
 
-// Parse opens the binary XLS at filePath and returns a BankStatement.
-func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
-	p.logger.Info("Parsing Amazon Visa XLS", "filePath", filePath)
-	// Verify the file exists before handing it to the library.
-	if _, err := os.Stat(filePath); err != nil {
-		p.logger.Error("Failed to stat Amazon Visa XLS", "filePath", filePath, "error", err)
-		return entity.BankStatement{}, fmt.Errorf("amazonvisa parser: stat: %w", err)
-	}
+// Parse opens the binary XLS bytes and returns a BankStatement.
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
+	p.logger.Info("Parsing Amazon Visa XLS")
+	reader := bytes.NewReader(fileBytes)
 
-	wb, err := xls.Open(filePath, "utf-8")
+	wb, err := xls.OpenReader(reader, "utf-8")
 	if err != nil {
 		// If it cannot be opened as an XLS, it's definitely not the right format for this parser
-		p.logger.Debug("Failed to open file as XLS", "filePath", filePath, "error", err)
+		p.logger.Debug("Failed to open file as XLS", "error", err)
 		return entity.BankStatement{}, ErrFormatMismatch
 	}
 
@@ -86,9 +82,7 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 	}
 
 	stmt := entity.BankStatement{
-		SourceFile:    filePath,
 		Currency:      "EUR",
-		BIC:           "", // Visa card — no BIC
 		StatementType: entity.StatementTypeCreditCard,
 	}
 
@@ -165,8 +159,8 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 	}
 	stmt.OldBalance = stmt.NewBalance - total
 
-	// Validation is now handled globally by BankStatementService calling stmt.IsValid()
-	p.logger.Info("Successfully parsed Amazon Visa XLS", "filePath", filePath)
+		// Validation is now handled globally by BankStatementService calling stmt.IsValid()
+	p.logger.Info("Successfully parsed Amazon Visa XLS")
 	return stmt, nil
 }
 

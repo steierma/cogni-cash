@@ -16,10 +16,6 @@ import (
 
 // ── request / response types ─────────────────────────────────────────────────
 
-type categorizeDocumentRequest struct {
-	RawText string `json:"raw_text"`
-}
-
 type updateInvoiceRequest struct {
 	VendorName  string     `json:"vendor_name"`
 	CategoryID  *uuid.UUID `json:"category_id"`
@@ -27,7 +23,6 @@ type updateInvoiceRequest struct {
 	Currency    string     `json:"currency"`
 	IssuedAt    *time.Time `json:"issued_at"`
 	Description *string    `json:"description"` // pointer so empty-string clears the field
-	RawText     string     `json:"raw_text"`
 }
 
 // ── handlers ──────────────────────────────────────────────────────────────────
@@ -124,7 +119,7 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 		categoryID = &parsed
 	}
 
-	invoice, err := h.invoiceSvc.ImportFromFile(r.Context(), userID, "", header.Filename, mimeType, fileBytes, categoryID)
+	invoice, err := h.invoiceSvc.ImportFromFile(r.Context(), userID, header.Filename, mimeType, fileBytes, categoryID)
 	if err != nil {
 		if errors.Is(err, entity.ErrInvoiceDuplicate) {
 			writeError(w, http.StatusConflict, "invoice already imported (duplicate)")
@@ -189,9 +184,6 @@ func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
 	// a pointer to any string (including "") means "set to this value".
 	if req.Description != nil {
 		updated.Description = *req.Description
-	}
-	if req.RawText != "" {
-		updated.RawText = req.RawText
 	}
 
 	saved, err := h.invoiceSvc.Update(r.Context(), updated)

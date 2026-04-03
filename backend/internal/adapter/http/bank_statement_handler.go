@@ -6,10 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
-	"strings"
 	"time"
 
 	"cogni-cash/internal/domain/entity"
@@ -101,26 +98,15 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		tmp, err := os.CreateTemp("", "bank-statement-*"+filepath.Ext(fileHeader.Filename))
-		if err != nil {
-			file.Close()
-			results = append(results, importResult{Filename: fileHeader.Filename, Status: "error", Error: "could not create temp file"})
-			continue
-		}
-
-		_, copyErr := io.Copy(tmp, file)
-		tmp.Close()
+		fileBytes, err := io.ReadAll(file)
 		file.Close()
-
-		if copyErr != nil {
-			os.Remove(tmp.Name())
+		if err != nil {
 			results = append(results, importResult{Filename: fileHeader.Filename, Status: "error", Error: "could not read file content"})
 			continue
 		}
 
 		// Pass the statementType down to the service layer.
-		stmt, err := h.bankStatementSvc.ImportFromFile(r.Context(), userID, tmp.Name(), useAI, statementType)
-		os.Remove(tmp.Name())
+		stmt, err := h.bankStatementSvc.ImportFromFile(r.Context(), userID, fileHeader.Filename, fileBytes, useAI, statementType)
 
 		if err != nil {
 			if errors.Is(err, entity.ErrDuplicate) {
@@ -210,21 +196,11 @@ func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	ext := strings.ToLower(filepath.Ext(stmt.SourceFile))
-	contentType := "application/octet-stream"
-	switch ext {
-	case ".pdf":
-		contentType = "application/pdf"
-	case ".csv":
-		contentType = "text/csv"
-	case ".xls":
-		contentType = "application/vnd.ms-excel"
-	case ".xlsx":
-		contentType = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-	}
+	contentType := "application/pdf"
+	filename := fmt.Sprintf("Statement_%s_%s.pdf", stmt.IBAN, stmt.StatementDate.Format("2006-01-02"))
 
 	w.Header().Set("Content-Type", contentType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", stmt.SourceFile))
+	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
 	w.Header().Set("Content-Length", strconv.FormatInt(int64(len(stmt.OriginalFile)), 10))
 
 	if _, err := w.Write(stmt.OriginalFile); err != nil {

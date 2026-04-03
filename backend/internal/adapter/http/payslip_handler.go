@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"os"
 	"strconv"
 
 	"cogni-cash/internal/domain/entity"
@@ -24,7 +23,12 @@ func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
 	}
 	userID, _ := uuid.Parse(userIDStr)
 
-	payslips, err := h.payslipRepo.FindAll(r.Context(), userID)
+	filter := entity.PayslipFilter{
+		UserID:   userID,
+		Employer: r.URL.Query().Get("employer"),
+	}
+
+	payslips, err := h.payslipSvc.GetAll(r.Context(), filter)
 	if err != nil {
 		h.Logger.Error("Failed to list payslips", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, "Failed to fetch payslips")
@@ -52,7 +56,7 @@ func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	payslip, err := h.payslipRepo.FindByID(r.Context(), id, userID)
+	payslip, err := h.payslipSvc.GetByID(r.Context(), id, userID)
 	if err != nil {
 		h.Logger.Error("Failed to fetch payslip", "id", id, "error", err, "user_id", userID)
 		writeError(w, http.StatusNotFound, "Payslip not found")
@@ -101,7 +105,6 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 
 	// --- Extract Manual Overrides from Multipart Form ---
 	overrides := &entity.Payslip{
-		EmployeeName: r.FormValue("employee_name"),
 		EmployerName: r.FormValue("employer_name"),
 	}
 	if val := r.FormValue("period_month_num"); val != "" {
@@ -153,27 +156,8 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 	}
 	// ----------------------------------------------------
 
-	// Create a temporary physical file for the PDF parser
-	tempFile, err := os.CreateTemp("", "payslip-*.pdf")
-	if err != nil {
-		h.Logger.Error("Failed to create temporary file", "error", err)
-		writeError(w, http.StatusInternalServerError, "Failed to process upload")
-		return
-	}
-	// Ensure the file is deleted from the disk when the request finishes
-	defer os.Remove(tempFile.Name())
-
-	// Write the uploaded bytes to the temp file
-	if _, err := tempFile.Write(fileBytes); err != nil {
-		tempFile.Close()
-		h.Logger.Error("Failed to write to temporary file", "error", err)
-		writeError(w, http.StatusInternalServerError, "Failed to process upload")
-		return
-	}
-	tempFile.Close() // Close it so the underlying parser can open it safely
-
-	// Pass the actual physical temp file path, overrides, and useAI flag to the service layer
-	payslip, err := h.payslipSvc.Import(r.Context(), userID, tempFile.Name(), header.Filename, mimeType, fileBytes, overrides, useAI)
+	// Pass the fileBytes directly to the service layer (no more temp files)
+	payslip, err := h.payslipSvc.Import(r.Context(), userID, header.Filename, mimeType, fileBytes, overrides, useAI)
 	if err != nil {
 		h.Logger.Error("Failed to import payslip", "error", err, "user_id", userID)
 		if errors.Is(err, entity.ErrPayslipDuplicate) {
@@ -232,12 +216,6 @@ func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
 			}
 			p.OriginalFileContent = fileBytes
 			p.OriginalFileName = header.Filename
-			mimeType := header.Header.Get("Content-Type")
-			if mimeType == "" {
-				mimeType = "application/pdf"
-			}
-			p.OriginalFileMime = mimeType
-			p.OriginalFileSize = int64(len(fileBytes))
 		}
 	} else {
 		// Standard JSON update (no file attached)
@@ -310,7 +288,8 @@ func (h *Handler) downloadPayslipFile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	content, mimeType, filename, err := h.payslipRepo.GetOriginalFile(r.Context(), id, userID)
+	content, mimeType, filename, err := h.payslipSvc.GetOriginalFile(r.Context(), id, userID)
+
 	if err != nil {
 		h.Logger.Error("Failed to fetch original file", "id", id, "error", err, "user_id", userID)
 		writeError(w, http.StatusNotFound, "File not found")
@@ -396,34 +375,8 @@ func (h *Handler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
 			mimeType = "application/pdf"
 		}
 
-		// Create a temporary physical file for the PDF parser
-		tempFile, err := os.CreateTemp("", "payslip-batch-*.pdf")
-		if err != nil {
-			h.Logger.Error("Failed to create temporary file in batch", "error", err)
-			response.Failed = append(response.Failed, batchImportError{
-				Filename: fileHeader.Filename,
-				Error:    "Internal server error processing file",
-			})
-			continue
-		}
-
-		// Write the uploaded bytes to the temp file
-		if _, err := tempFile.Write(fileBytes); err != nil {
-			tempFile.Close()
-			os.Remove(tempFile.Name())
-			response.Failed = append(response.Failed, batchImportError{
-				Filename: fileHeader.Filename,
-				Error:    "Failed to write to temporary file",
-			})
-			continue
-		}
-		tempFile.Close()
-
 		// Call the service (passing nil for manual overrides in a batch context, and false for useAI)
-		payslip, err := h.payslipSvc.Import(r.Context(), userID, tempFile.Name(), fileHeader.Filename, mimeType, fileBytes, nil, false)
-
-		// Clean up the temp file immediately after the service is done
-		os.Remove(tempFile.Name())
+		payslip, err := h.payslipSvc.Import(r.Context(), userID, fileHeader.Filename, mimeType, fileBytes, nil, false)
 
 		if err != nil {
 			// Provide a clean error message for duplicates

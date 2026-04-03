@@ -297,32 +297,62 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 		}
 		batch := txns[i:end]
 
-		results, err := s.llm.CategorizeBatch(ctx, userID, batch, catNames, examples)
-		if err != nil {
-			if ctx.Err() != nil {
-				s.JobTracker.Finish("cancelled")
-			} else {
-				s.Logger.Error("Failed to categorize batch", "error", err, "batch_start", i)
-				continue
-			}
-			return
-		}
-
+		var toCategorizeViaLLM []port.TransactionToCategorize
 		var successfulResults []port.CategorizedTransaction
-		for _, res := range results {
-			var validCategoryID *uuid.UUID
-			for _, knownCat := range categories {
-				if res.Category == knownCat.Name {
-					validCategoryID = &knownCat.ID
-					break
+
+		// 1. Try to find matches in database first
+		for _, tx := range batch {
+			if matchedID, err := s.repo.FindMatchingCategory(ctx, userID, tx); err == nil && matchedID != nil {
+				// Found a high-confidence match in DB
+				if err := s.repo.UpdateTransactionCategory(ctx, tx.Hash, matchedID, userID); err == nil {
+					// We need to find the category name for the job tracker
+					catName := "Categorized"
+					for _, c := range categories {
+						if c.ID == *matchedID {
+							catName = c.Name
+							break
+						}
+					}
+					successfulResults = append(successfulResults, port.CategorizedTransaction{
+						Hash:     tx.Hash,
+						Category: catName,
+					})
+					continue
 				}
 			}
+			toCategorizeViaLLM = append(toCategorizeViaLLM, tx)
+		}
 
-			if validCategoryID != nil {
-				if err := s.repo.UpdateTransactionCategory(ctx, res.Hash, validCategoryID, userID); err != nil {
-					s.Logger.Error("Failed to update transaction category", "hash", res.Hash, "error", err)
+		// 2. Only call LLM for transactions that weren't matched in DB
+		if len(toCategorizeViaLLM) > 0 {
+			results, err := s.llm.CategorizeBatch(ctx, userID, toCategorizeViaLLM, catNames, examples)
+			if err != nil {
+				if ctx.Err() != nil {
+					s.JobTracker.Finish("cancelled")
 				} else {
-					successfulResults = append(successfulResults, res)
+					s.Logger.Error("Failed to categorize batch via LLM", "error", err, "batch_start", i)
+					// We still report the DB-matched results
+					s.JobTracker.AddResults(len(batch), successfulResults)
+					continue
+				}
+				return
+			}
+
+			for _, res := range results {
+				var validCategoryID *uuid.UUID
+				for _, knownCat := range categories {
+					if res.Category == knownCat.Name {
+						validCategoryID = &knownCat.ID
+						break
+					}
+				}
+
+				if validCategoryID != nil {
+					if err := s.repo.UpdateTransactionCategory(ctx, res.Hash, validCategoryID, userID); err != nil {
+						s.Logger.Error("Failed to update transaction category", "hash", res.Hash, "error", err)
+					} else {
+						successfulResults = append(successfulResults, res)
+					}
 				}
 			}
 		}

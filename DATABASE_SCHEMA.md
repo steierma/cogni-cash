@@ -1,4 +1,4 @@
-~~~~# Database Schema
+# Database Schema
 
 > **Host:** configured via `DATABASE_HOST` / `DATABASE_PORT` in `backend/.env`
 > **Database:** configured via `POSTGRES_DB` in `backend/.env`
@@ -40,10 +40,8 @@
 │ user_id (FK)            │          │ user_id (FK)                     │
 │ name                    │          │ account_holder                   │
 │ color                   │          │ iban                             │
-│ created_at              │          │ bic                              │
-└────────────┬────────────┘          │ account_number                   │
-             │                       │ statement_date                   │
-             │                       │ statement_no                     │
+│ created_at              │          │ statement_date                   │
+└────────────┬────────────┘          │ statement_no                     │
              │                       │ old_balance                      │
              │                       │ new_balance                      │
              │                       │ source_file                      │
@@ -102,11 +100,8 @@
              │                       │ currency                         │
              │                       │ invoice_date                     │
              │                       │ description                      │
-             │                       │ raw_text                         │
              │                       │ content_hash (UQ)                │
              │                       │ original_file_name               │
-             │                       │ original_file_mime               │
-             │                       │ original_file_size               │
              │                       │ original_file_content            │
              │                       │ created_at                       │
              │                       └──────────────────────────────────┘
@@ -116,15 +111,11 @@
              └───────────────────────┤──────────────────────────────────┤
                                      │ id (PK)                          │
                                      │ user_id (FK)                     │
-                                     │ source_file                      │
                                      │ original_file_name               │
-                                     │ original_file_mime               │
-                                     │ original_file_size               │
                                      │ original_file_content            │
                                      │ content_hash (UQ)                │
                                      │ period_month_num                 │
                                      │ period_year                      │
-                                     │ employee_name                    │
                                      │ employer_name                    │
                                      │ tax_class                        │
                                      │ tax_id                           │
@@ -247,13 +238,10 @@ Represents imported bank statement files (PDF, CSV, XLS).
 | `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `account_holder`| `TEXT` | `NOT NULL` | Name on the account |
 | `iban` | `TEXT` | `NOT NULL` | Standardized account number |
-| `bic` | `TEXT` | `NOT NULL` | Bank identifier code |
-| `account_number`| `TEXT` | `NOT NULL` | Internal account number string |
 | `statement_date`| `DATE` | `NOT NULL` | Closing date of the statement |
 | `statement_no` | `INT` | `NOT NULL` | Sequential statement number |
 | `old_balance` | `NUMERIC(15,2)`| `NOT NULL` | Opening balance for the period |
 | `new_balance` | `NUMERIC(15,2)`| `NOT NULL` | Closing balance for the period |
-| `source_file` | `TEXT` | `NOT NULL` | Original filename |
 | `content_hash` | `VARCHAR(64)` | `NOT NULL`, `UNIQUE` | SHA-256 hash for deduplication |
 | `statement_type`| `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'giro'` | 'giro', 'credit_card', or 'extra_account' |
 | `bank_account_id`| `UUID` | `FK (bank_accounts.id)`, `ON DELETE SET NULL` | Parent bank account (API connection) |
@@ -308,11 +296,8 @@ Stores parsed and auto-categorized invoices.
 | `currency` | `TEXT` | `NOT NULL`, `DEFAULT 'EUR'` | Currency code |
 | `invoice_date` | `DATE` | | Extracted invoice date |
 | `description` | `TEXT` | `NOT NULL`, `DEFAULT ''` | Manual or extracted description |
-| `raw_text` | `TEXT` | `NOT NULL` | Raw text payload sent to LLM |
 | `content_hash` | `TEXT` | `UNIQUE` | SHA-256 hash for deduplication |
 | `original_file_name` | `VARCHAR(255)` | | Filename of the imported invoice |
-| `original_file_mime` | `VARCHAR(100)` | | MIME type (e.g., application/pdf) |
-| `original_file_size` | `BIGINT` | | Size of the file in bytes |
 | `original_file_content`| `BYTEA` | | Binary content of the invoice file |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
@@ -323,7 +308,7 @@ Key-value store for application configuration. Per-user settings.
 |---|---|---|---|
 | `key` | `TEXT` | `PK` (part) | The setting identifier string |
 | `user_id` | `UUID` | `PK`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
-| `value` | `TEXT` | `NOT NULL` | The configured value |
+| `value` | `TEXT" | `NOT NULL` | The configured value |
 
 **Constraints:** `PRIMARY KEY (key, user_id)`
 
@@ -334,15 +319,11 @@ Structured payroll information parsed from HR documents.
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
 | `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
-| `source_file` | `VARCHAR(255)`| | Name or path of the original file |
 | `original_file_name` | `VARCHAR(255)`| `NOT NULL` | Stored filename |
-| `original_file_mime` | `VARCHAR(100)`| | MIME type of the stored document |
-| `original_file_size` | `BIGINT` | `NOT NULL` | Size of the stored document in bytes |
 | `original_file_content`| `BYTEA` | | Raw binary payload of the PDF/document |
 | `content_hash` | `VARCHAR(64)` | `NOT NULL`, `UNIQUE` | SHA-256 hash for deduplication |
 | `period_month_num` | `INT` | | 1-12 representing the payroll month |
 | `period_year` | `INT` | `NOT NULL` | Payroll year |
-| `employee_name` | `VARCHAR(100)`| `NOT NULL` | Extracted employee name |
 | `employer_name` | `VARCHAR(100)`| `NOT NULL`, `DEFAULT 'Unknown'` | Extracted employer name |
 | `tax_class` | `VARCHAR(10)` | | E.g., '1', '3', '4' |
 | `tax_id` | `VARCHAR(50)` | | Tax identification number |
@@ -438,6 +419,8 @@ To ensure data integrity and optimal query performance:
     - `idx_transactions_bank_account_id` on `transactions(bank_account_id)`
     - `idx_bank_statements_bank_account_id` on `bank_statements(bank_account_id)`
     - `idx_reset_tokens_hash` on `password_reset_tokens(token_hash)`
+    - `idx_transactions_description_trgm` on `transactions(description)` (GIN trigram)
+    - `idx_transactions_counterparty_trgm` on `transactions(counterparty_name)` (GIN trigram)
 
 ---
 
@@ -478,4 +461,5 @@ Migrations are plain SQL files in `backend/migrations/`, applied in lexicographi
 8.  **`008_add_password_reset_tokens.sql`**: Adds `password_reset_tokens` table for the secure forgot-password flow.
 9.  **`009_add_bank_account_sync_error.sql`**: Adds `last_sync_error` to `bank_accounts` table for transparent error reporting.
 10. **`010_add_user_tenancy.sql`**: Implements multi-tenancy by adding `user_id` to all relevant tables and updating constraints.
-10. **`011_enrich_transactions.sql`**: Adds `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and `mandate_reference` to transactions for improved categorization and reconciliation.
+11. **`011_enrich_transactions.sql`**: Adds `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and mandate reference to transactions.
+12. **`012_add_fuzzy_matching.sql`**: Enables `pg_trgm` extension and adds GIN indexes for high-performance fuzzy matching of descriptions and counterparty names. Also removes redundant columns across `bank_statements`, `transactions`, `invoices`, and `payslips` to streamline the schema.

@@ -134,41 +134,45 @@ func (r *BankStatementRepository) SearchTransactions(ctx context.Context, filter
 	return r.FindTransactions(ctx, filter)
 }
 
-func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesPerCategory int) ([]entity.CategorizationExample, error) {
+func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesCount int) ([]entity.CategorizationExample, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 
 	// map[categoryID][]entity.CategorizationExample
 	catExamples := make(map[uuid.UUID][]entity.CategorizationExample)
+	totalCount := 0
 
 	for _, tx := range r.transactions {
 		if tx.CategoryID == nil || tx.UserID != userID {
 			continue
 		}
 
+		if totalCount >= examplesCount {
+			break
+		}
+
 		if _, ok := catExamples[*tx.CategoryID]; !ok {
 			catExamples[*tx.CategoryID] = make([]entity.CategorizationExample, 0)
 		}
 
-		if len(catExamples[*tx.CategoryID]) < examplesPerCategory {
-			// Check for uniqueness based on description + reference
-			isDuplicate := false
-			for _, existing := range catExamples[*tx.CategoryID] {
-				if existing.Description == tx.Description && existing.Reference == tx.Reference {
-					isDuplicate = true
-					break
-				}
+		// Check for uniqueness based on description + reference
+		isDuplicate := false
+		for _, existing := range catExamples[*tx.CategoryID] {
+			if existing.Description == tx.Description && existing.Reference == tx.Reference {
+				isDuplicate = true
+				break
 			}
-			if !isDuplicate {
-				catExamples[*tx.CategoryID] = append(catExamples[*tx.CategoryID], entity.CategorizationExample{
-					Description:         tx.Description,
-					Reference:           tx.Reference,
-					CounterpartyName:    tx.CounterpartyName,
-					CounterpartyIban:    tx.CounterpartyIban,
-					BankTransactionCode: tx.BankTransactionCode,
-					MandateReference:    tx.MandateReference,
-				})
-			}
+		}
+		if !isDuplicate {
+			catExamples[*tx.CategoryID] = append(catExamples[*tx.CategoryID], entity.CategorizationExample{
+				Description:         tx.Description,
+				Reference:           tx.Reference,
+				CounterpartyName:    tx.CounterpartyName,
+				CounterpartyIban:    tx.CounterpartyIban,
+				BankTransactionCode: tx.BankTransactionCode,
+				MandateReference:    tx.MandateReference,
+			})
+			totalCount++
 		}
 	}
 
@@ -180,7 +184,6 @@ func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context,
 				catName = c.Name
 			}
 		}
-
 		for _, ex := range exList {
 			ex.Category = catName
 			examples = append(examples, ex)
@@ -189,6 +192,11 @@ func (r *BankStatementRepository) GetCategorizationExamples(ctx context.Context,
 
 	return examples, nil
 }
+
+func (r *BankStatementRepository) FindMatchingCategory(ctx context.Context, userID uuid.UUID, txn port.TransactionToCategorize) (*uuid.UUID, error) {
+	return nil, nil // Not implemented for memory repository
+}
+
 
 func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()

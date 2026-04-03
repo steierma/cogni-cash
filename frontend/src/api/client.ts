@@ -39,72 +39,72 @@ api.interceptors.response.use(
 // ── System & Settings ─────────────────────────────────────────────────────────
 
 export const fetchSystemInfo = (): Promise<SystemInfo> =>
-    api.get<SystemInfo>('/system/info').then((r: AxiosResponse<SystemInfo>) => r.data);
+    api.get<SystemInfo>('system/info/').then((r: AxiosResponse<SystemInfo>) => r.data);
 
 export const fetchSettings = (): Promise<Record<string, string>> =>
-    api.get<Record<string, string>>('/settings/').then((r: AxiosResponse<Record<string, string>>) => r.data ?? {});
+    api.get<Record<string, string>>('settings/').then((r: AxiosResponse<Record<string, string>>) => r.data ?? {});
 
 export const updateSettings = (settings: Record<string, string>): Promise<void> =>
-    api.patch('/settings/', settings).then(() => undefined);
+    api.patch('settings/', settings).then(() => undefined);
 
 export const sendTestEmail = (to: string): Promise<void> =>
-    api.post('/settings/test-email', {to}).then(() => undefined);
+    api.post('settings/test-email/', {to}).then(() => undefined);
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
 export const login = (username: string, password: string): Promise<{ token: string }> =>
-    api.post<{ token: string }>('/login', {username, password}).then((r: AxiosResponse<{ token: string }>) => r.data);
+    api.post<{ token: string }>('login/', {username, password}).then((r: AxiosResponse<{ token: string }>) => r.data);
 
 export const logout = (): Promise<void> =>
-    api.post('/logout').then(() => undefined);
+    api.post('logout/').then(() => undefined);
 
 export const changePassword = (oldPassword: string, newPassword: string): Promise<void> =>
-    api.post('/auth/change-password', {
+    api.post('auth/change-password/', {
         old_password: oldPassword,
         new_password: newPassword
     }).then(() => undefined);
 
 export const requestPasswordReset = (email: string): Promise<{ message: string }> =>
-    api.post('/auth/forgot-password', {email}).then(r => r.data);
+    api.post('auth/forgot-password/', {email}).then(r => r.data);
 
 export const validateResetToken = (token: string): Promise<{ valid: boolean }> =>
-    api.get('/auth/reset-password/validate', {params: {token}}).then(r => r.data);
+    api.get('auth/reset-password/validate/', {params: {token}}).then(r => r.data);
 
 export const confirmPasswordReset = (token: string, newPassword: string): Promise<{ message: string }> =>
-    api.post('/auth/reset-password/confirm', {token, new_password: newPassword}).then(r => r.data);
+    api.post('auth/reset-password/confirm/', {token, new_password: newPassword}).then(r => r.data);
 
 // ── Users ─────────────────────────────────────────────────────────────────────
 
 export const fetchUsers = (search?: string): Promise<User[]> =>
-    api.get<User[]>('/users', {params: {q: search}}).then((r: AxiosResponse<User[]>) => r.data ?? []);
+    api.get<User[]>('users/', {params: {q: search}}).then((r: AxiosResponse<User[]>) => r.data ?? []);
 
 export const fetchUser = (id: string): Promise<User> =>
-    api.get<User>(`/users/${id}`).then((r: AxiosResponse<User>) => r.data);
+    api.get<User>(`users/${id}/`).then((r: AxiosResponse<User>) => r.data);
 
 export const createUser = (data: Partial<User> & { password?: string }): Promise<User> =>
-    api.post<User>('/users', data).then((r: AxiosResponse<User>) => r.data);
+    api.post<User>('users/', data).then((r: AxiosResponse<User>) => r.data);
 
 export const updateUser = (id: string, data: Partial<User>): Promise<User> =>
-    api.put<User>(`/users/${id}`, data).then((r: AxiosResponse<User>) => r.data);
+    api.put<User>(`users/${id}/`, data).then((r: AxiosResponse<User>) => r.data);
 
 export const fetchMe = (): Promise<User> =>
-    api.get<User>('/auth/me').then((r: AxiosResponse<User>) => r.data);
+    api.get<User>('auth/me/').then((r: AxiosResponse<User>) => r.data);
 
 export const deleteUser = (id: string): Promise<void> =>
-    api.delete(`/users/${id}`).then(() => undefined);
+    api.delete(`users/${id}/`).then(() => undefined);
 
 // ── Invoices ──────────────────────────────────────────────────────────────────
 
 export const fetchInvoices = (): Promise<Invoice[]> =>
-    api.get<Invoice[]>('/invoices/').then((r: AxiosResponse<Invoice[]>) => r.data ?? []);
+    api.get<Invoice[]>('invoices/').then((r: AxiosResponse<Invoice[]>) => r.data ?? []);
 
 export const fetchInvoice = (id: string): Promise<Invoice> =>
-    api.get<Invoice>(`/invoices/${id}`).then((r: AxiosResponse<Invoice>) => r.data);
+    api.get<Invoice>(`invoices/${id}/`).then((r: AxiosResponse<Invoice>) => r.data);
 
 export const importInvoice = (file: File): Promise<Invoice> => {
     const form = new FormData();
     form.append('file', file);
-    return api.post<Invoice>('/invoices/import', form, {
+    return api.post<Invoice>('invoices/import/', form, {
         headers: {'Content-Type': 'multipart/form-data'}
     }).then((r: AxiosResponse<Invoice>) => r.data);
 };
@@ -127,14 +127,14 @@ export const updateInvoice = (id: string, data: InvoiceUpdatePayload): Promise<I
     if (data.currency !== undefined) body.currency = data.currency;
     if (data.issued_at !== undefined) body.issued_at = data.issued_at ? new Date(data.issued_at).toISOString() : null;
     if (data.description !== undefined) body.description = data.description;
-    return api.put<Invoice>(`/invoices/${id}`, body).then((r: AxiosResponse<Invoice>) => r.data);
+    return api.put<Invoice>(`invoices/${id}/`, body).then((r: AxiosResponse<Invoice>) => r.data);
 };
 
 export const deleteInvoice = (id: string): Promise<void> =>
-    api.delete(`/invoices/${id}`).then(() => undefined);
+    api.delete(`invoices/${id}/`).then(() => undefined);
 
 export const getInvoicePreviewUrl = async (id: string): Promise<string> => {
-    const response = await api.get<Blob>(`/invoices/${id}/download`, {
+    const response = await api.get<Blob>(`invoices/${id}/download/`, {
         responseType: 'blob',
     });
     const blob = new Blob([response.data], {type: 'application/pdf'});
@@ -142,7 +142,7 @@ export const getInvoicePreviewUrl = async (id: string): Promise<string> => {
 };
 
 export const downloadInvoiceFile = async (id: string, vendorName?: string): Promise<void> => {
-    const response = await api.get<Blob>(`/invoices/${id}/download`, {
+    const response = await api.get<Blob>(`invoices/${id}/download/`, {
         responseType: 'blob',
     });
 
@@ -174,13 +174,13 @@ export const downloadInvoiceFile = async (id: string, vendorName?: string): Prom
 // ── Bank Statements ───────────────────────────────────────────────────────────
 
 export const fetchBankStatements = (): Promise<BankStatementSummary[]> =>
-    api.get<BankStatementSummary[]>('/bank-statements/').then((r: AxiosResponse<BankStatementSummary[]>) => r.data ?? []);
+    api.get<BankStatementSummary[]>('bank-statements/').then((r: AxiosResponse<BankStatementSummary[]>) => r.data ?? []);
 
 export const fetchBankStatement = (id: string): Promise<BankStatement> =>
-    api.get<BankStatement>(`/bank-statements/${id}`).then((r: AxiosResponse<BankStatement>) => r.data);
+    api.get<BankStatement>(`bank-statements/${id}/`).then((r: AxiosResponse<BankStatement>) => r.data);
 
 export const fetchBankStatementBlob = async (id: string): Promise<Blob> => {
-    const response = await api.get<Blob>(`/bank-statements/${id}/download`, {
+    const response = await api.get<Blob>(`bank-statements/${id}/download/`, {
         responseType: 'blob',
     });
     return response.data;
@@ -200,14 +200,14 @@ export const importBankStatement = (
     }
 
     return api
-        .post<ImportBatchResponse>('/bank-statements/import', form, {
+        .post<ImportBatchResponse>('bank-statements/import/', form, {
             headers: {'Content-Type': 'multipart/form-data'},
         })
         .then((r: AxiosResponse<ImportBatchResponse>) => r.data);
 };
 
 export const downloadBankStatement = async (id: string): Promise<void> => {
-    const response = await api.get<Blob>(`/bank-statements/${id}/download`, {
+    const response = await api.get<Blob>(`bank-statements/${id}/download/`, {
         responseType: 'blob',
     });
 
@@ -239,7 +239,7 @@ export const downloadBankStatement = async (id: string): Promise<void> => {
 };
 
 export const deleteBankStatement = (id: string): Promise<void> =>
-    api.delete(`/bank-statements/${id}`).then(() => undefined);
+    api.delete(`bank-statements/${id}/`).then(() => undefined);
 
 // ── Transactions ──────────────────────────────────────────────────────────────
 
@@ -247,50 +247,52 @@ export const fetchTransactions = (
     statementId?: string,
     hideReconciled: boolean = true,
     categoryId?: string,
-    reviewed?: boolean
+    reviewed?: boolean,
+    search?: string
 ): Promise<Transaction[]> =>
-    api.get<Transaction[]>('/transactions/', {
+    api.get<Transaction[]>('transactions/', {
         params: {
             statement_id: statementId || undefined,
             hide_reconciled: hideReconciled,
             category_id: categoryId || undefined,
-            reviewed: reviewed
+            reviewed: reviewed,
+            search: search || undefined
         }
     }).then((r: AxiosResponse<Transaction[]>) => r.data ?? []);
 
 export const fetchAnalytics = (hideReconciled: boolean = true): Promise<TransactionAnalytics> =>
-    api.get<TransactionAnalytics>('/transactions/analytics', {
+    api.get<TransactionAnalytics>('transactions/analytics/', {
         params: {hide_reconciled: hideReconciled}
     }).then((r: AxiosResponse<TransactionAnalytics>) => r.data);
 
 export const updateTransactionCategory = (contentHash: string, categoryId: string): Promise<void> =>
-    api.patch(`/transactions/${contentHash}/category`, {category_id: categoryId}).then(() => undefined);
+    api.patch(`transactions/${contentHash}/category/`, {category_id: categoryId}).then(() => undefined);
 
 export const markTransactionReviewed = (contentHash: string): Promise<void> =>
-    api.patch(`/transactions/${contentHash}/review`).then(() => undefined);
+    api.patch(`transactions/${contentHash}/review/`).then(() => undefined);
 
 export const startAutoCategorize = (): Promise<{ message: string }> =>
-    api.post<{ message: string }>('/transactions/auto-categorize/start').then(r => r.data);
+    api.post<{ message: string }>('transactions/auto-categorize/start/').then(r => r.data);
 
 export const getAutoCategorizeStatus = (): Promise<JobState> =>
-    api.get<JobState>('/transactions/auto-categorize/status').then(r => r.data);
+    api.get<JobState>('transactions/auto-categorize/status/').then(r => r.data);
 
 export const cancelAutoCategorize = (): Promise<{ message: string }> =>
-    api.post<{ message: string }>('/transactions/auto-categorize/cancel').then(r => r.data);
+    api.post<{ message: string }>('transactions/auto-categorize/cancel/').then(r => r.data);
 
 // ── Categories ────────────────────────────────────────────────────────────────
 
 export const fetchCategories = (): Promise<Category[]> =>
-    api.get<Category[]>('/categories/').then((r: AxiosResponse<Category[]>) => r.data ?? []);
+    api.get<Category[]>('categories/').then((r: AxiosResponse<Category[]>) => r.data ?? []);
 
 export const createCategory = (name: string, color: string): Promise<Category> =>
-    api.post<Category>('/categories/', {name, color}).then((r: AxiosResponse<Category>) => r.data);
+    api.post<Category>('categories/', {name, color}).then((r: AxiosResponse<Category>) => r.data);
 
 export const updateCategory = (id: string, name: string, color: string): Promise<Category> =>
-    api.put<Category>(`/categories/${id}`, {name, color}).then((r: AxiosResponse<Category>) => r.data);
+    api.put<Category>(`categories/${id}/`, {name, color}).then((r: AxiosResponse<Category>) => r.data);
 
 export const deleteCategory = (id: string): Promise<void> =>
-    api.delete(`/categories/${id}`).then(() => undefined);
+    api.delete(`categories/${id}/`).then(() => undefined);
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
@@ -304,33 +306,33 @@ export const createReconciliation = (
     targetTxHash: string
 ): Promise<Reconciliation> =>
     api
-        .post<Reconciliation>('/reconciliations/', {
+        .post<Reconciliation>('reconciliations/', {
             settlement_tx_hash: settlementTxHash,
             target_tx_hash: targetTxHash,
         })
         .then((r) => r.data);
 
 export const fetchReconciliationSuggestions = async (windowDays: number = 7): Promise<ReconciliationPairSuggestion[]> => {
-    const response = await api.get(`/reconciliations/suggestions?window=${windowDays}`);
+    const response = await api.get(`reconciliations/suggestions/?window=${windowDays}`);
     return response.data;
 };
 
 export const fetchReconciliations = (): Promise<Reconciliation[]> =>
-    api.get<Reconciliation[]>('/reconciliations/').then((r) => r.data ?? []);
+    api.get<Reconciliation[]>('reconciliations/').then((r) => r.data ?? []);
 
 export const deleteReconciliation = (id: string): Promise<void> =>
-    api.delete(`/reconciliations/${id}`).then(() => undefined);
+    api.delete(`reconciliations/${id}/`).then(() => undefined);
 
 // ── Payslips ──────────────────────────────────────────────────────────────────
 
-export const fetchPayslips = (): Promise<Payslip[]> =>
-    api.get<Payslip[]>('/payslips/').then((r: AxiosResponse<Payslip[]>) => r.data ?? []);
+export const fetchPayslips = (employer?: string): Promise<Payslip[]> =>
+    api.get<Payslip[]>('payslips/', {params: {employer: employer || undefined}}).then((r: AxiosResponse<Payslip[]>) => r.data ?? []);
 
 export const fetchPayslip = (id: string): Promise<Payslip> =>
-    api.get<Payslip>(`/payslips/${id}`).then((r: AxiosResponse<Payslip>) => r.data);
+    api.get<Payslip>(`payslips/${id}/`).then((r: AxiosResponse<Payslip>) => r.data);
 
 export const getPayslipPreviewUrl = async (id: string): Promise<string> => {
-    const response = await api.get<Blob>(`/payslips/${id}/download`, {
+    const response = await api.get<Blob>(`payslips/${id}/download/`, {
         responseType: 'blob',
     });
 
@@ -353,7 +355,7 @@ export const importPayslip = async ({file, overrides, useAI}: {
     if (overrides) {
         if (overrides.period_month_num) form.append('period_month_num', overrides.period_month_num.toString());
         if (overrides.period_year) form.append('period_year', overrides.period_year.toString());
-        if (overrides.employee_name) form.append('employee_name', overrides.employee_name);
+        if (overrides.employer_name) form.append('employer_name', overrides.employer_name);
         if (overrides.gross_pay) form.append('gross_pay', overrides.gross_pay.toString());
         if (overrides.net_pay) form.append('net_pay', overrides.net_pay.toString());
         if (overrides.payout_amount) form.append('payout_amount', overrides.payout_amount.toString());
@@ -364,21 +366,27 @@ export const importPayslip = async ({file, overrides, useAI}: {
             form.append('bonuses', JSON.stringify(overrides.bonuses));
         }
     }
-    return api.post('/payslips/import', form, {headers: {'Content-Type': 'multipart/form-data'}}).then(r => r.data);
+    return api.post('payslips/import/', form, {headers: {'Content-Type': 'multipart/form-data'}}).then(r => r.data);
+};
+
+export const importPayslipsBatch = (files: File[]): Promise<{ successful: Payslip[], failed: { filename: string, error: string }[] }> => {
+    const form = new FormData();
+    files.forEach(f => form.append('files', f));
+    return api.post('payslips/import/batch/', form, {headers: {'Content-Type': 'multipart/form-data'}}).then(r => r.data);
 };
 
 export const updatePayslip = (id: string, data: Partial<Payslip> | FormData): Promise<Payslip> => {
     const isFormData = data instanceof FormData;
     const config = isFormData ? {headers: {'Content-Type': 'multipart/form-data'}} : undefined;
 
-    return api.put(`/payslips/${id}`, data, config).then(r => r.data);
+    return api.put(`payslips/${id}/`, data, config).then(r => r.data);
 };
 
 export const deletePayslip = (id: string): Promise<void> =>
-    api.delete(`/payslips/${id}`).then(() => undefined);
+    api.delete(`payslips/${id}/`).then(() => undefined);
 
 export const downloadPayslipFile = async (id: string, originalName: string): Promise<void> => {
-    const response = await api.get<Blob>(`/payslips/${id}/download`, {
+    const response = await api.get<Blob>(`payslips/${id}/download/`, {
         responseType: 'blob',
     });
 
@@ -396,10 +404,10 @@ export const downloadPayslipFile = async (id: string, originalName: string): Pro
 // ── Bank Integration ──────────────────────────────────────────────────────────
 
 export const fetchBankInstitutions = (country: string = 'DE', sandbox: boolean = false): Promise<BankInstitution[]> =>
-    api.get<BankInstitution[]>('/bank/institutions', {params: {country, sandbox}}).then(r => r.data ?? []);
+    api.get<BankInstitution[]>('bank/institutions/', {params: {country, sandbox}}).then(r => r.data ?? []);
 
 export const createBankConnection = (institutionId: string, country: string, redirectUrl: string, sandbox: boolean = false): Promise<BankConnection> =>
-    api.post<BankConnection>('/bank/connections', {
+    api.post<BankConnection>('bank/connections/', {
         institution_id: institutionId,
         country: country,
         redirect_url: redirectUrl,
@@ -407,16 +415,16 @@ export const createBankConnection = (institutionId: string, country: string, red
     }).then(r => r.data);
 
 export const finishBankConnection = (requisitionId: string, code?: string): Promise<void> =>
-    api.post('/bank/connections/finish', {requisition_id: requisitionId, code: code}).then(() => undefined);
+    api.post('bank/connections/finish/', {requisition_id: requisitionId, code: code}).then(() => undefined);
 
 export const fetchBankConnections = (): Promise<BankConnection[]> =>
-    api.get<BankConnection[]>('/bank/connections').then(r => r.data ?? []);
+    api.get<BankConnection[]>('bank/connections/').then(r => r.data ?? []);
 
 export const deleteBankConnection = (id: string): Promise<void> =>
-    api.delete(`/bank/connections/${id}`).then(() => undefined);
+    api.delete(`bank/connections/${id}/`).then(() => undefined);
 
 export const updateBankAccountType = (accountId: string, accountType: string): Promise<void> =>
-    api.put(`/bank/accounts/${accountId}/type`, {account_type: accountType}).then(() => undefined);
+    api.put(`bank/accounts/${accountId}/type/`, {account_type: accountType}).then(() => undefined);
 
 export const syncBankAccounts = (): Promise<{ message: string }> =>
-    api.post<{ message: string }>('/bank/sync').then(r => r.data);
+    api.post<{ message: string }>('bank/sync/').then(r => r.data);

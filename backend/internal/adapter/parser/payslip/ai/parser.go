@@ -2,11 +2,7 @@ package ai
 
 import (
 	"context"
-	"fmt"
 	"log/slog"
-	"os"
-	"path/filepath"
-	"strings"
 
 	"cogni-cash/internal/domain/entity"
 
@@ -32,38 +28,21 @@ func NewPayslipParser(llm LLMPayslipParser, logger *slog.Logger) *PayslipParser 
 	}
 }
 
-func (p *PayslipParser) Parse(ctx context.Context, userID uuid.UUID, filePath string) (entity.Payslip, error) {
-	// 1. Read the raw bytes of the file directly
-	data, err := os.ReadFile(filePath)
-	if err != nil {
-		return entity.Payslip{}, fmt.Errorf("ai payslip parser: failed to read file %s: %w", filepath.Base(filePath), err)
-	}
-
-	// 2. Determine the MIME type based on the extension
-	ext := strings.ToLower(filepath.Ext(filePath))
-	mimeType := "text/plain" // Default fallback
-
-	switch ext {
-	case ".pdf":
-		mimeType = "application/pdf"
-	case ".png":
-		mimeType = "image/png"
-	case ".jpg", ".jpeg":
-		mimeType = "image/jpeg"
-	}
+func (p *PayslipParser) Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) (entity.Payslip, error) {
+	// 1. Determine the MIME type (assume PDF for now, but in a real app this would be passed or detected)
+	mimeType := "application/pdf"
 
 	p.logger.Info("Sending document to LLM for payslip parsing",
-		"file", filepath.Base(filePath),
-		"size_bytes", len(data),
+		"size_bytes", len(fileBytes),
 		"mime_type", mimeType,
+		"user_id", userID,
 	)
 
-	// 3. Pass the blob data to the LLM adapter
-	payslip, err := p.llm.ParsePayslipDocument(ctx, userID, mimeType, data)
+	// 2. Pass the blob data to the LLM adapter
+	payslip, err := p.llm.ParsePayslipDocument(ctx, userID, mimeType, fileBytes)
 	if err != nil {
 		return entity.Payslip{}, err
 	}
 
-	payslip.SourceFile = filePath
 	return payslip, nil
 }

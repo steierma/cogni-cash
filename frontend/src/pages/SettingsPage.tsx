@@ -71,7 +71,7 @@ JSON Schema Definition:
 {
   "period_month_num": "integer (1-12)",
   "period_year": "integer (YYYY)",
-  "employee_name": "string",
+  "employer_name": "string",
   "tax_class": "string",
   "tax_id": "string",
   "gross_pay": "float",

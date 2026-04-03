@@ -59,12 +59,19 @@ OLLAMA_URL=http://YOUR_OLLAMA_HOST:11434   # your Ollama host
 ```
 
 `DATABASE_HOST` must stay `postgres` (the Docker service name) — do not change it.
-
 ### 3. Build the images
 
-```bash
-make build
-```
+If you are deploying for the first time or `docker compose pull` fails (e.g., due to private repository restrictions), you should build the images locally:
+
+1. **Enable local builds:** Copy the override template to activate the `build:` instructions:
+   ```bash
+   cp docker-compose.override.yml.example docker-compose.override.yml
+   ```
+2. **Build and start:**
+   ```bash
+   make build
+   make up
+   ```
 
 | Image                 | Base                        | Size   |
 |-----------------------|-----------------------------|--------|
@@ -77,8 +84,30 @@ make build
 make up
 ```
 
-Start-up order is enforced automatically:
+#### Using a specific version
+By default, `make up` uses the `:latest` image. If you want to run a specific release version (e.g., v1.4.0):
 
+```bash
+TAG=v1.4.0 make up
+```
+
+---
+
+## Local Network Usage (Bypassing SSL)
+
+By default, the bundled Caddy reverse proxy tries to enable HTTPS. If you are accessing Cogni-Cash via a local IP (e.g., `http://192.168.1.50`) on your home network, Caddy may cause `ERR_SSL_PROTOCOL_ERROR`.
+
+To allow plain HTTP access over your local network:
+
+1. Open `caddy/Caddyfile`.
+2. Change the first line from `{$DOMAIN_NAME:localhost} {` to `:80 {`.
+3. Restart the stack: `make restart`.
+
+This will serve the application on port 80 without attempting to negotiate SSL certificates.
+
+---
+
+## Option B — Deploy to a remote Linux server
 ```text
 postgres (healthy) → migrate (exits 0) → backend (healthy) → frontend
 ```
@@ -99,6 +128,19 @@ make down      # stop everything (data volume is preserved)
 make restart   # restart all containers
 docker compose down -v   # stop + wipe the postgres volume (full reset)
 ```
+
+---
+
+## Troubleshooting
+
+### Bind Mount is a Directory instead of a File
+If you see an error like `is a directory` or `permission denied` regarding a `.pem` or `.env` file mounted in Docker:
+- **Cause:** Docker creates a directory if the source file is missing on the host during startup (common if the file is not tracked by Git or was deleted).
+- **Fix:** 
+  1. Stop the stack: `make down`.
+  2. Remove the accidental directory on the host: `rm -rf enable-banking-prod.pem` (replace with your filename).
+  3. Ensure the actual file exists on the host.
+  4. Start the stack: `make up`.
 
 ---
 

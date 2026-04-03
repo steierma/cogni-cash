@@ -25,15 +25,12 @@ func TestPayslipRepository(t *testing.T) {
 		// 1. Setup dummy entity matching our real-world data
 		payslip := entity.Payslip{
 			UserID:              userID,
-			SourceFile:          "testdata/99999999_Monatsabrechnung_202602.pdf",
 			OriginalFileName:    "99999999_Monatsabrechnung_202602.pdf",
-			OriginalFileMime:    "application/pdf",
-			OriginalFileSize:    1024,
 			OriginalFileContent: []byte("dummy pdf binary content"),
 			ContentHash:         "dummy_sha256_hash_12345",
 			PeriodMonthNum:      2,
 			PeriodYear:          2026,
-			EmployeeName:        "Mathias Steierl",
+			EmployerName:        "Test Employer",
 			TaxClass:            "4",
 			TaxID:               "41935678240",
 			GrossPay:            8812.58,
@@ -135,9 +132,15 @@ func TestPayslipRepository(t *testing.T) {
 		}
 
 		// 7. FindAll
-		all, err := repo.FindAll(ctx, userID)
+		all, err := repo.FindAll(ctx, entity.PayslipFilter{UserID: userID})
 		if err != nil || len(all) == 0 {
 			t.Fatalf("expected at least 1 payslip in FindAll, got %d", len(all))
+		}
+
+		// 7b. FindAll with filtering
+		filtered, err := repo.FindAll(ctx, entity.PayslipFilter{UserID: userID, Employer: "NonExistent"})
+		if err != nil || len(filtered) != 0 {
+			t.Errorf("expected 0 results for non-existent employer, got %d", len(filtered))
 		}
 
 		// 8. Delete (should cascade and remove Bonuses as well)

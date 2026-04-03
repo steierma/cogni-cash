@@ -1,11 +1,11 @@
-name: CI / CD
+name: Public Release
 
 on:
   push:
-    branches: [main]
+    branches: [public-main]
     tags: ['v*']
   pull_request:
-    branches: [main]
+    branches: [public-main]
 
 jobs:
   # ── 1. Test ────────────────────────────────────────────────────────────────
@@ -143,9 +143,9 @@ jobs:
         id: meta-backend
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/steierma/cogni-cash-backend-internal
+          images: ghcr.io/steierma/cogni-cash-backend
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/public-main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -153,9 +153,9 @@ jobs:
         id: meta-frontend
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/steierma/cogni-cash-frontend-internal
+          images: ghcr.io/steierma/cogni-cash-frontend
           tags: |
-            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/main' }}
+            type=raw,value=latest,enable=${{ github.ref == 'refs/heads/public-main' }}
             type=semver,pattern={{version}}
             type=semver,pattern={{major}}.{{minor}}
 
@@ -209,77 +209,3 @@ jobs:
           mv /tmp/.buildx-cache-backend-new /tmp/.buildx-cache-backend
           mv /tmp/.buildx-cache-frontend-new /tmp/.buildx-cache-frontend
 
-  # ── 5. Deploy ──────────────────────────────────────────────────────────────
-  deploy:
-    name: Deploy to Proxmox
-    runs-on: docker
-    needs: build
-    if: github.event_name == 'push'
-
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4.1.1
-
-      - name: Install SSH client & rsync on Runner
-        run: |
-          apt-get update
-          apt-get install -y openssh-client rsync
-
-      - name: Load Deploy Key into Runner
-        shell: sh
-        run: |
-          install -m 700 -d ~/.ssh
-          echo "${{ secrets.DEPLOY_SSH_KEY }}" > ~/.ssh/deploy_key
-          chmod 600 ~/.ssh/deploy_key
-          ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
-
-      - name: Targeted Sync of Configuration
-        shell: sh
-        run: |
-          # We only need docker-compose.yml on the server.
-          # Everything else (backend, frontend, migrations) is inside the Docker images.
-          # Files like .env, docker-compose.override.yml, and keys are already on the server.
-          rsync -avz \
-            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
-            docker-compose.yml \
-            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/"
-
-      - name: Pull images & start stack
-        shell: sh
-        run: |
-          ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
-            set -euo pipefail
-          
-            echo ">>> Authenticating with GHCR..."
-            echo "${{ secrets.GHCR_PAT }}" | docker login ghcr.io -u steierma --password-stdin
-          
-            echo ">>> Pulling latest images from GHCR..."
-            cd "${{ secrets.DEPLOY_PATH }}"
-          
-            # Use docker compose pull to update images without affecting existing config files
-            export IMAGE_SUFFIX=-internal
-            docker compose pull
-          
-            echo ">>> Starting stack..."
-            # Note: We assume .env and docker-compose.override.yml are already present on the server.
-            # If backend/.env is missing but root .env exists, we link/copy it for the postgres service.
-            if [ ! -f backend/.env ] && [ -f .env ]; then
-              mkdir -p backend
-              cp .env backend/.env
-              echo "✅ Ensured backend/.env for postgres service"
-            fi
-          
-            docker compose up -d --remove-orphans
-          
-            echo ">>> Waiting for backend health..."
-            for i in $(seq 1 30); do
-              health_status=$(docker inspect --format='{{.State.Health.Status}}' cogni-cash-backend 2>/dev/null || echo "missing")
-              if [ "$health_status" = "healthy" ]; then
-                echo "✅ Backend is healthy"
-                break
-              fi
-              echo "  [$i/30] status=$health_status — waiting..."
-              sleep 3
-            done
-            docker compose ps
-          EOF

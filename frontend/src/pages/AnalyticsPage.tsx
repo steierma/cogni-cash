@@ -40,9 +40,9 @@ export default function AnalyticsPage() {
         queryFn: fetchCategories,
     });
 
-    const { data: payslips = [] } = useQuery<Payslip[]>({
+    const { data: payslips = [] } = useQuery<Payslip[], Error>({
         queryKey: ['payslips'],
-        queryFn: fetchPayslips,
+        queryFn: () => fetchPayslips(),
     });
 
     // --- State: Filters ---
@@ -153,7 +153,7 @@ export default function AnalyticsPage() {
 
         return Object.values(monthly).sort((a, b) => a.month.localeCompare(b.month)).map(m => {
             const [y, mm] = m.month.split('-');
-            const hrDoc = payslips.find(p => p.period_year === parseInt(y, 10) && p.period_month_num === parseInt(mm, 10));
+            const hrDoc = (payslips as Payslip[]).find(p => p.period_year === parseInt(y, 10) && p.period_month_num === parseInt(mm, 10));
 
             return {
                 ...m,
@@ -437,7 +437,7 @@ export default function AnalyticsPage() {
                                 {t('analytics.hrTitle')}
                             </h2>
                             <div className="flex-1 w-full h-full min-h-[350px]">
-                                {trendData.length > 0 && payslips.length > 0 ? (
+                                {trendData.length > 0 && (payslips as Payslip[]).length > 0 ? (
                                     <ResponsiveContainer width="100%" height="100%">
                                         <BarChart data={trendData} margin={{ top: 10, right: 10, left: -20, bottom: 0 }}>
                                             <CartesianGrid strokeDasharray="3 3" vertical={false} stroke="#374151" opacity={0.2} />

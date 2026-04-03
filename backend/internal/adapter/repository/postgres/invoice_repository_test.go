@@ -37,7 +37,6 @@ func TestInvoiceRepository(t *testing.T) {
 		inv := entity.Invoice{
 			ID:         invID,
 			UserID:     userID,
-			RawText:    "Invoice data 123",
 			CategoryID: &catID,
 			Vendor:     entity.Vendor{Name: "GitHub"},
 			Amount:     15.00,
@@ -72,7 +71,6 @@ func TestInvoiceRepository(t *testing.T) {
 		inv := entity.Invoice{
 			ID:       invID,
 			UserID:   userID,
-			RawText:  "initial text",
 			Vendor:   entity.Vendor{Name: "InitialVendor"},
 			Amount:   10.00,
 			Currency: "EUR",
@@ -168,8 +166,6 @@ func TestInvoiceRepository(t *testing.T) {
 			Currency:            "EUR",
 			ContentHash:         hash,
 			OriginalFileName:    "receipt.pdf",
-			OriginalFileMime:    "application/pdf",
-			OriginalFileSize:    int64(len(fileBytes)),
 			OriginalFileContent: fileBytes,
 		})
 

@@ -54,30 +54,30 @@ func (s *BankStatementService) RegisterParser(ext string, parser port.BankStatem
 	s.parsers[ext] = append(s.parsers[ext], parser)
 }
 
-func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.UUID, filePath string, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error) {
-	s.Logger.Info("Starting import of bank statement file", "file", filePath, "use_ai_parser", useAI, "user_id", userID)
-	if filePath == "" {
-		return entity.BankStatement{}, ErrEmptyFilePath
+func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.UUID, fileName string, fileBytes []byte, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error) {
+	s.Logger.Info("Starting import of bank statement file", "file", fileName, "use_ai_parser", useAI, "user_id", userID)
+	if len(fileBytes) == 0 {
+		return entity.BankStatement{}, errors.New("bank statement service: file bytes must not be empty")
 	}
 
-	ext := strings.ToLower(filepath.Ext(filePath))
+	ext := strings.ToLower(filepath.Ext(fileName))
 	var stmt entity.BankStatement
 	var parseErr error
 	parsedSuccessfully := false
 
 	if useAI {
 		if s.fallbackParser != nil {
-			s.Logger.Info("Attempting AI parser exclusively as requested", "file", filePath, "user_id", userID)
-			stmt, parseErr = s.fallbackParser.Parse(ctx, userID, filePath)
+			s.Logger.Info("Attempting AI parser exclusively as requested", "file", fileName, "user_id", userID)
+			stmt, parseErr = s.fallbackParser.Parse(ctx, userID, fileBytes)
 			if parseErr == nil {
 				if err := stmt.IsValid(); err == nil {
 					parsedSuccessfully = true
 				} else {
 					parseErr = fmt.Errorf("AI parser validation failed: %w", err)
-					s.Logger.Error("AI parser validation failed", "file", filePath, "user_id", userID, "error", parseErr)
+					s.Logger.Error("AI parser validation failed", "file", fileName, "user_id", userID, "error", parseErr)
 				}
 			} else {
-				s.Logger.Error("AI parser failed", "file", filePath, "user_id", userID, "error", parseErr)
+				s.Logger.Error("AI parser failed", "file", fileName, "user_id", userID, "error", parseErr)
 			}
 		} else {
 			parseErr = errors.New("bank statement service: AI parser requested but not configured")
@@ -86,7 +86,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 		if parserList, ok := s.parsers[ext]; ok {
 			var lastErr error
 			for _, parser := range parserList {
-				stmt, parseErr = parser.Parse(ctx, userID, filePath)
+				stmt, parseErr = parser.Parse(ctx, userID, fileBytes)
 				if parseErr == nil {
 					if err := stmt.IsValid(); err != nil {
 						lastErr = fmt.Errorf("validation failed: %w", err)
@@ -117,7 +117,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 	}
 
 	if !parsedSuccessfully {
-		return entity.BankStatement{}, fmt.Errorf("bank statement service: parse %s: %w", filePath, parseErr)
+		return entity.BankStatement{}, fmt.Errorf("bank statement service: parse %s: %w", fileName, parseErr)
 	}
 
 	stmt.UserID = userID
@@ -132,15 +132,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 		stmt.Transactions[i].StatementType = stmt.StatementType
 	}
 
-	fileBytes, err := os.ReadFile(filePath)
-	if err != nil {
-		return entity.BankStatement{}, fmt.Errorf("bank statement service: read file %s: %w", filePath, err)
-	}
 	stmt.OriginalFile = fileBytes
-
-	if stmt.SourceFile == "" {
-		stmt.SourceFile = filepath.Base(filePath)
-	}
 
 	if stmt.ContentHash == "" {
 		stmtBase := fmt.Sprintf("%s|%s|%d|%.2f", stmt.IBAN, stmt.StatementDate.Format("2006-01-02"), stmt.StatementNo, stmt.NewBalance)
@@ -352,8 +344,14 @@ func (s *BankStatementService) ImportFromDirectory(ctx context.Context, userID u
 		}
 
 		filePath := filepath.Join(dirPath, f.Name())
+		fileBytes, err := os.ReadFile(filePath)
+		if err != nil {
+			errs = append(errs, fmt.Errorf("failed to read file %s: %w", f.Name(), err))
+			continue
+		}
+
 		// We don't know the statement type for auto-imports, so we use empty/giro
-		_, err := s.ImportFromFile(ctx, userID, filePath, false, "")
+		_, err = s.ImportFromFile(ctx, userID, f.Name(), fileBytes, false, "")
 		if err != nil {
 			if !errors.Is(err, ErrDuplicate) && !errors.Is(err, ErrUnsupportedFormat) {
 				errs = append(errs, fmt.Errorf("file %s: %w", f.Name(), err))

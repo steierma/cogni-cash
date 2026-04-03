@@ -28,7 +28,13 @@ func xlsPath() string {
 func TestAmazonVisaParser_ParseRealXLS(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := NewParser(logger)
-	stmt, err := p.Parse(context.Background(), uuid.Nil, xlsPath())
+
+	fileBytes, err := os.ReadFile(xlsPath())
+	if err != nil {
+		t.Fatalf("failed to read test fixture: %v", err)
+	}
+
+	stmt, err := p.Parse(context.Background(), uuid.Nil, fileBytes)
 	if err != nil {
 		t.Fatalf("unexpected parse error: %v", err)
 	}
@@ -108,11 +114,11 @@ func TestAmazonVisaParser_ParseRealXLS(t *testing.T) {
 	}
 }
 
-func TestAmazonVisaParser_MissingFile(t *testing.T) {
+func TestAmazonVisaParser_EmptyFile(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	p := NewParser(logger)
-	_, err := p.Parse(context.Background(), uuid.Nil, "/nonexistent/file.xls")
+	_, err := p.Parse(context.Background(), uuid.Nil, []byte{})
 	if err == nil {
-		t.Error("expected error for missing file, got nil")
+		t.Error("expected error for empty file, got nil")
 	}
 }

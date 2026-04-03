@@ -26,16 +26,18 @@ type mockParser struct {
 	err    error
 }
 
-func (m *mockParser) Parse(_ context.Context, _ uuid.UUID, _ string) (entity.BankStatement, error) {
+func (m *mockParser) Parse(_ context.Context, _ uuid.UUID, _ []byte) (entity.BankStatement, error) {
 	return m.result, m.err
 }
 
 type mockRepo struct {
-	saveErr       error
-	saved         []entity.BankStatement
-	existingTxns  []entity.Transaction
-	linkedTxIDs   []uuid.UUID
-	linkedStmtIDs []uuid.UUID
+	saveErr        error
+	saved          []entity.BankStatement
+	existingTxns   []entity.Transaction
+	linkedTxIDs    []uuid.UUID
+	linkedStmtIDs  []uuid.UUID
+	findMatchingID *uuid.UUID
+	findMatchFunc  func(port.TransactionToCategorize) *uuid.UUID
 }
 
 func (m *mockRepo) Save(_ context.Context, stmt entity.BankStatement) error {
@@ -89,6 +91,13 @@ func (m *mockRepo) GetCategorizationExamples(_ context.Context, _ uuid.UUID, _ i
 	return nil, nil
 }
 
+func (m *mockRepo) FindMatchingCategory(_ context.Context, _ uuid.UUID, txn port.TransactionToCategorize) (*uuid.UUID, error) {
+	if m.findMatchFunc != nil {
+		return m.findMatchFunc(txn), nil
+	}
+	return m.findMatchingID, nil
+}
+
 func (m *mockRepo) UpdateTransactionCategory(_ context.Context, hash string, categoryID *uuid.UUID, _ uuid.UUID) error {
 	for i, tx := range m.existingTxns {
 		if tx.ContentHash == hash {
@@ -107,9 +116,9 @@ func (m *mockRepo) MarkTransactionReviewed(_ context.Context, _ string, _ uuid.U
 	return nil
 }
 
-func (m *mockRepo) LinkTransactionToStatement(_ context.Context, id uuid.UUID, statementID uuid.UUID, _ uuid.UUID) error {
+func (m *mockRepo) LinkTransactionToStatement(_ context.Context, id uuid.UUID, stmtID uuid.UUID, _ uuid.UUID) error {
 	m.linkedTxIDs = append(m.linkedTxIDs, id)
-	m.linkedStmtIDs = append(m.linkedStmtIDs, statementID)
+	m.linkedStmtIDs = append(m.linkedStmtIDs, stmtID)
 	return nil
 }
 
@@ -245,7 +254,7 @@ func TestBankStatementService_ImportFromFile_HappyPath(t *testing.T) {
 
 	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: expected}, &mockRepo{})
-	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, "test.pdf", []byte("dummy"), false, "")
 
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -293,7 +302,7 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicates(t *testing.T) {
 	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
 
-	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, "test.pdf", []byte("dummy"), false, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -335,7 +344,7 @@ func TestBankStatementService_ImportFromFile_DoesNotSkipSameDateAmountDifferentT
 	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
 
-	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, "test.pdf", []byte("dummy"), false, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -380,7 +389,7 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicatesWithNormalizedText(t
 	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
 
-	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, "test.pdf", []byte("dummy"), false, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -435,7 +444,7 @@ func TestBankStatementService_ImportFromFile_LinksExistingTransactions(t *testin
 	dummyUserID := uuid.New()
 	svc := setupTestBankStatementService(&mockParser{result: parsedStmt}, repo)
 
-	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, tmpFile(t, ".pdf"), false, "")
+	stmt, err := svc.ImportFromFile(context.Background(), dummyUserID, "test.pdf", []byte("dummy"), false, "")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

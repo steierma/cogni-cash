@@ -1,6 +1,7 @@
 package ing
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -40,9 +41,9 @@ type Parser struct {
 
 func NewParser(logger *slog.Logger) *Parser { return &Parser{Logger: logger} }
 
-func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
-	p.Logger.Info("Parsing ING PDF", "filePath", filePath)
-	tokens, raw, err := extractTokens(filePath)
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
+	p.Logger.Info("Parsing ING PDF")
+	tokens, raw, err := extractTokens(fileBytes)
 	if err != nil {
 		return entity.BankStatement{}, fmt.Errorf("ing parser: extract text: %w", err)
 	}
@@ -57,13 +58,9 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 	}
 
 	stmt := entity.BankStatement{
-		SourceFile: filePath,
-		Currency:   "EUR",
+		Currency: "EUR",
 	}
 
-	if m := reBIC.FindString(raw); m != "" {
-		stmt.BIC = m
-	}
 	if m := reOldBalance.FindStringSubmatch(raw); len(m) == 2 {
 		stmt.OldBalance, _ = parseGermanFloat(m[1])
 	}
@@ -76,9 +73,6 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 	if m := reStatementNo.FindStringSubmatch(raw); len(m) == 2 {
 		stmt.StatementNo, _ = strconv.Atoi(m[1])
 	}
-	if m := reAccountNo.FindStringSubmatch(raw); len(m) == 2 {
-		stmt.AccountNumber = m[1]
-	}
 	stmt.AccountHolder = extractAccountHolder(tokens)
 
 	if iban := extractLabeledValue(tokens, "IBAN"); iban != "" {
@@ -89,16 +83,16 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 
 	stmt.Transactions = parseTransactions(tokens)
 
-	p.Logger.Info("Successfully parsed ING PDF", "filePath", filePath)
+	p.Logger.Info("Successfully parsed ING PDF")
 	return stmt, nil
 }
 
-func extractTokens(filePath string) ([]string, string, error) {
-	f, r, err := pdf.Open(filePath)
+func extractTokens(fileBytes []byte) ([]string, string, error) {
+	readerAt := bytes.NewReader(fileBytes)
+	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
 	if err != nil {
 		return nil, "", err
 	}
-	defer f.Close()
 
 	var tokens []string
 	for i := 1; i <= r.NumPage(); i++ {

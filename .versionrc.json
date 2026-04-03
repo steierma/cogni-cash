@@ -1,0 +1,16 @@
+{
+  "types": [
+    {"type": "feat", "section": "Features"},
+    {"type": "fix", "section": "Bug Fixes"},
+    {"type": "chore", "section": "Maintenance"},
+    {"type": "docs", "section": "Documentation"},
+    {"type": "style", "section": "Styles"},
+    {"type": "refactor", "section": "Code Refactoring"},
+    {"type": "perf", "section": "Performance Improvements"},
+    {"type": "test", "section": "Tests"}
+  ],
+  "commitUrlFormat": "https://github.com/steierma/cogni-cash/commit/{{hash}}",
+  "compareUrlFormat": "https://github.com/steierma/cogni-cash/compare/{{previousTag}}...{{currentTag}}",
+  "issueUrlFormat": "https://github.com/steierma/cogni-cash/issues/{{id}}",
+  "userUrlFormat": "https://github.com/steierma/{{user}}"
+}

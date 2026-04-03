@@ -6,7 +6,6 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"os"
 	"time"
 
 	"cogni-cash/internal/domain/entity"
@@ -69,7 +68,7 @@ func NewInvoiceService(
 func (s *InvoiceService) ImportFromFile(
 	ctx context.Context,
 	userID uuid.UUID,
-	filePath, fileName, mimeType string,
+	fileName, mimeType string,
 	fileBytes []byte,
 	categoryID *uuid.UUID,
 ) (entity.Invoice, error) {
@@ -86,27 +85,15 @@ func (s *InvoiceService) ImportFromFile(
 		return entity.Invoice{}, fmt.Errorf("%w: %s", ErrInvoiceDuplicate, contentHash)
 	}
 
-	// 2. Write to a temp file so the parser can open it by path
-	tmp, err := os.CreateTemp("", "invoice-*"+fileExtFromName(fileName))
-	if err != nil {
-		return entity.Invoice{}, fmt.Errorf("invoice service: create temp file: %w", err)
-	}
-	defer os.Remove(tmp.Name())
-	if _, err := tmp.Write(fileBytes); err != nil {
-		tmp.Close()
-		return entity.Invoice{}, fmt.Errorf("invoice service: write temp file: %w", err)
-	}
-	tmp.Close()
-
-	// 3. Extract text
-	rawText, err := s.parser.Extract(ctx, userID, tmp.Name(), mimeType)
+	// 2. Extract text from the byte slice directly
+	rawText, err := s.parser.Extract(ctx, userID, fileBytes, mimeType)
 	if err != nil || rawText == "" {
 		s.logger.Warn("Text extraction failed or returned empty; using filename as fallback raw text",
 			"file", fileName, "error", err, "user_id", userID)
 		rawText = fileName // minimal fallback so LLM still gets something
 	}
 
-	// 4. Categorize via LLM
+	// 3. Categorize via LLM
 	invoice, err := s.categorize(ctx, userID, rawText)
 	if err != nil {
 		return entity.Invoice{}, err
@@ -121,8 +108,6 @@ func (s *InvoiceService) ImportFromFile(
 	invoice.UserID = userID
 	invoice.ContentHash = contentHash
 	invoice.OriginalFileName = fileName
-	invoice.OriginalFileMime = mimeType
-	invoice.OriginalFileSize = int64(len(fileBytes))
 	invoice.OriginalFileContent = fileBytes
 
 	// 7. Persist
@@ -229,7 +214,6 @@ func (s *InvoiceService) categorize(ctx context.Context, userID uuid.UUID, rawTe
 		Currency:    result.Currency,
 		IssuedAt:    time.Now().UTC(),
 		Description: result.Description,
-		RawText:     rawText,
 	}, nil
 }
 

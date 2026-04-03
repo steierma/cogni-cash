@@ -34,11 +34,11 @@
 package ingcsv
 
 import (
+	"bytes"
 	"context"
 	"encoding/csv"
 	"errors"
 	"fmt"
-	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -62,18 +62,13 @@ type Parser struct {
 // NewParser returns a new ING CSV Parser.
 func NewParser(logger *slog.Logger) *Parser { return &Parser{Logger: logger} }
 
-// Parse opens the ISO-8859-1 CSV at filePath and returns a BankStatement.
-func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.BankStatement, error) {
-	p.Logger.Info("Parsing ING CSV", "filePath", filePath)
-	f, err := os.Open(filePath)
-	if err != nil {
-		p.Logger.Error("Failed to open ING CSV", "filePath", filePath, "error", err)
-		return entity.BankStatement{}, fmt.Errorf("ingcsv parser: open: %w", err)
-	}
-	defer f.Close()
+// Parse opens the ISO-8859-1 CSV bytes and returns a BankStatement.
+func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
+	p.Logger.Info("Parsing ING CSV")
+	byteReader := bytes.NewReader(fileBytes)
 
 	// Decode ISO-8859-1 → UTF-8 on the fly.
-	utf8Reader := transform.NewReader(f, charmap.ISO8859_1.NewDecoder())
+	utf8Reader := transform.NewReader(byteReader, charmap.ISO8859_1.NewDecoder())
 
 	r := csv.NewReader(utf8Reader)
 	r.Comma = ';'
@@ -93,8 +88,7 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 	}
 
 	stmt := entity.BankStatement{
-		SourceFile: filePath,
-		Currency:   "EUR",
+		Currency: "EUR",
 	}
 
 	// ---- parse metadata rows ------------------------------------------------
@@ -125,9 +119,6 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 			break
 		}
 	}
-
-	// BIC is not in the CSV; set a known constant for ING Germany.
-	stmt.BIC = "INGDDEFFXXX"
 
 	// Derive StatementDate from the newest transaction, as the CSV lacks a strict statement date
 	var newestDate time.Time
@@ -172,8 +163,8 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, filePath string) (entity.
 	}
 	stmt.OldBalance = stmt.NewBalance - total
 
-	// Validation is now handled globally by BankStatementService calling stmt.IsValid()
-	p.Logger.Info("Successfully parsed ING CSV", "filePath", filePath)
+		// Validation is now handled globally by BankStatementService calling stmt.IsValid()
+	p.Logger.Info("Successfully parsed ING CSV")
 	return stmt, nil
 }
 

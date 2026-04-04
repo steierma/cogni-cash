@@ -215,7 +215,15 @@ export function PayslipChart({
                                                 <input
                                                     type="checkbox"
                                                     checked={excludedBonuses.has(b)}
-                                                    onChange={(e) => setExcludedBonuses(prev => { const next = new Set(prev); e.target.checked ? next.add(b) : next.delete(b); return next; })}
+                                                    onChange={(e) => setExcludedBonuses(prev => { 
+                                                        const next = new Set(prev); 
+                                                        if (e.target.checked) {
+                                                            next.add(b);
+                                                        } else {
+                                                            next.delete(b);
+                                                        }
+                                                        return next; 
+                                                    })}
                                                     className="rounded border-gray-300 text-indigo-600 focus:ring-indigo-500 bg-white dark:bg-gray-900"
                                                 />
                                                 <span className="text-xs text-gray-700 dark:text-gray-300 truncate" title={b}>{b}</span>

@@ -575,6 +575,7 @@
     "storageMode": "Storage Mode",
     "successSaved": "Settings saved successfully.",
     "systemStatus": "System Status",
+    "version": "Version",
     "testEmailPlaceholder": "recipient@example.com",
     "testEmailSuccess": "Test email sent! Check your inbox.",
     "testSmtp": "Test SMTP Connection",

@@ -575,6 +575,7 @@
     "storageMode": "Mode de stockage",
     "successSaved": "Paramètres enregistrés avec succès.",
     "systemStatus": "État du système",
+    "version": "Version",
     "testEmailPlaceholder": "destinistataire@exemple.fr",
     "testEmailSuccess": "E-mail de test envoyé ! Vérifiez votre boîte de réception.",
     "testSmtp": "Tester la connexion SMTP",

@@ -54,6 +54,7 @@ services:
       PAYSLIP_IMPORT_JSON_PATH: /app/payslips/payslips_import.json
       # NEU: Dem Backend sagen, wo es den Key im Container findet
       ENABLEBANKING_PRIVATE_KEY_PATH: /app/enable-banking-prod.pem
+      APP_VERSION: ${TAG:-latest}
     volumes:
       - ${PAYSLIP_HOST_DIR:-./backend/payslips}:/app/payslips
       # NEU: Mounte die lokale enable-banking.pem in den Container (Read-Only)

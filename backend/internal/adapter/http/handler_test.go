@@ -521,6 +521,9 @@ func (m *mockPayslipRepo) Import(ctx context.Context, userID uuid.UUID, fileName
 func (m *mockPayslipRepo) GetOriginalFile(_ context.Context, _ string, _ uuid.UUID) ([]byte, string, string, error) {
 	return []byte("pdf"), "application/pdf", "test.pdf", nil
 }
+func (m *mockPayslipRepo) GetSummary(_ context.Context, _ uuid.UUID) (entity.PayslipSummary, error) {
+	return entity.PayslipSummary{}, nil
+}
 
 func TestUpdatePayslip_WithBonuses(t *testing.T) {
 	authSvc, token := setupTestAuth(t)

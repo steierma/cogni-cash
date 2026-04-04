@@ -22,4 +22,7 @@ type PayslipRepository interface {
 
 	// File Download
 	GetOriginalFile(ctx context.Context, id string, userID uuid.UUID) ([]byte, string, string, error)
+
+	// Aggregations
+	GetSummary(ctx context.Context, userID uuid.UUID) (entity.PayslipSummary, error)
 }

@@ -232,7 +232,7 @@ export default function SettingsPage() {
                     <Server size={20} className="text-gray-500 dark:text-gray-400" />
                     {t('settings.systemStatus')}
                 </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                     <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
                         <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.storageMode')}</p>
                         <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.storage_mode || 'Loading...'}</p>
@@ -249,6 +249,10 @@ export default function SettingsPage() {
                             <div className={`w-2 h-2 rounded-full ${sysInfo?.db_state === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></div>
                             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.db_state || 'Checking...'}</p>
                         </div>
+                    </div>
+                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.version')}</p>
+                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{sysInfo?.version || '...'}</p>
                     </div>
                 </div>
             </div>

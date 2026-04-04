@@ -233,3 +233,106 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 	err := r.db.QueryRow(ctx, query, id, userID).Scan(&content, &filename)
 	return content, "application/pdf", filename, err
 }
+
+func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (entity.PayslipSummary, error) {
+	var summary entity.PayslipSummary
+
+	// 1. Totals
+	queryTotals := `
+		SELECT 
+			COALESCE(SUM(gross_pay), 0),
+			COALESCE(SUM(net_pay), 0),
+			COALESCE(SUM(payout_amount), 0),
+			COUNT(*)
+		FROM payslips 
+		WHERE user_id = $1
+	`
+	err := r.db.QueryRow(ctx, queryTotals, userID).Scan(
+		&summary.TotalGross, &summary.TotalNet, &summary.TotalPayout, &summary.PayslipCount,
+	)
+	if err != nil {
+		return summary, fmt.Errorf("summary totals: %w", err)
+	}
+
+	if summary.PayslipCount == 0 {
+		summary.Trends = []entity.PayslipTrend{}
+		return summary, nil
+	}
+
+	// 2. Total Bonuses
+	queryBonuses := `
+		SELECT COALESCE(SUM(b.amount), 0)
+		FROM payslip_bonuses b
+		JOIN payslips p ON b.payslip_id = p.id
+		WHERE p.user_id = $1
+	`
+	err = r.db.QueryRow(ctx, queryBonuses, userID).Scan(&summary.TotalBonuses)
+	if err != nil {
+		return summary, fmt.Errorf("summary bonuses: %w", err)
+	}
+
+	// 3. Latest and Previous for Trend
+	queryRecent := `
+		SELECT net_pay, period_year, period_month_num
+		FROM payslips
+		WHERE user_id = $1
+		ORDER BY period_year DESC, period_month_num DESC
+		LIMIT 2
+	`
+	rows, err := r.db.Query(ctx, queryRecent, userID)
+	if err != nil {
+		return summary, fmt.Errorf("summary recent: %w", err)
+	}
+	defer rows.Close()
+
+	var recentNet []float64
+	var latestYear, latestMonth int
+	if rows.Next() {
+		var net float64
+		rows.Scan(&net, &latestYear, &latestMonth)
+		recentNet = append(recentNet, net)
+		summary.LatestNetPay = net
+		summary.LatestPeriod = fmt.Sprintf("%04d-%02d", latestYear, latestMonth)
+	}
+	if rows.Next() {
+		var net float64
+		var y, m int
+		rows.Scan(&net, &y, &m)
+		recentNet = append(recentNet, net)
+	}
+
+	if len(recentNet) == 2 && recentNet[1] > 0 {
+		summary.NetPayTrend = ((recentNet[0] - recentNet[1]) / recentNet[1]) * 100
+	}
+
+	// 4. Last 12 months for chart
+	queryTrend := `
+		SELECT period_year, period_month_num, gross_pay, net_pay
+		FROM payslips
+		WHERE user_id = $1
+		ORDER BY period_year DESC, period_month_num DESC
+		LIMIT 12
+	`
+	tRows, err := r.db.Query(ctx, queryTrend, userID)
+	if err != nil {
+		return summary, fmt.Errorf("summary trend: %w", err)
+	}
+	defer tRows.Close()
+
+	summary.Trends = []entity.PayslipTrend{}
+	for tRows.Next() {
+		var y, m int
+		var g, n float64
+		if err := tRows.Scan(&y, &m, &g, &n); err != nil {
+			return summary, err
+		}
+		// Insert at beginning to have chronological order in JSON if frontend expects it
+		summary.Trends = append([]entity.PayslipTrend{{
+			Period: fmt.Sprintf("%04d-%02d", y, m),
+			Gross:  g,
+			Net:    n,
+		}}, summary.Trends...)
+	}
+
+	return summary, nil
+}

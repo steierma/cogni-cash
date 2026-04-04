@@ -6,8 +6,8 @@ import {
     ArrowLeftRight, BarChart3, Briefcase, ChevronLeft, ChevronRight, FileText, Landmark,
     LayoutDashboard, Link2, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List
 } from 'lucide-react';
-import {fetchSettings, updateSettings, fetchMe, logout} from '../api/client';
-import type { User } from '../api/types';
+import {fetchSettings, updateSettings, fetchMe, logout, fetchSystemInfo} from '../api/client';
+import type { User, SystemInfo } from '../api/types';
 
 const ALL_NAV_GROUPS = [
     {
@@ -57,6 +57,11 @@ export default function Layout({children}: { children?: React.ReactNode }) {
     const {data: currentUser} = useQuery<User>({
         queryKey: ['currentUser'],
         queryFn: fetchMe,
+    });
+
+    const {data: sysInfo} = useQuery<SystemInfo>({
+        queryKey: ['systemInfo'],
+        queryFn: fetchSystemInfo,
     });
 
     // Directly derive state from the query instead of syncing to a local useState via useEffect
@@ -211,6 +216,13 @@ export default function Layout({children}: { children?: React.ReactNode }) {
                         <LogOut size={18} className="shrink-0 text-gray-400 dark:text-gray-500 group-hover:text-red-600 dark:group-hover:text-red-400 transition-colors"/>
                         {showLabels && <span className="truncate">{t('layout.logout')}</span>}
                     </button>
+
+                    {showLabels && sysInfo?.version && (
+                        <div className="px-3 pt-2 text-[10px] font-medium text-gray-400 dark:text-gray-600 flex items-center gap-1 opacity-60">
+                            <span className="w-1 h-1 rounded-full bg-gray-300 dark:bg-gray-700"></span>
+                            {t('settings.version')}: {sysInfo.version}
+                        </div>
+                    )}
                 </div>
             </aside>
 

@@ -60,6 +60,9 @@ func (m *mockPayslipRepoForPayslipSvc) FindByID(_ context.Context, _ string, _ u
 func (m *mockPayslipRepoForPayslipSvc) GetOriginalFile(_ context.Context, _ string, _ uuid.UUID) ([]byte, string, string, error) {
 	return nil, "", "", nil
 }
+func (m *mockPayslipRepoForPayslipSvc) GetSummary(_ context.Context, _ uuid.UUID) (entity.PayslipSummary, error) {
+	return entity.PayslipSummary{TotalGross: 5000}, nil
+}
 
 // --- List Tests ---
 
@@ -105,6 +108,19 @@ func TestPayslipService_GetOriginalFile(t *testing.T) {
 	_, _, _, err := svc.GetOriginalFile(context.Background(), "some-id", payslipDummyUserID)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
+	}
+}
+
+func TestPayslipService_GetSummary(t *testing.T) {
+	repo := &mockPayslipRepoForPayslipSvc{}
+	svc := service.NewPayslipService(repo, nil, nil, nil)
+
+	summary, err := svc.GetSummary(context.Background(), payslipDummyUserID)
+	if err != nil {
+		t.Fatalf("expected no error, got %v", err)
+	}
+	if summary.TotalGross != 5000 {
+		t.Errorf("expected 5000, got %v", summary.TotalGross)
 	}
 }
 

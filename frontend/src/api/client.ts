@@ -9,6 +9,7 @@ import type {
     Invoice,
     JobState,
     Payslip,
+    PayslipSummary,
     Reconciliation,
     ReconciliationPairSuggestion,
     SystemInfo,
@@ -327,6 +328,9 @@ export const deleteReconciliation = (id: string): Promise<void> =>
 
 export const fetchPayslips = (employer?: string): Promise<Payslip[]> =>
     api.get<Payslip[]>('payslips/', {params: {employer: employer || undefined}}).then((r: AxiosResponse<Payslip[]>) => r.data ?? []);
+
+export const fetchPayslipSummary = (): Promise<PayslipSummary> =>
+    api.get<PayslipSummary>('payslips/summary/').then((r: AxiosResponse<PayslipSummary>) => r.data);
 
 export const fetchPayslip = (id: string): Promise<Payslip> =>
     api.get<Payslip>(`payslips/${id}/`).then((r: AxiosResponse<Payslip>) => r.data);

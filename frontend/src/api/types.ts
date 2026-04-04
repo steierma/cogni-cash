@@ -195,6 +195,24 @@ export interface Payslip {
     created_at: string;
 }
 
+export interface PayslipTrend {
+    period: string;
+    gross: number;
+    net: number;
+}
+
+export interface PayslipSummary {
+    total_gross: number;
+    total_net: number;
+    total_payout: number;
+    total_bonuses: number;
+    payslip_count: number;
+    latest_net_pay: number;
+    net_pay_trend: number;
+    latest_period: string;
+    trends: PayslipTrend[];
+}
+
 // ── Bank Integration Types ───────────────────────────────────────────────────
 
 export type ConnectionStatus = 'initialized' | 'linked' | 'expired' | 'failed';

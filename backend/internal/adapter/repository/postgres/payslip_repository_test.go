@@ -152,5 +152,14 @@ func TestPayslipRepository(t *testing.T) {
 		if err == nil {
 			t.Errorf("expected error when querying deleted payslip, got nil")
 		}
+
+		// 9. GetSummary (Verify totals after cleanup - should be 0)
+		summary, err := repo.GetSummary(ctx, userID)
+		if err != nil {
+			t.Fatalf("expected no error from GetSummary, got %v", err)
+		}
+		if summary.PayslipCount != 0 {
+			t.Errorf("expected 0 payslips in summary after delete, got %d", summary.PayslipCount)
+		}
 	})
 }

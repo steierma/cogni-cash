@@ -4,16 +4,55 @@ CogniCash is a **privacy-first, self-hosted** financial engine that transforms r
 
 ### 🌟 Why CogniCash?
 
-*   **🧠 Local-First AI Intelligence:** Leverage local LLMs (like Llama 3 via Ollama) to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Includes a **Hybrid Matcher** that first checks for high-confidence (90%+) historical matches in your local database before calling the AI.
-*   **🏦 Seamless Bank Integration:** Synchronize directly with real-world bank accounts via **Enable Banking (PSD2)** or import files from major providers like **ING, Amazon Visa, and VW/CARIAD**.
-*   **📊 Precision Analytics & Review:** Master your cash flow with deep-dive analytics, a dedicated **Review Mode (Inbox)** for new transactions, and a smart **Reconciliation Wizard** to link internal transfers and prevent double-counting.
-*   **👥 Multi-Tenant by Design:** Built up for **Full User Tenancy**, allowing multiple users to manage their isolated financial data on a single instance.
-*   **📱 Offline-First Mobile App:** High-fidelity Flutter app with a **Cache-First (Isar)** architecture and **Mutation Outbox** for seamless financial management without a network connection.
-*   **🥧 Raspberry Pi 5 Ready:** Fully compatible with **ARM64** architectures (tested on Raspberry Pi 5).
+*   **🧠 Local-First AI Intelligence:** Leverage local LLMs (like Llama 3 via Ollama) to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. All AI processing happens **locally on your hardware** — your sensitive financial data never leaves your network. Includes a **Hybrid Matcher** that first checks for high-confidence (65%+) historical matches before calling the AI.
+*   **📜 Professional Payslip Management:** Master your HR documents with a dedicated **Payslip Engine**. Automatically extract Gross, Net, Payout, and Bonuses. Includes a **Split-View Preview** to compare the original PDF with the extracted data for 100% accuracy.
+*   **🏦 Offline-First Parsers (ING & more):** Built-in, privacy-respecting offline parsers for major providers like **ING (DIBA), Amazon Visa, and VW/CARIAD**. These parsers work entirely without AI for maximum speed and reliability, with many more provider-specific parsers currently in development.
+*   **📈 Precision Analytics:** Master your cash flow with deep-dive analytics, a dedicated **Review Mode (Inbox)** for new transactions, and a smart **Reconciliation Wizard** to link internal transfers and prevent double-counting.
+*   **👥 Multi-Tenant by Design:** Built from the ground up for **Full User Tenancy**, allowing multiple users to manage their isolated financial data on a single shared instance.
+*   **📱 Native Mobile App:** High-fidelity Flutter app with a **Cache-First (Isar)** architecture and **Mutation Outbox** for seamless financial management without a network connection.
+*   **🥧 Raspberry Pi 5 Ready:** Fully compatible with **ARM64** architectures — run your entire financial center on a low-power Pi 5.
 
 ## Intro Video
 
 https://github.com/user-attachments/assets/44a99551-3589-4b79-b353-bb4d597fd291
+
+-----
+
+## 📱 Mobile Experience (Beta)
+
+Manage your finances on the go with the **CogniCash Mobile App**. Built with Flutter, it offers a seamless, offline-first experience that syncs perfectly with your self-hosted instance.
+
+### ✨ Key Mobile Features
+*   **🤖 Local-First AI Recognition:** Snap a photo or upload a PDF of your **payslips, bank statements, or invoices**. The app uses local AI logic (via your self-hosted backend) to recognize and categorize your data instantly without cloud leaks.
+*   **📜 Payslip Master View:** Detailed management of your salary history, bonuses, and tax classes with high-fidelity charts.
+*   **🏦 ING DIBA & More:** Native support for the **ING DIBA offline parser**, ensuring maximum privacy and speed for your banking imports, with many more providers coming soon.
+*   **Offline-First:** View and manage your data even without an internet connection.
+*   **Native Performance:** Smooth 60fps animations and transitions.
+*   **Document Preview:** View original documents directly in the app while you edit or review extracted fields.
+*   **Biometric Security:** Protect your financial data with Fingerprint or Face ID.
+
+<p align="center">
+  <img src="screenshots/CogniCash-portfolio.png" width="100%" alt="CogniCash Portfolio">
+</p>
+
+#### Smartphone Experience
+<p align="center">
+  <img src="screenshots/spartphone_dashboard.jpg" width="32%" alt="Dashboard">
+  <img src="screenshots/smartphone_transactions.jpg" width="32%" alt="Transactions">
+  <img src="screenshots/spartphone_analytics.jpg" width="32%" alt="Analytics">
+</p>
+
+#### Tablet Optimization
+<p align="center">
+  <img src="screenshots/tablet_dashboard.jpeg" width="49%" alt="Tablet Dashboard">
+  <img src="screenshots/tablet_analytics.jpeg" width="49%" alt="Tablet Analytics">
+</p>
+
+### 🚀 Interested in the Mobile App?
+I am currently preparing for a public release on the **Google Play Store**. 
+
+If you are interested in joining the **Beta Program** or want to be notified when the app is available, please **contact me**:
+👉 [support-cogni-cash@steierl.org](mailto:support-cogni-cash@steierl.org?subject=Interest%20in%20CogniCash%20Mobile)
 
 -----
 
@@ -214,9 +253,12 @@ make frontend-dev     # Vite dev server on :5173
 
 ```bash
 cp backend/.env.example backend/.env
-# Copy the local build override
-cp docker-compose.override.yml.example docker-compose.override.yml
-# Edit backend/.env — set POSTGRES_PASSWORD and DOMAIN_NAME at minimum
+# Edit backend/.env — set POSTGRES_PASSWORD and OLLAMA_URL at minimum
+# NOTE: Use your host's network IP for OLLAMA_URL, not 'localhost'
+
+# If using Enable Banking, add your private key
+touch enable-banking-prod.pem 
+
 make build            # builds backend + frontend images locally
 make up               # starts postgres → migrate → backend → frontend → caddy
 ```

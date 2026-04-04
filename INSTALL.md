@@ -52,26 +52,34 @@ cp backend/.env.example backend/.env
 
 ```dotenv
 JWT_SECRET=<random-hex-string>             # openssl rand -hex 32
-ADMIN_USERNAME=admin                       # login username (default: admin)
-ADMIN_PASSWORD=<your-strong-password>      # login password — set this!
-POSTGRES_PASSWORD=<your-strong-password>   # database password — set this!
-OLLAMA_URL=http://YOUR_OLLAMA_HOST:11434   # your Ollama host
+ADMIN_USERNAME=admin                       # login username
+ADMIN_PASSWORD=<your-strong-password>      # login password
+POSTGRES_PASSWORD=<your-strong-password>   # database password
+OLLAMA_URL=http://192.168.x.x:11434        # Use your host IP, NOT localhost
+DOMAIN_NAME=localhost                      # Change if using public domain
 ```
+
+> **Note on OLLAMA_URL**: When running inside Docker, `localhost` refers to the container itself. To reach an Ollama instance running on the host machine, you must use the host's actual network IP (e.g., `192.168.1.50`) or `host.docker.internal` (on Docker for Mac/Windows).
+
 
 `DATABASE_HOST` must stay `postgres` (the Docker service name) — do not change it.
 ### 3. Build the images
 
-If you are deploying for the first time or `docker compose pull` fails (e.g., due to private repository restrictions), you should build the images locally:
+If you are deploying for the first time or `docker compose pull` fails, you should build the images locally:
 
-1. **Enable local builds:** Copy the override template to activate the `build:` instructions:
-   ```bash
-   cp docker-compose.override.yml.example docker-compose.override.yml
-   ```
+1. **Enable local builds:** Local builds are supported by default if you use the provided `docker-compose.override.yml` (already in the repo). Ensure you don't have an empty one overriding things.
 2. **Build and start:**
    ```bash
    make build
    make up
    ```
+
+### 4. Special Files (Optional)
+
+If you plan to use **Enable Banking**, you must place your private key file in the root directory:
+- **Filename:** `enable-banking-prod.pem`
+- **Why:** The `docker-compose.yml` expects this file to exist for mounting into the backend container. If you don't use it, you can create an empty file: `touch enable-banking-prod.pem`.
+
 
 | Image                 | Base                        | Size   |
 |-----------------------|-----------------------------|--------|

@@ -87,6 +87,7 @@ type PayslipUseCase interface {
 	Update(ctx context.Context, payslip *entity.Payslip) error
 	Delete(ctx context.Context, id string, userID uuid.UUID) error
 	GetOriginalFile(ctx context.Context, id string, userID uuid.UUID) ([]byte, string, string, error)
+	GetSummary(ctx context.Context, userID uuid.UUID) (entity.PayslipSummary, error)
 }
 
 type BankUseCase interface {

@@ -22,10 +22,10 @@ TAG           ?= latest
 BACKEND_IMAGE := cogni-cash-backend:$(TAG)
 FRONTEND_IMAGE:= cogni-cash-frontend:$(TAG)
 
-DEPLOY_HOST   ?= your-server-ip
-DEPLOY_USER   ?= deploy
+DEPLOY_HOST   ?= financial-manager
 DEPLOY_PATH   ?= /opt/cogni-cash
-DEPLOY_SSH    := ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no
+DEPLOY_SSH    := ssh $(DEPLOY_HOST)
+RSYNC_SSH     := ssh
 
 .DEFAULT_GOAL := help
 
@@ -160,24 +160,28 @@ deploy: build deploy-sync deploy-up
 	@echo ">>> Deploy complete. Check status with: make ps"
 
 deploy-sync:
-	@echo ">>> Syncing files to $(DEPLOY_USER)@$(DEPLOY_HOST):$(DEPLOY_PATH)/"
+	@echo ">>> Syncing files to $(DEPLOY_HOST):$(DEPLOY_PATH)/"
 	rsync -az --delete \
-		-e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+		-e "$(RSYNC_SSH)" \
 		--exclude='.git' \
 		--exclude='.env' \
+		--exclude='docker-compose.override.yml' \
 		--exclude='backend/balance/diba_history' \
 		--exclude='backend/balance/bulk_import' \
 		--exclude='backend/bin' \
 		--exclude='frontend/node_modules' \
 		--exclude='frontend/dist' \
+		--exclude='mobile' \
+		--exclude='standalone_mobile' \
+		--exclude='tmp' \
 		./ \
-		$(DEPLOY_USER)@$(DEPLOY_HOST):$(DEPLOY_PATH)/
+		$(DEPLOY_HOST):$(DEPLOY_PATH)/
 
 deploy-up:
 	@echo ">>> Starting stack on $(DEPLOY_HOST)..."
-	$(DEPLOY_SSH) $(DEPLOY_USER)@$(DEPLOY_HOST) \
+	$(DEPLOY_SSH) \
 		"cd $(DEPLOY_PATH) && \
-		 [ -f .env ] || cp backend/.env.example .env && \
+		 [ -f backend/.env ] || cp backend/.env.example backend/.env && \
 		 export IMAGE_SUFFIX=-internal && \
 		 docker compose pull && \
 		 docker compose up -d --remove-orphans && \
@@ -330,9 +334,9 @@ db-dump-local:
 	@echo ">>> Done. Compressed dump saved to backups/ directory."
 
 db-dump-remote:
-	@echo ">>> Dumping database from $(DEPLOY_USER)@$(DEPLOY_HOST)…"
+	@echo ">>> Dumping database from $(DEPLOY_HOST)…"
 	@mkdir -p backups
-	$(DEPLOY_SSH) $(DEPLOY_USER)@$(DEPLOY_HOST) \
+	$(DEPLOY_SSH) \
 		"cd $(DEPLOY_PATH) && export \$$(grep -v '^#' backend/.env | xargs) && docker compose exec -T postgres pg_dump -U \$$POSTGRES_USER -d \$$POSTGRES_DB -c -F p" | gzip > backups/prod_db_$$(date +%Y%m%d_%H%M%S).sql.gz
 	@echo ">>> Done. Compressed dump saved to backups/ directory."
 
@@ -340,8 +344,8 @@ db-restore-remote:
 	@[ -n "$(FILE)" ] || (echo "ERROR: FILE is required. Usage: make db-restore-remote FILE=backups/dump.sql.gz"; exit 1)
 	@echo ">>> ⚠️ WARNING: This will overwrite the database on $(DEPLOY_HOST)."
 	@printf ">>> Are you sure? [y/N] " && read ans && [ "$${ans}" = "y" ] || (echo "Aborted." && exit 1)
-	@echo ">>> Restoring $(FILE) to $(DEPLOY_USER)@$(DEPLOY_HOST)…"
-	@gunzip -c $(FILE) | $(DEPLOY_SSH) $(DEPLOY_USER)@$(DEPLOY_HOST) \
+	@echo ">>> Restoring $(FILE) to $(DEPLOY_HOST)…"
+	@gunzip -c $(FILE) | $(DEPLOY_SSH) \
 		"cd $(DEPLOY_PATH) && export \$$(grep -v '^#' backend/.env | xargs) && docker compose exec -T postgres psql -U \$$POSTGRES_USER -d \$$POSTGRES_DB"
 	@echo ">>> Restore complete."
 

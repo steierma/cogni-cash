@@ -6,7 +6,8 @@ import {
 } from 'lucide-react';
 import {
     deletePayslip, fetchPayslips, importPayslip, downloadPayslipFile, updatePayslip,
-    fetchSettings, updateSettings, getPayslipPreviewUrl, importPayslipsBatch
+    fetchSettings, updateSettings, getPayslipPreviewUrl, importPayslipsBatch,
+    fetchPayslipSummary
 } from '../api/client';
 import type {Payslip} from '../api/types';
 import {fmtCurrency} from '../utils/formatters';
@@ -77,6 +78,10 @@ export default function PayslipsPage() {
     const {data: allPayslips = []} = useQuery<Payslip[], Error>({
         queryKey: ['payslips', 'all'],
         queryFn: () => fetchPayslips()
+    });
+    const {data: summary} = useQuery({
+        queryKey: ['payslips', 'summary'],
+        queryFn: fetchPayslipSummary
     });
     const {data: settings} = useQuery({queryKey: ['settings'], queryFn: fetchSettings});
 
@@ -176,7 +181,7 @@ export default function PayslipsPage() {
             if (p) setPreviewingPayslip(p);
             const url = await getPayslipPreviewUrl(id);
             setPreviewUrl(url);
-        } catch (error) {
+        } catch {
             alert("Could not load the document preview.");
         } finally {
             setIsPreviewLoading(null);
@@ -254,7 +259,17 @@ export default function PayslipsPage() {
         return filtered;
     }, [payslips, appliedStartPeriod, appliedEndPeriod, appliedEmployer, appliedTaxClass, sortConfig, excludedBonuses, excludeLeasing, useProportionalMath]);
 
+    const hasFilter = appliedStartPeriod !== 'All' || appliedEndPeriod !== 'All' || appliedEmployer !== 'All' || appliedTaxClass !== 'All';
+
     const periodTotals = useMemo(() => {
+        if (!hasFilter && summary) {
+            return {
+                gross: summary.total_gross,
+                net: summary.total_net,
+                payout: summary.total_payout,
+                bonuses: summary.total_bonuses,
+            };
+        }
         return filteredPayslips.reduce((acc, p) => {
             acc.gross += p.gross_pay || 0;
             acc.net += p.net_pay || 0;
@@ -262,15 +277,21 @@ export default function PayslipsPage() {
             acc.bonuses += (p.bonuses || []).reduce((sum, b) => sum + (b.amount || 0), 0);
             return acc;
         }, {gross: 0, net: 0, payout: 0, bonuses: 0});
-    }, [filteredPayslips]);
+    }, [filteredPayslips, hasFilter, summary]);
 
     const latestPayslip = [...filteredPayslips].sort((a, b) => (b.period_year - a.period_year) || ((b.period_month_num || 0) - (a.period_month_num || 0)))[0];
     const previousPayslip = [...filteredPayslips].sort((a, b) => (b.period_year - a.period_year) || ((b.period_month_num || 0) - (a.period_month_num || 0)))[1];
 
     let totalPercentChange = 0;
     let adjPercentChange = 0;
+    
+    if (!hasFilter && summary) {
+        totalPercentChange = summary.net_pay_trend;
+    } else if (latestPayslip && previousPayslip && previousPayslip.net_pay > 0) {
+        totalPercentChange = ((latestPayslip.net_pay - previousPayslip.net_pay) / previousPayslip.net_pay) * 100;
+    }
+
     if (latestPayslip && previousPayslip) {
-        if (previousPayslip.net_pay > 0) totalPercentChange = ((latestPayslip.net_pay - previousPayslip.net_pay) / previousPayslip.net_pay) * 100;
         const prevAdjNet = getAdjustedNetto(previousPayslip, excludedBonuses, excludeLeasing, useProportionalMath);
         if (prevAdjNet > 0) adjPercentChange = ((getAdjustedNetto(latestPayslip, excludedBonuses, excludeLeasing, useProportionalMath) - prevAdjNet) / prevAdjNet) * 100;
     }
@@ -512,7 +533,11 @@ export default function PayslipsPage() {
                 ignoredPayslipIds={ignoredPayslipIds}
                 onToggleIgnore={(id) => setIgnoredPayslipIds(prev => {
                     const next = new Set(prev);
-                    next.has(id) ? next.delete(id) : next.add(id);
+                    if (next.has(id)) {
+                        next.delete(id);
+                    } else {
+                        next.add(id);
+                    }
                     return next;
                 })}
                 onPreview={handlePreview}

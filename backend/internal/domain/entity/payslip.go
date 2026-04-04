@@ -42,3 +42,23 @@ type PayslipFilter struct {
 	UserID   uuid.UUID
 	Employer string // Optional: Filter by employer name
 }
+
+// PayslipSummary provides pre-calculated statistics for the dashboard/mobile view.
+type PayslipSummary struct {
+	TotalGross    float64 `json:"total_gross"`
+	TotalNet      float64 `json:"total_net"`
+	TotalPayout   float64 `json:"total_payout"`
+	TotalBonuses  float64 `json:"total_bonuses"`
+	PayslipCount  int     `json:"payslip_count"`
+	LatestNetPay  float64 `json:"latest_net_pay"`
+	NetPayTrend   float64 `json:"net_pay_trend"` // Percentage change from previous
+	LatestPeriod  string  `json:"latest_period"`   // YYYY-MM
+	Trends        []PayslipTrend `json:"trends"`   // Last 12 months for charting
+}
+
+// PayslipTrend represents a data point for salary charts.
+type PayslipTrend struct {
+	Period string  `json:"period"` // YYYY-MM
+	Gross  float64 `json:"gross"`
+	Net    float64 `json:"net"`
+}

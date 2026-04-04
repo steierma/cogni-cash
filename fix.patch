@@ -1,0 +1,39 @@
+--- mobile/lib/domain/entities/payslip.dart
++++ mobile/lib/domain/entities/payslip.dart
+@@ -204,18 +204,6 @@
+           const [],
+       createdAt: parseDate(json['created_at']),
+     );
+-  }
+-
+-  String get periodLabel => '${periodMonthNum.toString().padLeft(2, '0')}/$periodYear';
+-}
+-
+-      'employer_name': employerName,
+-      if (taxClass != null) 'tax_class': taxClass,
+-      'gross_pay': grossPay,
+-      'net_pay': netPay,
+-      'payout_amount': payoutAmount,
+-      'bonuses': bonuses.map((e) => e.toJson()).toList(),
+-      if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
+-    };
+   }
+ 
+   Map<String, dynamic> toJson() {
+     return {
+       'id': id,
+       if (originalFileName != null) 'original_file_name': originalFileName,
+       'period_month_num': periodMonthNum,
+       'period_year': periodYear,
+       'employer_name': employerName,
+       if (taxClass != null) 'tax_class': taxClass,
+       'gross_pay': grossPay,
+       'net_pay': netPay,
+       'payout_amount': payoutAmount,
+       'bonuses': bonuses.map((e) => e.toJson()).toList(),
+       if (createdAt != null) 'created_at': createdAt!.toIso8601String(),
+     };
+   }
+ 
+   String get periodLabel => '${periodMonthNum.toString().padLeft(2, '0')}/$periodYear';
+ }

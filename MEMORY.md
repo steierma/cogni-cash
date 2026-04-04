@@ -81,32 +81,41 @@ This file tracks persistent project state, maintenance requirements, and synchro
     - [x] **Verification**: Verified all path parameters and trailing slashes match the actual route registrations.
 - [x] **i18n Management Tool**: Created `scripts/support/i18n_tool.py` to automate and safeguard internationalization.
     - [x] **Full-Stack Sync**: The tool scans `.tsx` source code for `t()` calls and compares them against all 4 language files (`en`, `de`, `es`, `fr`).
-    - [x] **Automation**: Supports `add`, `sync`, and `pretty` commands to safely modify nested JSON without syntax errors.
+    - [x] **Automation**: Supports `add`, `sync`, and `pretty` command to safely modify nested JSON without syntax errors.
     - [x] **Audit**: Successfully resolved over 70 missing or inconsistent keys across the application and fixed a JSON syntax error in the German locale.
-
+- [x] **Mobile Logging Strategy**: Implemented a comprehensive, persistent logging infrastructure for `mobile` and `standalone_mobile`.
+  - [x] **AppLogger**: Added log rotation (`app_old.log`), `StackTrace` support, and `debugPrint` integration.
+  - [x] **Network Persistence**: Added `PersistentLoggingInterceptor` to capture HTTP request/response summaries in the log file.
+  - [x] **Global Error Capture**: Integrated Flutter and Platform error handlers to persist all crashes and async errors.
+- [x] **Payslips Performance Optimization**: Reduced `PayslipsView` loading time by shifting heavy calculations to the backend.
+  - [x] **Summary Endpoint**: Added `GET /api/v1/payslips/summary/` with pre-calculated KPIs and trends.
+  - [x] **Hybrid Caching**: Updated mobile `PayslipRepository` to use Isar-cached summaries for an instant "Network First, Cache Assisted" UI update.
+  - [x] **Backend Consistency**: Implemented `GetSummary` across Repository (Postgres/Memory), Service, and Handler layers.
 - [x] **Database Cleanup**: Removed redundant and unused fields across `bank_statements`, `transactions`, `invoices`, and `payslips` to streamline the schema and reduce storage overhead (Migration `012`).
 
 
 ## 2. Technical Debt & Roadmap
+- **Bank Integration (SimpleFIN) (High Priority)**:
+  - [ ] **Backend Adapter**: Create `internal/adapter/bank/simplefin` implementing the `BankProvider` port.
+  - [ ] **Token Exchange**: Implement the Setup Token to permanent Access URL exchange logic.
+  - [ ] **Data Mapping**: Map SimpleFIN's "Standard JSON" (accounts/transactions) to internal entities.
+  - [ ] **Frontend**: Add SimpleFIN to the provider selection in Settings and implement the token-based link flow in Bank Connections.
 - **Security Hardening (High Priority)**:
   - [x] **Tenancy & Isolation**: Implementing stricter data ownership (`user_id`).
   - [x] **Auth Layer Enhancement**: Strengthening session management (HttpOnly cookies).
   - [x] **Memory Safety**: Reduced disk I/O for sensitive document parsing via `[]byte` refactor.
-- **Mobile Development (Flutter) (Phase 17)**: ✅
-  - [x] High-fidelity Dashboard with fl_chart integrations.
-  - [x] Full application-wide internationalization (EN, DE, ES, FR).
-  - [x] Enhanced Bank Connections with account-level sync tracking.
-  - [x] Salary Trend Visualization in Payslips.
-  - [x] Cross-platform support (Web Debug + Android Release built).
-  - [x] Onboarding flow for dynamic backend URL configuration.
-  - [x] Parity with Web UI for Transactions, Invoices, and Reconciliations.
-  - [x] Improved resilience for TLS handshakes and dropdown data loading.
-  - [x] UI/UX refinements (spacing, localized FABs).
-  - [x] Resolved Flutter 3.29+ deprecations.
+- **Mobile Development (Flutter) (Phase 18: Release Preparation)**: ✅
+  - [x] **Application ID**: Updated to `org.steierl.cognicash` (verified with domain ownership).
+  - [x] **Release Signing**: Generated production keystore with high-complexity passwords and configured `build.gradle.kts`.
+  - [x] **Security**: Enabled ProGuard/R8 obfuscation for release builds.
+  - [x] **Marketing**: Added Mobile App showcase and "Contact for Interest" CTA to `README.md`.
+  - [x] **Bugfixes**: Resolved 404 error on payslip preview by fixing trailing slashes in repository API paths.
+  - [x] **Features**: Implemented payslip edit parity with Web UI (Document Split-View) and added Native Share support.
   - [x] **Cogni-Sync Offline Layer**: Implemented a proper Isar-based caching layer for offline support and faster data loading, featuring reactive streams and a **Mutation Outbox** for reliable background synchronization (Offline Sync).
-  - [x] **Android App Store Release**: Complete the [Release Checklist](docs/MOBILE_RELEASE_CHECKLIST.md) including signing, icons, and legal requirements.
+  - [x] **Android App Store Release**: Completed Technical & Security items in [Release Checklist](docs/MOBILE_RELEASE_CHECKLIST.md).
 - [x] **Support & Diagnostics**: Implemented "Contact Support" email integration with automatic debug info (Version, Device, Platform) and a "Share Debug Logs" feature for local database export (Isar/SQLite).
   - [x] **Diagnostic Toolkit**: Created `scripts/support/inspect_isar.sh` and `docs/DIAGNOSTIC_WORKFLOW.md` to automate and document the process of investigating user-provided database exports.
+  - [x] **Persistent Logging Strategy**: Implemented app-wide persistent logging for network requests, system events, and crashes to enable proactive support.
   - [ ] Native Document Scanner (Auto-cropping/OCR).
 - **Email & Notifications (SMTP) (Phase 16)**: ✅
   - [x] Implement `EmailProvider` port and `SMTPAdapter`.

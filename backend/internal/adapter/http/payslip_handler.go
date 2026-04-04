@@ -41,6 +41,25 @@ func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, payslips)
 }
 
+// getPayslipSummary handles GET /api/v1/payslips/summary
+func (h *Handler) getPayslipSummary(w http.ResponseWriter, r *http.Request) {
+	userIDStr, ok := r.Context().Value(userIDKey).(string)
+	if !ok {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	userID, _ := uuid.Parse(userIDStr)
+
+	summary, err := h.payslipSvc.GetSummary(r.Context(), userID)
+	if err != nil {
+		h.Logger.Error("Failed to get payslip summary", "error", err, "user_id", userID)
+		writeError(w, http.StatusInternalServerError, "Failed to fetch payslip summary")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, summary)
+}
+
 // getPayslip handles GET /api/v1/payslips/{id}
 func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
 	userIDStr, ok := r.Context().Value(userIDKey).(string)

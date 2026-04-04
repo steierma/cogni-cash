@@ -161,6 +161,10 @@ func (s *PayslipService) GetOriginalFile(ctx context.Context, id string, userID 
 	return s.repo.GetOriginalFile(ctx, id, userID)
 }
 
+func (s *PayslipService) GetSummary(ctx context.Context, userID uuid.UUID) (entity.PayslipSummary, error) {
+	return s.repo.GetSummary(ctx, userID)
+}
+
 // JSONPayslipEntry represents a single record in the payslip bulk-import JSON manifest.
 type JSONPayslipEntry struct {
 	PeriodMonthNum   int            `json:"period_month_num"`

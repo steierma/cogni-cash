@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Save, Plus, X, Loader2 } from 'lucide-react';
 import type { Payslip } from '../../api/types';
@@ -13,15 +13,12 @@ interface PayslipFormProps {
 
 export function PayslipForm({ initialData, onSubmit, isPending, submitLabel, showSubmitIcon = true }: PayslipFormProps) {
     const { t } = useTranslation();
-    const [editBonuses, setEditBonuses] = useState<{ description: string; amount: string }[]>([]);
-
-    useEffect(() => {
+    const [editBonuses, setEditBonuses] = useState<{ description: string; amount: string }[]>(() => {
         if (initialData.bonuses) {
-            setEditBonuses(initialData.bonuses.map(sz => ({ description: sz.description, amount: sz.amount.toString() })));
-        } else {
-            setEditBonuses([]);
+            return initialData.bonuses.map(sz => ({ description: sz.description, amount: sz.amount.toString() }));
         }
-    }, [initialData.bonuses]);
+        return [];
+    });
 
     const handleSubmit = (e: React.FormEvent<HTMLFormElement>) => {
         e.preventDefault();

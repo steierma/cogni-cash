@@ -38,11 +38,16 @@ func (h *Handler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	version := os.Getenv("APP_VERSION")
+	if version == "" {
+		version = "unknown"
+	}
+
 	info := map[string]string{
 		"storage_mode":  h.storageMode,
 		"db_host":       h.dbHost,
 		"db_state":      dbState,
-		"version":       "1.0.0",
+		"version":       version,
 		"bank_provider": bankProvider,
 	}
 	writeJSON(w, http.StatusOK, info)

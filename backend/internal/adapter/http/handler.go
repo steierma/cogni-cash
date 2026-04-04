@@ -212,6 +212,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			})
 
 			r.Route("/payslips", func(r chi.Router) {
+				r.Get("/summary/", h.getPayslipSummary)
 				r.Get("/", h.listPayslips)
 				r.Get("/{id}/", h.getPayslip)
 				r.Post("/import/", h.importPayslip)

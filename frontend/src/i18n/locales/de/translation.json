@@ -575,6 +575,7 @@
     "storageMode": "Speichermodus",
     "successSaved": "Einstellungen erfolgreich gespeichert.",
     "systemStatus": "Systemstatus",
+    "version": "Version",
     "testEmailPlaceholder": "empfaenger@beispiel.de",
     "testEmailSuccess": "Test-E-Mail gesendet! Überprüfen Sie Ihren Posteingang.",
     "testSmtp": "SMTP-Verbindung testen",

@@ -1,0 +1,173 @@
+# Gemini CLI Project Memory: Cogni-Cash
+
+This file tracks persistent project state, maintenance requirements, and synchronization tasks. It must be updated by Gemini CLI regularly.
+
+## 1. Post-Feature Maintenance
+- [x] **Full User Tenancy**: Implemented comprehensive multi-tenant isolation across all entities (categories, bank statements, transactions, invoices, payslips, and settings). Added migration `010_add_user_tenancy.sql` and updated all backend services and repositories to enforce `user_id` filtering. Verified with comprehensive integration and unit tests (all green).
+- [x] **Auth Layer Enhancement**: Implemented HttpOnly cookie-based session management for the web frontend. Added `/api/v1/logout` endpoint. Updated `authMiddleware` to support both cookies and `Authorization` headers.
+- [x] **SMTP Integration**: Implemented SMTP adapter and notification service. Added SMTP settings to UI and seeded from .env.
+- [x] **i18n Cleanup**: Finalized translation files for en, de, es, fr. Added bank integration, provider settings, and SMTP configuration.
+- [x] **README.md Sync**: Updated "Target Architecture & Roadmap" and migration history to include full tenancy and mobile improvements.
+- [x] **DATABASE_SCHEMA.md Sync**: Synchronized documentation with all 10 migrations, including user tenancy and bank account sync errors.
+- [x] **Settings Service Sync**: Added `Get` method to `SettingsUseCase` to support granular retrieval.
+- [x] **Transaction Review System**: Added `reviewed` field to transactions, "Unreviewed" default inbox, and "Review All" batch actions.
+- [x] **AI Few-Shot Learning**: Enhanced auto-categorization by providing historical examples to the LLM (configurable via settings).
+- [x] **Smart Bank Sync**: Implemented a randomized background worker that synchronizes bank accounts every 2 days between 08:00 and 20:00.
+- [x] **Security Audit**: Verified SQL injection safety and implemented role-based access control for all sensitive endpoints.
+- [x] **CI/CD Quality Gates**: Enforced strict, multi-level test coverage checks in GitHub Actions. Excluded non-logic files (entities, ports, cmd/, migrations/, main.go) from coverage calculation.
+- [x] **Automated Versioning & Releases**: Implemented a professional release process starting from **v1.4.0**.
+  - [x] **Conventional Commits**: Adopted the Conventional Commits standard (`feat`, `fix`, `chore`, etc.) to drive automated versioning and changelog generation.
+  - [x] **standard-version**: Integrated `standard-version` in the root `package.json` for one-command releases (`npm run release`).
+  - [x] **Public & Internal Tagging**: Updated Forgejo CI/CD workflows (`ci-cd.yml` and `public-release.yml`) to automatically build and push version-tagged images (e.g., `:1.4.0`) to both internal and public registries when a git tag is pushed.
+  - [x] **Automated Changelog**: Configured `.versionrc.json` to generate structured `CHANGELOG.md` updates.
+  - [x] **Developer Documentation**: Created `COMMIT_CONVENTION.md` to guide contributors on commit formatting and release procedures.
+- [x] **CI/CD Deployment Optimization**: Replaced broad `rsync --delete` with a surgical sync of only `docker-compose.yml`. This ensures that all server-side state (like `.env`, `docker-compose.override.yml`, central Caddy config, and PEM keys) is completely preserved and never overridden by the CI/CD pipeline.
+- [x] **Production Hardening**: Enforced mandatory `JWT_SECRET` and implemented secure CORS handling for both Web and Mobile.
+- [x] **Mobile Implementation**: Fully functional Flutter app with Dashboard, Analytics, Transactions, Invoices, and User management.
+- [x] **Mobile i18n & L10n**: Full application-wide internationalization (150+ keys) supporting EN, DE, ES, and FR with real-time switching and persistence.
+- [x] **Mobile Bank Integration**: Enhanced Bank Connections view with nested accounts, balances, last sync status, and expandable/collapsible UI.
+- [x] **Mobile Salary Analysis**: Integrated salary trend chart in Payslips view showing Gross vs. Net development.
+- [x] **Branding & Documentation**: Standardized application name to **CogniCash** across the entire full-stack project, added a polished eye-catcher to the `README.md`, and integrated the application logo into the mobile app (Login screen and Navigation Drawer).
+- [x] **Mobile UI Polishing**: Fixed chart legends spacing, removed global FAB in favor of localized view-specific upload buttons, resolved `DropdownButton` crashes during data loading, and fixed a bug where the "All" filter for transaction review status was unresponsive.
+- [x] **Mobile Independent Theming**: Implemented `ThemeController` using `shared_preferences` to allow mobile-specific theme selection (Light/Dark/System) that persists locally and operates independently from the web frontend's theme setting.
+  - [x] **Theme Reactivity**: Fixed a bug where theme changes required a restart/re-login by properly watching the `themeProvider` state in `main.dart`.
+  - [x] **Theme Localization**: Added localized labels for theme modes in EN, DE, ES, and FR.
+- [x] **Mobile Filter Logic**: Implemented the sentinel pattern in `TransactionFilter.copyWith` to allow explicit `null` state transitions for the `reviewed` field, enabling the "All" filter to function correctly.
+- [x] **Mobile Backend Bridge**: Hardened CORS for dynamic localhost ports, improved TLS handshake error reporting with helpful user hints, and fixed JSON null array handling.
+- [x] **Bank Sync Error Tracking**: Added `last_sync_error` to `bank_accounts` and UI indicators (tooltips) for transparent error reporting. Added fail-fast validation for mock IDs in real adapters.
+- [x] **Automatic Bank Account Categorization**: Enhanced `EnableBanking` adapter to automatically detect `credit_card` and `extra_account` types using PSD2 CashAccountType.
+- [x] **Readable Bank Names**: Implemented storage and display of human-readable institution names across the entire banking stack.
+- [x] **Bank Statement Linking**: Improved duplicate detection in `BankStatementService` to link existing transactions (from API sync) to uploaded statements using fuzzy matching. Linked and newly imported transactions remain open for review by default.
+- [x] **Security Audit**: Verified SQL injection safety across the entire PostgreSQL repository layer.
+- [x] **Layout Mode Implementation**: Added "Layout Density" setting (Standard vs. Compact) to the web frontend. Implemented global CSS class toggling and updated all table views and sidebars to respond to the compact preference. Added full translations for EN, DE, ES, and FR.
+- [x] **Backend Parser Optimization**: Refactored `InvoiceParser`, `PayslipParser`, and `BankStatementParser` ports and adapters to use `[]byte` instead of `filePath`. This eliminates the need for temporary physical files in the service layer, improves security (no disk persistence for sensitive data during parsing), and streamlines the implementation of all parsers (PDF, CSV, XLS, AI).
+- [x] **Mobile UI Modernization**: Addressed several Flutter deprecation warnings (`withOpacity` -> `withValues`, `surfaceVariant` -> `surfaceContainerHighest`) and fixed unnecessary null checks for non-nullable filter fields.
+- [x] **Developer Experience**: Restored the `run_wireless.sh` script for easy wireless ADB debugging on mobile devices.
+- [x] **Deployment Documentation**: Updated `INSTALL.md` with Raspberry Pi 5 / ARM64 specific notes, local network (SSL bypass) instructions, and troubleshooting for Docker volume bind-mount quirks.
+- [x] **Employer Filtering in Payslips**: Implemented full-stack filtering for payslips by employer name.
+  - [x] **Backend**: Updated `PayslipRepository` (Postgres/Memory) and `FindAll` port to support `Employer` filtering. Added query parameter support to `listPayslips` HTTP handler.
+  - [x] **Service Layer Refactoring**: Refactored `PayslipUseCase` to include `GetAll`, `GetByID`, and `GetOriginalFile`. Updated `PayslipService` to implement these methods and updated the HTTP handler to use the service layer exclusively instead of the repository.
+  - [x] **Frontend**: Updated API client and `PayslipsPage` with an Employer dropdown filter. Added translations for "All Employers" in EN, DE, ES, and FR.
+  - [x] **Data Integrity**: Verified that `employer_name` is correctly sent during import and updated in the database.
+- [x] **LLM Debugging & Observability**: Added detailed debug logging to `Ollama` and `Gemini` adapters.
+  - [x] **Request Transparency**: Full URL and JSON payload logging for all LLM requests (Ollama, Gemini, Gemini Multimodal).
+  - [x] **Error Diagnostics**: Non-200 responses now include the full response body in the error message for instant troubleshooting of model mismatches or configuration errors.
+- [x] **Payslip Batch Upload**: Implemented full-stack support for uploading multiple payslip PDFs at once.
+  - [x] **Backend**: Registered the `importPayslipsBatch` endpoint (`POST /api/v1/payslips/import/batch`) in the router.
+  - [x] **Frontend API**: Added `importPayslipsBatch` to the API client.
+  - [x] **Frontend UI**: Updated `PayslipsPage` to handle multiple files in the dropzone, added a `batchUploadMutation`, and implemented a `BatchResultsModal` to show success/failure counts and detailed error messages for each file.
+  - [x] **Split-View Preview**: Redesigned the payslip preview modal to a side-by-side view. The left side shows the original PDF, and the right side provides an editable form with all stored database values (Period, Employee, Gross/Net, Bonuses, etc.) for instant comparison and correction.
+  - [x] **i18n**: Added `batchResults` translation keys for EN, DE, ES, and FR.
+- [x] **Full-Stack Consistency Review**: Completed a holistic review based on `AI_CONSISTENCY_CHECKLIST.md`.
+  - [x] **Backend Tests**: Added `TestImportPayslipsBatch` to `handler_test.go`.
+  - [x] **Mobile Parity**: Updated Flutter `Payslip` entity with `employerName` and manual mapping.
+  - [x] **Frontend Refactoring**: Extracted `PayslipForm.tsx` for shared form logic across modals.
+  - [x] **Documentation**: Updated `DATABASE_SCHEMA.md` with new unique constraints and migration history.
+- [x] **CI/CD Build Fix**: Resolved TypeScript `error TS6133` (unused variables) in `frontend/src/components/payslips/PayslipModals.tsx`, `frontend/src/components/payslips/PayslipChart.tsx`, and `frontend/src/pages/PayslipsPage.tsx`. Verified fix with successful `npm run build`.
+- [x] **Mobile UI Streamlining**: Removed the bank statement filter from the Transactions view in both `mobile` and `standalone_mobile` apps to simplify the user interface. Removed corresponding "View Transactions" shortcuts from the Bank Statements view.
+- [x] **Demo Data Realism**: Enhanced `backend/balance/dummy-data.sql` to show a steady 1.5% - 3.0% salary increase every May, providing more realistic historical data for analytics and trend testing.
+- [x] **Hybrid Categorization Matcher**: Implemented a two-stage categorization process.
+    - [x] **DB-First Matching**: Added `FindMatchingCategory` to check for exact or 65%+ similarity matches in the database before calling the LLM. Enabled `pg_trgm` and added GIN indexes for high performance.
+    - [x] **Few-Shot Optimization**: Refined the LLM request to provide a total of 20 unique, recent historical examples across all categories, significantly improving context relevance while reducing token usage.
+- [x] **Database & Entity Streamlining**: Conducted a comprehensive cleanup of redundant and privacy-sensitive fields.
+    - [x] **Bank Statements**: Removed `account_number`, `bic`, and `source_file`. IBAN is now the sole account identifier.
+    - [x] **Transactions**: Removed `amount_base_currency` and `exchange_rate` to simplify the schema for single-currency use cases.
+    - [x] **Invoices**: Removed `raw_text`, `amount_base_currency`, `exchange_rate`, `original_file_mime`, and `original_file_size`. Binary content and filename are sufficient.
+    - [x] **Payslips**: Removed `employee_name` (redundant due to tenancy), `source_file`, `original_file_mime`, and `original_file_size`. Adjusted frontend filtering, table columns, and detail views accordingly. Updated AI prompt and parsers to no longer extract these fields.
+    - [x] **Documentation & Data**: Fully synchronized `DATABASE_SCHEMA.md`, `README.md`, and `dummy-data.sql` with the streamlined schema. All backend tests verified green.
+- [x] **API Documentation Sync**: Conducted a full audit of `docs/API_REFERENCE.md` against `internal/adapter/http/handler.go`.
+    - [x] **Public Endpoints**: Added missing `logout`, `forgot-password`, and `reset-password` endpoints.
+    - [x] **Method Completeness**: Documented the `PATCH` method for partial payslip updates.
+    - [x] **Verification**: Verified all path parameters and trailing slashes match the actual route registrations.
+- [x] **i18n Management Tool**: Created `scripts/support/i18n_tool.py` to automate and safeguard internationalization.
+    - [x] **Full-Stack Sync**: The tool scans `.tsx` source code for `t()` calls and compares them against all 4 language files (`en`, `de`, `es`, `fr`).
+    - [x] **Automation**: Supports `add`, `sync`, and `pretty` command to safely modify nested JSON without syntax errors.
+    - [x] **Audit**: Successfully resolved over 70 missing or inconsistent keys across the application and fixed a JSON syntax error in the German locale.
+- [x] **Mobile Logging Strategy**: Implemented a comprehensive, persistent logging infrastructure for `mobile` and `standalone_mobile`.
+  - [x] **AppLogger**: Added log rotation (`app_old.log`), `StackTrace` support, and `debugPrint` integration.
+  - [x] **Network Persistence**: Added `PersistentLoggingInterceptor` to capture HTTP request/response summaries in the log file.
+  - [x] **Global Error Capture**: Integrated Flutter and Platform error handlers to persist all crashes and async errors.
+- [x] **Payslips Performance Optimization**: Reduced `PayslipsView` loading time by shifting heavy calculations to the backend.
+  - [x] **Summary Endpoint**: Added `GET /api/v1/payslips/summary/` with pre-calculated KPIs and trends.
+  - [x] **Hybrid Caching**: Updated mobile `PayslipRepository` to use Isar-cached summaries for an instant "Network First, Cache Assisted" UI update.
+  - [x] **Backend Consistency**: Implemented `GetSummary` across Repository (Postgres/Memory), Service, and Handler layers.
+- [x] **Database Cleanup**: Removed redundant and unused fields across `bank_statements`, `transactions`, `invoices`, and `payslips` to streamline the schema and reduce storage overhead (Migration `012`).
+
+
+## 2. Technical Debt & Roadmap
+- **Bank Integration (SimpleFIN) (High Priority)**:
+  - [ ] **Backend Adapter**: Create `internal/adapter/bank/simplefin` implementing the `BankProvider` port.
+  - [ ] **Token Exchange**: Implement the Setup Token to permanent Access URL exchange logic.
+  - [ ] **Data Mapping**: Map SimpleFIN's "Standard JSON" (accounts/transactions) to internal entities.
+  - [ ] **Frontend**: Add SimpleFIN to the provider selection in Settings and implement the token-based link flow in Bank Connections.
+- **Security Hardening (High Priority)**:
+  - [x] **Tenancy & Isolation**: Implementing stricter data ownership (`user_id`).
+  - [x] **Auth Layer Enhancement**: Strengthening session management (HttpOnly cookies).
+  - [x] **Memory Safety**: Reduced disk I/O for sensitive document parsing via `[]byte` refactor.
+- **Mobile Development (Flutter) (Phase 18: Release Preparation)**: ✅
+  - [x] **Application ID**: Updated to `org.steierl.cognicash` (verified with domain ownership).
+  - [x] **Release Signing**: Generated production keystore with high-complexity passwords and configured `build.gradle.kts`.
+  - [x] **Security**: Enabled ProGuard/R8 obfuscation for release builds.
+  - [x] **Marketing**: Added Mobile App showcase and "Contact for Interest" CTA to `README.md`.
+  - [x] **Bugfixes**: Resolved 404 error on payslip preview by fixing trailing slashes in repository API paths.
+  - [x] **Features**: Implemented payslip edit parity with Web UI (Document Split-View) and added Native Share support.
+  - [x] **Cogni-Sync Offline Layer**: Implemented a proper Isar-based caching layer for offline support and faster data loading, featuring reactive streams and a **Mutation Outbox** for reliable background synchronization (Offline Sync).
+  - [x] **Android App Store Release**: Completed Technical & Security items in [Release Checklist](docs/MOBILE_RELEASE_CHECKLIST.md).
+- [x] **Support & Diagnostics**: Implemented "Contact Support" email integration with automatic debug info (Version, Device, Platform) and a "Share Debug Logs" feature for local database export (Isar/SQLite).
+  - [x] **Diagnostic Toolkit**: Created `scripts/support/inspect_isar.sh` and `docs/DIAGNOSTIC_WORKFLOW.md` to automate and document the process of investigating user-provided database exports.
+  - [x] **Persistent Logging Strategy**: Implemented app-wide persistent logging for network requests, system events, and crashes to enable proactive support.
+  - [ ] Native Document Scanner (Auto-cropping/OCR).
+- **Email & Notifications (SMTP) (Phase 16)**: ✅
+  - [x] Implement `EmailProvider` port and `SMTPAdapter`.
+  - [x] Create `NotificationUseCase` and `NotificationService`.
+  - [x] Seed SMTP settings from `.env` and expose in Web UI.
+  - [x] Integrate `SendWelcomeEmail` into user creation flow.
+  - [x] Added `SendTestEmail` capability for configuration verification.
+- **Smart Bank Sync (Phase 15)**: ✅
+  - [x] Background worker with randomized schedule (8:00 - 20:00).
+  - [x] Persistent scheduling via `bank_sync_next_run` setting.
+  - [x] Error handling and audit logging.
+- **AI Few-Shot Learning (Phase 14)**: ✅
+  - [x] Implement `GetCategorizationExamples` in repositories.
+  - [x] Update `TransactionCategorizer` to support `{{EXAMPLES}}` placeholder.
+  - [x] Add `auto_categorization_examples_per_category` setting.
+  - [x] Detailed Ollama adapter logging for observability.
+- **Transaction Review (Phase 13)**: ✅
+  - [x] Database migration `007` for `reviewed` column.
+  - [x] Backend repository & service support for review status.
+  - [x] UI implementation: pulsing dots, "Review All" button, default filtering.
+  - [x] i18n alignment across EN, DE, ES, FR.
+- **In-Memory Dev Solution (Phase 12)**: ✅
+  - [x] Create in-memory repository implementations in `internal/adapter/repository/memory/`.
+  - [x] Add missing sentinel errors to `internal/domain/entity/errors.go`.
+  - [x] Update `main.go` to support `DB_TYPE` environment variable for switching between `postgres` and `memory`.
+  - [x] Refactor PostgreSQL adapters to use port interfaces instead of concrete types for cross-adapter dependencies.
+- **Configurable Bank Sync History**: ✅
+  - [x] Update `BankProvider` port interface to accept `dateFrom` and `dateTo` parameters.
+  - [x] Update `EnableBanking`, `Dynamic`, and `Mock` adapters to support the new date parameters and pass them to the respective external APIs.
+  - [x] Integrate `SettingsUseCase` into `BankService` to dynamically retrieve the `bank_sync_history_days` setting.
+  - [x] Add inline settings control for `bank_sync_history_days` directly to the `BankConnectionsPage.tsx` UI.
+
+## 3. Active Context & State
+- [x] **Transactions Metadata Integration**: Fully integrated `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and `mandate_reference`.
+  - [x] **Backend Search**: Updated PostgreSQL repository to include all new fields in the search ILIKE filter.
+  - [x] **AI Categorization**: Updated `TransactionToCategorize` and `TransactionService` to pass all new metadata to the LLM for higher accuracy.
+  - [x] **Frontend UI**: Improved `TransactionTable` to show counterparty info by default in a combined view with description.
+- [x] **Reconciliation UI**: Made the batch reconciliation "Link" button in the Suggestions tab float always at the bottom of the page (Web).
+  - [x] **Mobile Reconcile View**: Updated suggestions and manual tabs to include `counterparty_name` and `location` for better identification, matching the web app improvements.
+  - [x] **Mobile UI**: Verified detail sheets and fixed a mapping typo (`counterparty_ame` -> `counterparty_name`) in the Flutter entity.
+- [x] **Payslips Analytics Enhancements**:
+  - **Web**: Removed the cumulative "stair" graph mode and hardcoded the exclusion of leasing rates in calculations for a cleaner experience.
+  - **Mobile**: Added the "Period Summary (Filtered)" section showing total Gross, Net, Payout, and Bonuses. Aligned the mobile `SalaryTrendChart` to match the web's "Trends" and "Yearly" modes.
+- **Current Phase:** Advanced Visuals & Polishing (Mobile) ✅
+- **Last Database Migration:** `012_add_fuzzy_matching.sql` (Note: In-memory mode does not use migrations)
+- **Security & Hardening (2026-03-31):**
+  - Implemented full multi-tenant isolation across the entire database and backend application layer.
+  - Verified per-user data isolation for categories, statements, transactions, invoices, and payslips.
+  - Conducted security audit of TLS handshake error reporting and CORS configurations.
+- **Recent Significant Changes:**
+  - **Backend Performance & Architecture:** Refactored parser ports to use in-memory `[]byte` buffers, removing temporary file overhead and simplifying service logic.
+  - **Raspberry Pi 5 Compatibility:** Verified ARM64 support and documented local deployment optimizations.
+  - **Mobile Polishing:** Cleaned up analyzer warnings and deprecated UI members.
+  - **Troubleshooting Docs:** Added guidance for Docker's "missing file turns into directory" behavior.
+  - [x] **Documentation & Data Sync**: Fully updated `DATABASE_SCHEMA.md`, `README.md`, and `dummy-data.sql` to align with the latest architectural changes (multi-tenancy, transaction enrichment, CI/CD optimizations).

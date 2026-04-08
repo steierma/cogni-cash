@@ -1,0 +1,15 @@
+# For local network (IP-only) access without SSL, change the first line to: :80
+{$DOMAIN_NAME:localhost} {
+	# Compress responses
+	encode zstd gzip
+
+	# Route API requests to the Go backend
+	handle /api/* {
+		reverse_proxy backend:8080
+	}
+
+	# Route all other requests to the React frontend
+	handle {
+		reverse_proxy frontend:80
+	}
+}

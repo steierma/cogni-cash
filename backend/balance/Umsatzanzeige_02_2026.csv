@@ -1,0 +1,71 @@
+Umsatzanzeige;Datei erstellt am: 01.03.2026 08:00
+
+IBAN;DE89 3704 0044 0532 0130 00
+Kontoname;Girokonto
+Bank;ING
+Kunde;Erika Mustermann
+Zeitraum;01.02.2026 - 28.02.2026
+Saldo;-352,76;EUR
+
+Sortierung;Erstbuchungsdatum, absteigend
+Ihre Umsaetze im angegebenen Zeitraum
+
+Buchung;Wertstellungsdatum;Auftraggeber/Empfaenger;Buchungstext;Verwendungszweck;Saldo;Waehrung;Betrag;Waehrung
+27.02.2026;27.02.2026;Muster Arbeitgeber GmbH;Gehalt/Rente;LOHN GEHALT 02/2026;-352,76;EUR;4.752,01;EUR
+26.02.2026;26.02.2026;REWE SAGT DANKE;Lastschrift;KAUFUMSATZ 25.02 REWE;-5104,77;EUR;-87,45;EUR
+25.02.2026;25.02.2026;Musterstadt Verkehrsbetriebe;Lastschrift;Monatskarte Februar 2026;-5017,32;EUR;-86,00;EUR
+24.02.2026;24.02.2026;Streaming Dienst GmbH;Lastschrift;Abo Februar 2026;-4931,32;EUR;-17,99;EUR
+23.02.2026;23.02.2026;Restaurant Zur Linde;Lastschrift;KAUFUMSATZ 22.02;-4913,33;EUR;-42,00;EUR
+22.02.2026;22.02.2026;LIDL SAGT DANKE;Lastschrift;KAUFUMSATZ 21.02 LIDL;-4871,33;EUR;-63,20;EUR
+21.02.2026;21.02.2026;Stadtwerke Musterstadt GmbH;Lastschrift;Strom Februar 2026;-4808,13;EUR;-110,00;EUR
+20.02.2026;20.02.2026;Online Versand GmbH;Lastschrift;Bestellung 2026-0002;-4698,13;EUR;-34,99;EUR
+19.02.2026;19.02.2026;Apotheke am Marktplatz;Lastschrift;KAUFUMSATZ 19.02;-4663,14;EUR;-18,50;EUR
+18.02.2026;18.02.2026;Musterbank Ruecklastschrift;Lastschrift;Darl.-Leistung Tilgung;-4644,64;EUR;-167,70;EUR
+17.02.2026;17.02.2026;Musikschule Musterstadt e. V.;Lastschrift;Unterrichtsgebuehren Februar 2026;-4476,94;EUR;-69,00;EUR
+16.02.2026;16.02.2026;Krankenversicherung AG;Lastschrift;Krankenversicherung 02/2026;-4407,94;EUR;-79,86;EUR
+15.02.2026;15.02.2026;Fahrschule Muster GbR;Ueberweisung;Kursgebuehr;-4328,08;EUR;-300,00;EUR
+14.02.2026;14.02.2026;ALDI SUED;Lastschrift;KAUFUMSATZ 13.02 ALDI;-4028,08;EUR;-54,10;EUR
+13.02.2026;13.02.2026;DB Bahn GmbH;Ueberweisung;Ticket 13.02.2026;-3973,98;EUR;-29,90;EUR
+12.02.2026;12.02.2026;Wohnungsvermietung GmbH;Dauerauftrag;Kaltmiete Februar 2026;-3944,08;EUR;-950,00;EUR
+11.02.2026;11.02.2026;Tiernahrung Fachmarkt;Lastschrift;KAUFUMSATZ 10.02;-2994,08;EUR;-67,81;EUR
+10.02.2026;10.02.2026;Drogerie Muster;Lastschrift;KAUFUMSATZ 09.02;-2926,27;EUR;-25,20;EUR
+09.02.2026;09.02.2026;Energie Versorgung GmbH;Lastschrift;Gas Februar 2026;-2901,07;EUR;-95,00;EUR
+08.02.2026;08.02.2026;Sportverein Muster e. V.;Lastschrift;Beitrag 01-06.2026;-2806,07;EUR;-111,00;EUR
+07.02.2026;07.02.2026;Kindergarten Musterstadt;Ueberweisung;Beitrag Februar 2026;-2695,07;EUR;-200,00;EUR
+06.02.2026;06.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.001 Einkauf;-2495,07;EUR;-45,00;EUR
+05.02.2026;05.02.2026;Rechtsschutz Versicherung;Lastschrift;Jahresbeitrag 2026;-2450,07;EUR;-261,93;EUR
+05.02.2026;05.02.2026;Familienkasse Bundesagentur;Gutschrift;Kindergeld 02/2026;-2188,14;EUR;259,00;EUR
+04.02.2026;04.02.2026;Buchladen Muster GmbH;Ueberweisung;Rechnung 2026-123;-2447,14;EUR;-53,50;EUR
+04.02.2026;04.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.002 Einkauf;-2393,64;EUR;-62,91;EUR
+03.02.2026;03.02.2026;Kreditkarte Abrechnung AG;Lastschrift;Abrechnung 01/2026;-2330,73;EUR;-36,98;EUR
+03.02.2026;03.02.2026;Krankenkasse Zusatz AG;Gutschrift;Erstattung Rechnung;-2293,75;EUR;30,00;EUR
+03.02.2026;03.02.2026;Energie Solar GmbH;Lastschrift;INV01566107;-2323,75;EUR;-52,00;EUR
+02.02.2026;02.02.2026;Online Haendler GmbH;Ueberweisung;Bestellung MMRR3RV3;-2271,75;EUR;-70,84;EUR
+02.02.2026;02.02.2026;Mode Versand GmbH;Lastschrift;Ratenzahlung;-2200,91;EUR;-104,80;EUR
+02.02.2026;02.02.2026;Mobilfunk Anbieter GmbH;Lastschrift;Rechnung Januar 2026;-2096,11;EUR;-14,99;EUR
+02.02.2026;02.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.003 Einkauf;-2081,12;EUR;-65,00;EUR
+02.02.2026;02.02.2026;Energie Solar GmbH;Lastschrift;INV01575371;-2016,12;EUR;-138,97;EUR
+01.02.2026;01.02.2026;Schnellrestaurant Muster;Lastschrift;KAUFUMSATZ 01.02;-1877,15;EUR;-12,59;EUR
+01.02.2026;01.02.2026;Imbiss Musterstadt;Lastschrift;KAUFUMSATZ 01.02;-1864,56;EUR;-11,50;EUR
+01.02.2026;01.02.2026;Mobilfunk 2 GmbH;Lastschrift;SIM24 Rechnung;-1853,06;EUR;-15,06;EUR
+01.02.2026;01.02.2026;Finanzamt Musterstadt;Gutschrift;Erstattung USt;-1838,00;EUR;14,00;EUR
+01.02.2026;01.02.2026;Bausparkasse Muster AG;Lastschrift;Sparrate 02/2026;-1852,00;EUR;-50,00;EUR
+01.02.2026;01.02.2026;Telekom Muster GmbH;Lastschrift;Festnetz 02/2026;-1802,00;EUR;-74,95;EUR
+01.02.2026;01.02.2026;Biokiste Muster GmbH;Lastschrift;Rechnung 02/2026;-1727,05;EUR;-48,06;EUR
+01.02.2026;01.02.2026;Gemuese Lieferservice;Lastschrift;Rechnung Nr. 464053;-1678,99;EUR;-36,42;EUR
+01.02.2026;01.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.004 Einkauf;-1642,57;EUR;-13,95;EUR
+01.02.2026;01.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.005 Einkauf;-1628,62;EUR;-3,50;EUR
+01.02.2026;01.02.2026;Mustermann M.;Ueberweisung;FMT 01.02.2026;-1625,12;EUR;800,00;EUR
+01.02.2026;01.02.2026;Ratenzahlung Bank;Lastschrift;Ratenzahlung 01/2026;-2425,12;EUR;-78,73;EUR
+01.02.2026;01.02.2026;Ratenzahlung Bank;Lastschrift;Ratenzahlung 02/2026;-2346,39;EUR;-36,95;EUR
+01.02.2026;01.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.006 Einkauf;-2309,44;EUR;-512,50;EUR
+01.02.2026;01.02.2026;Coaching Praxis Muster;Ueberweisung;Coaching Sitzung;-1796,94;EUR;-100,00;EUR
+01.02.2026;01.02.2026;Grundschule Musterstadt;Ueberweisung;Beitrag;-1696,94;EUR;-30,00;EUR
+01.02.2026;01.02.2026;Mustermann M.;Dauerauftrag;Tierkonto;-1666,94;EUR;-115,00;EUR
+01.02.2026;01.02.2026;Supermarkt E-Center Muster;Lastschrift;KAUFUMSATZ 31.01;-1551,94;EUR;-36,30;EUR
+01.02.2026;01.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.007 Einkauf;-1515,64;EUR;-6,78;EUR
+01.02.2026;01.02.2026;Musik Streaming GmbH;Lastschrift;Abo 02/2026;-1508,86;EUR;-13,00;EUR
+01.02.2026;01.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.008 Einkauf;-1495,86;EUR;-54,00;EUR
+01.02.2026;01.02.2026;Rundfunkanstalt Beitragsservice;Lastschrift;Rundfunkbeitrag 01-12.2026;-1441,86;EUR;-220,32;EUR
+01.02.2026;01.02.2026;PayPal Europe S.a.r.l.;Lastschrift;PP.MUSTER.009 Einkauf;-1221,54;EUR;-53,57;EUR
+01.02.2026;01.02.2026;Mustermann E.;Ueberweisung;Privatdarlehen Rueckzahlung;-1167,97;EUR;1.300,00;EUR

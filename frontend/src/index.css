@@ -1,0 +1,42 @@
+@import "tailwindcss";
+@custom-variant dark (&:is(.dark *));
+
+@layer base {
+    :root.layout-compact {
+        --compact-padding-x: 0.5rem;
+        --compact-padding-y: 0.25rem;
+        --compact-font-size: 0.75rem;
+    }
+}
+
+.layout-compact .compact-px {
+    padding-left: var(--compact-padding-x, 1rem);
+    padding-right: var(--compact-padding-x, 1rem);
+}
+
+.layout-compact .compact-py {
+    padding-top: var(--compact-padding-y, 0.75rem);
+    padding-bottom: var(--compact-padding-y, 0.75rem);
+}
+
+.layout-compact .compact-text {
+    font-size: var(--compact-font-size, 0.875rem);
+}
+
+.layout-compact td, .layout-compact th {
+    padding-top: 0.375rem !important;
+    padding-bottom: 0.375rem !important;
+    padding-left: 0.5rem !important;
+    padding-right: 0.5rem !important;
+    font-size: 0.75rem !important;
+}
+
+.layout-compact .align-top {
+    padding-top: 0.375rem !important;
+}
+
+.layout-compact select {
+    padding-top: 0.125rem !important;
+    padding-bottom: 0.125rem !important;
+    font-size: 0.7rem !important;
+}

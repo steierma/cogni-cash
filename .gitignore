@@ -1,0 +1,50 @@
+# ── Go ────────────────────────────────────────────────────────────────────────
+backend/bin/
+backend/*.exe
+backend/*.test
+backend/dev
+backend/main
+backend/migrate
+backend/resetpw
+backend/healthcheck
+
+# ── Node / Vite ───────────────────────────────────────────────────────────────
+frontend/node_modules/
+frontend/dist/
+
+# ── Environment secrets ───────────────────────────────────────────────────────
+.env
+backend/.env
+*.env
+/frontend/.env.development
+/frontend/.env.prod-local
+
+# ── Deploy artifacts ──────────────────────────────────────────────────────────
+*.tar
+/tmp/fm-deploy/
+
+# ── SSH deploy keys ───────────────────────────────────────────────────────────
+**/.ssh/deploy_key
+**/.ssh/deploy_key.pub
+
+# ── OS / IDE ──────────────────────────────────────────────────────────────────
+.DS_Store
+.idea/
+*.swp
+
+/backend/balance/history/*
+/backend/payslips/history/*
+**/*Monatsabrechnung*.pdf
+**/*Entgeltnachweis*.pdf
+/backend/internal/adapter/parser/payslip/cariad/parser_test.go
+/backend/internal/adapter/parser/bank_statement/vw/testdata/test-statement.pdf
+/backend/internal/adapter/parser/bank_statement/vw/parser_test.go
+/backend/internal/adapter/parser/payslip/audi/parser_test.go
+/frontend/src/i18n/locales/*/translation_*.json
+/docker-compose.override.yml
+/backups/*
+/*.pem
+/pentest/*
+/mobile/run_wireless.sh
+/mobile/tmp/*
+/tmp/*

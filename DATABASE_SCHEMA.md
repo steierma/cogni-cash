@@ -23,6 +23,11 @@
     - [bank_connections](#bank_connections)
     - [bank_accounts](#bank_accounts)
     - [password_reset_tokens](#password_reset_tokens)
+    - [refresh_tokens](#refresh_tokens)
+    - [planned_transactions](#planned_transactions)
+    - [excluded_forecasts](#excluded_forecasts)
+    - [pattern_exclusions](#pattern_exclusions)
+    - [bridge_access_tokens](#bridge_access_tokens)
 3. [Indexes & Constraints](#indexes--constraints)
 4. [Deduplication via Content Hash](#deduplication-via-content-hash)
 5. [Reconciliation](#reconciliation)
@@ -44,8 +49,10 @@
 └────────────┬────────────┘          │ statement_no                     │
              │                       │ old_balance                      │
              │                       │ new_balance                      │
+             │                       │ currency                         │
              │                       │ source_file                      │
-             │                       │ content_hash (UQ)                │
+             │                       │ original_file                    │
+             │                       │ content_hash (UQ w/ user_id)     │
              │                       │ statement_type                   │
              │                       │ bank_account_id (FK)             │
              │                       │ imported_at                      │
@@ -71,11 +78,13 @@
              │                       │ transaction_type                 │
              │                       │ reference                        │
              │                       │ category_id (FK)                 │
-             │                       │ content_hash (UQ)                │
+             │                       │ content_hash (UQ w/ user_id)     │
              │                       │ is_reconciled                    │
              │                       │ reconciliation_id (FK)           │
              │                       │ reviewed                         │
              │                       │ statement_type                   │
+             │                       │ skip_forecasting                 │
+             │                       │ is_payslip_verified              │
              │                       └─────────────────┬────────────────┘
              │                                         │
              │ (1:N)                 ┌─────────────────▼────────────────┐
@@ -83,8 +92,8 @@
              ├───────────────────────┤──────────────────────────────────┤
              │                       │ id (PK)                          │
              │                       │ user_id (FK)                     │
-             │                       │ settlement_transaction_hash (FK)  │
-             │                       │ target_transaction_hash (FK)      │
+             │                       │ settlement_transaction_hash (FK) │
+             │                       │ target_transaction_hash (FK)     │
              │                       │ amount                           │
              │                       │ reconciled_at                    │
              │                       └──────────────────────────────────┘
@@ -100,7 +109,7 @@
              │                       │ currency                         │
              │                       │ invoice_date                     │
              │                       │ description                      │
-             │                       │ content_hash (UQ)                │
+             │                       │ content_hash (UQ w/ user_id)     │
              │                       │ original_file_name               │
              │                       │ original_file_content            │
              │                       │ created_at                       │
@@ -113,7 +122,7 @@
                                      │ user_id (FK)                     │
                                      │ original_file_name               │
                                      │ original_file_content            │
-                                     │ content_hash (UQ)                │
+                                     │ content_hash (UQ w/ user_id)     │
                                      │ period_month_num                 │
                                      │ period_year                      │
                                      │ employer_name                    │
@@ -160,6 +169,17 @@
              │                       └──────────────────────────────────┘
              │
              │ (1:N)                 ┌──────────────────────────────────┐
+             │                       │      bridge_access_tokens        │
+             ├───────────────────────┤──────────────────────────────────┤
+             │                       │ id (PK)                          │
+             │                       │ user_id (FK)                     │
+             │                       │ name                             │
+             │                       │ token_hash (UQ)                  │
+             │                       │ last_used_at                     │
+             │                       │ created_at                       │
+             │                       └──────────────────────────────────┘
+             │
+             │ (1:N)                 ┌──────────────────────────────────┐
              │                       │         bank_connections         │
              └───────────────────────┤──────────────────────────────────┘
                                      │ id (PK)                          │
@@ -195,12 +215,13 @@
 ## Tables
 
 ### `schema_migrations`
-Internal table managed by the lightweight Go migration script (`cmd/migrate/main.go`). Tracks applied SQL files.
+Internal table managed by the lightweight Go migration script (`cmd/migrate/main.go`). Tracks applied SQL files by filename stem and content hash.
 
 | Column | Type | Constraints | Description |
 |---|---|---|---|
-| `version` | `VARCHAR(255)` | `PK` | The filename (e.g. `001_initial_schema.sql`) |
-| `applied_at` | `TIMESTAMPTZ` | `DEFAULT CURRENT_TIMESTAMP` | When the migration was applied |
+| `version` | `TEXT` | `PK` | Filename stem (e.g. `001_initial_schema`) |
+| `applied_at` | `TIMESTAMPTZ` | `NOT NULL DEFAULT NOW()` | When the migration was last applied |
+| `content_hash` | `TEXT` | `NOT NULL DEFAULT ''` | SHA-256 of the SQL file — triggers re-run if changed |
 
 ### `users`
 Manages system access, authentication (JWT), and role-based permissions (RBAC).
@@ -224,8 +245,10 @@ Stores classification tags used across the application. Per-user namespace.
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
 | `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `name` | `TEXT` | `NOT NULL` | The category name (e.g., 'Groceries') |
-| `color` | `TEXT` | `NOT NULL`, `DEFAULT '#6366f1'` | Hex color code for UI badges |
+| `color` | `TEXT` | `NOT NULL`, `DEFAULT '#6366f1'` | Hex color code for UI badges. Constraint: `~* '^#[a-fA-F0-9]{6}$'` |
+| `is_variable_spending` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | If true, forecast uses monthly burn rate instead of discrete events |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+| `deleted_at` | `TIMESTAMPTZ` | `NULL` | Soft-delete timestamp |
 
 **Constraints:** `UNIQUE (name, user_id)`
 
@@ -236,16 +259,19 @@ Represents imported bank statement files (PDF, CSV, XLS).
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
 | `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `bank_account_id`| `UUID` | `FK (bank_accounts.id)`, `ON DELETE SET NULL` | Parent bank account (API connection) |
 | `account_holder`| `TEXT` | `NOT NULL` | Name on the account |
 | `iban` | `TEXT` | `NOT NULL` | Standardized account number |
-| `statement_date`| `DATE` | `NOT NULL` | Closing date of the statement |
+| `statement_date`| `DATE` | | Closing date of the statement |
 | `statement_no` | `INT` | `NOT NULL` | Sequential statement number |
 | `old_balance` | `NUMERIC(15,2)`| `NOT NULL` | Opening balance for the period |
 | `new_balance` | `NUMERIC(15,2)`| `NOT NULL` | Closing balance for the period |
-| `content_hash` | `VARCHAR(64)` | `NOT NULL`, `UNIQUE` | SHA-256 hash for deduplication |
-| `statement_type`| `VARCHAR(20)` | `NOT NULL`, `DEFAULT 'giro'` | 'giro', 'credit_card', or 'extra_account' |
-| `bank_account_id`| `UUID` | `FK (bank_accounts.id)`, `ON DELETE SET NULL` | Parent bank account (API connection) |
+| `currency` | `VARCHAR(3)` | `NOT NULL`, `DEFAULT 'EUR'` | 3-letter currency code (ISO 4217) |
+| `source_file` | `TEXT` | `NOT NULL` | Original filename |
 | `imported_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+| `content_hash` | `TEXT` | `NOT NULL`, `UNIQUE w/ user_id` | SHA-256 hash for deduplication |
+| `original_file`| `BYTEA` | | Raw binary payload of the imported file |
+| `statement_type`| `TEXT` | `NOT NULL`, `DEFAULT 'giro'` | 'giro', 'credit_card', or 'extra_account' |
 
 ### `transactions`
 Contains both file-imported and API-synced financial transactions.
@@ -259,17 +285,23 @@ Contains both file-imported and API-synced financial transactions.
 | `booking_date` | `DATE` | `NOT NULL` | Date transaction was booked |
 | `valuta_date` | `DATE` | `NOT NULL` | Value date |
 | `description` | `TEXT` | `NOT NULL` | Original reference/purpose string |
-| `location` | `TEXT` | | Optional extracted city, region, or country |
 | `amount` | `NUMERIC(15,2)`| `NOT NULL` | Positive (income) or negative (expense) |
-| `currency` | `TEXT` | `NOT NULL`, `DEFAULT 'EUR'` | Currency code |
+| `currency` | `VARCHAR(3)` | `NOT NULL`, `DEFAULT 'EUR'` | 3-letter currency code (ISO 4217) |
 | `transaction_type`| `TEXT` | `NOT NULL` | 'credit' (in) or 'debit' (out) |
-| `reference` | `TEXT` | | Optional reference ID from bank |
+| `reference` | `TEXT` | `NOT NULL`, `DEFAULT ''` | Optional reference ID from bank |
 | `category_id` | `UUID` | `FK (categories.id)`, `ON DELETE SET NULL` | Assigned category |
-| `content_hash` | `VARCHAR(64)` | `NOT NULL`, `UNIQUE` | SHA-256 hash for deduplication |
+| `content_hash` | `TEXT` | `NOT NULL`, `UNIQUE w/ user_id` | SHA-256 hash for deduplication |
 | `is_reconciled` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | True if part of an internal transfer |
 | `reconciliation_id` | `UUID` | `FK (reconciliations.id)`, `ON DELETE SET NULL` | Linked reconciliation record |
-| `reviewed` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | True if user has acknowledged the transaction |
 | `statement_type`| `TEXT` | | 'giro', 'credit_card', or 'extra_account' |
+| `location` | `TEXT` | | Optional extracted city, region, or country |
+| `reviewed` | `BOOLEAN` | `NOT NULL`, `DEFAULT false` | True if user has acknowledged the transaction |
+| `counterparty_name`| `TEXT` | | Extracted metadata |
+| `counterparty_iban`| `TEXT` | | Extracted metadata |
+| `bank_transaction_code`| `TEXT` | | Extracted metadata |
+| `mandate_reference`| `TEXT` | | Extracted metadata |
+| `skip_forecasting`| `BOOLEAN` | `NOT NULL`, `DEFAULT false` | If true, ignored by the forecast pattern detector |
+| `is_payslip_verified`| `BOOLEAN` | `NOT NULL`, `DEFAULT false` | True if verified against a payslip |
 
 ### `reconciliations`
 Links a settlement payment (from a Giro account) to a target transaction (Credit Card or Extra Account) via content hashes.
@@ -278,8 +310,8 @@ Links a settlement payment (from a Giro account) to a target transaction (Credit
 |---|---|---|---|
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
 | `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
-| `settlement_transaction_hash` | `TEXT` | `NOT NULL`, `UNIQUE` | The hash of the debit transaction |
-| `target_transaction_hash` | `TEXT` | `UNIQUE` | The hash of the credit transaction |
+| `settlement_transaction_hash` | `TEXT` | `NOT NULL`, `UNIQUE w/ user_id` | The hash of the debit transaction |
+| `target_transaction_hash` | `TEXT` | `UNIQUE w/ user_id` | The hash of the credit transaction |
 | `amount` | `NUMERIC(15,2)`| `NOT NULL` | The absolute transferred amount |
 | `reconciled_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
@@ -291,14 +323,14 @@ Stores parsed and auto-categorized invoices.
 | `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
 | `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `vendor` | `TEXT` | `NOT NULL` | Vendor or company name extracted by LLM |
-| `category_id` | `UUID` | `FK (categories.id)`, `ON DELETE SET NULL` | Assigned category |
-| `amount` | `NUMERIC(12,2)`| `NOT NULL` | Total invoice amount |
-| `currency` | `TEXT` | `NOT NULL`, `DEFAULT 'EUR'` | Currency code |
+| `amount` | `NUMERIC(15,2)`| `NOT NULL`, `DEFAULT 0` | Total invoice amount |
+| `currency` | `VARCHAR(3)` | `NOT NULL`, `DEFAULT 'EUR'` | 3-letter currency code (ISO 4217) |
 | `invoice_date` | `DATE` | | Extracted invoice date |
 | `description` | `TEXT` | `NOT NULL`, `DEFAULT ''` | Manual or extracted description |
-| `content_hash` | `TEXT` | `UNIQUE` | SHA-256 hash for deduplication |
+| `content_hash` | `TEXT` | `UNIQUE w/ user_id` | SHA-256 hash for deduplication |
 | `original_file_name` | `VARCHAR(255)` | | Filename of the imported invoice |
 | `original_file_content`| `BYTEA` | | Binary content of the invoice file |
+| `category_id` | `UUID` | `FK (categories.id)`, `ON DELETE SET NULL` | Assigned category |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
 ### `settings`
@@ -308,7 +340,7 @@ Key-value store for application configuration. Per-user settings.
 |---|---|---|---|
 | `key` | `TEXT` | `PK` (part) | The setting identifier string |
 | `user_id` | `UUID` | `PK`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
-| `value` | `TEXT" | `NOT NULL` | The configured value |
+| `value` | `TEXT` | `NOT NULL` | The configured value |
 
 **Constraints:** `PRIMARY KEY (key, user_id)`
 
@@ -321,7 +353,7 @@ Structured payroll information parsed from HR documents.
 | `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `original_file_name` | `VARCHAR(255)`| `NOT NULL` | Stored filename |
 | `original_file_content`| `BYTEA` | | Raw binary payload of the PDF/document |
-| `content_hash` | `VARCHAR(64)` | `NOT NULL`, `UNIQUE` | SHA-256 hash for deduplication |
+| `content_hash` | `VARCHAR(64)` | `NOT NULL`, `UNIQUE w/ user_id` | SHA-256 hash for deduplication |
 | `period_month_num` | `INT` | | 1-12 representing the payroll month |
 | `period_year` | `INT` | `NOT NULL` | Payroll year |
 | `employer_name` | `VARCHAR(100)`| `NOT NULL`, `DEFAULT 'Unknown'` | Extracted employer name |
@@ -355,10 +387,10 @@ Stores external bank API authorization state.
 | `user_id` | `UUID` | `NOT NULL`, `FK (users.id)` | Owning user |
 | `institution_id` | `TEXT` | `NOT NULL` | Provider's bank ID |
 | `institution_name` | `TEXT` | `NOT NULL`, `DEFAULT ''` | Readable bank name |
-| `provider` | `TEXT` | `NOT NULL`, `DEFAULT 'enablebanking'` | Aggregator name |
 | `requisition_id` | `TEXT` | `NOT NULL`, `UNIQUE` | Session ID from provider |
 | `reference_id` | `TEXT` | `NOT NULL`, `UNIQUE` | Internal tracking ID |
 | `status` | `TEXT` | `NOT NULL`, `DEFAULT 'initialized'` | initialized, linked, expired, failed |
+| `provider` | `TEXT` | `NOT NULL`, `DEFAULT 'enablebanking'` | Aggregator name |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Creation timestamp |
 | `expires_at` | `TIMESTAMPTZ` | | Consent expiration |
 
@@ -372,10 +404,10 @@ Stores individual accounts under a connection.
 | `provider_account_id` | `TEXT` | `NOT NULL`, `UNIQUE` | Account ID from provider |
 | `iban` | `TEXT` | `NOT NULL`, `DEFAULT ''` | International Account Number |
 | `name` | `TEXT` | `NOT NULL`, `DEFAULT ''` | Friendly name |
-| `currency` | `TEXT` | `NOT NULL`, `DEFAULT 'EUR'` | Currency code |
+| `currency` | `VARCHAR(3)` | `NOT NULL`, `DEFAULT 'EUR'` | 3-letter currency code (ISO 4217) |
 | `balance` | `NUMERIC(15,2)`| `NOT NULL`, `DEFAULT 0` | Cached balance |
-| `last_synced_at` | `TIMESTAMPTZ` | | Last successful data fetch |
 | `account_type` | `TEXT` | `NOT NULL`, `DEFAULT 'giro'` | 'giro', 'credit_card', or 'extra_account' |
+| `last_synced_at` | `TIMESTAMPTZ` | | Last successful data fetch |
 | `last_sync_error` | `TEXT` | | Error message from last failed sync |
 
 ### `password_reset_tokens`
@@ -387,6 +419,67 @@ Stores temporary, hashed security tokens for the "Forgot Password" flow.
 | `user_id` | `UUID` | `NOT NULL`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
 | `token_hash` | `TEXT` | `NOT NULL`, `UNIQUE` | SHA-256 hash of the random token |
 | `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Token expiration timestamp |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+
+### `refresh_tokens`
+Stores rotation tokens for JWT session renewal and revocation.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | `PK` | Unique identifier |
+| `user_id` | `UUID` | `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `token_hash` | `TEXT` | `NOT NULL` | Hashed refresh token |
+| `expires_at` | `TIMESTAMPTZ` | `NOT NULL` | Expiration date |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+| `revoked` | `BOOLEAN` | `NOT NULL`, `DEFAULT FALSE` | Revocation status |
+
+### `planned_transactions`
+Contains manual entries for expected future transactions to improve forecasting accuracy.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `NOT NULL`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `amount` | `NUMERIC(15,2)`| `NOT NULL` | Expected amount |
+| `date` | `DATE` | `NOT NULL` | Expected occurrence date |
+| `description` | `TEXT` | `NOT NULL`, `DEFAULT ''` | Reference or purpose |
+| `category_id` | `UUID` | `FK (categories.id)`, `ON DELETE SET NULL` | Assigned category |
+| `status` | `TEXT` | `NOT NULL`, `DEFAULT 'pending'` | 'pending', 'matched', or 'cancelled' |
+| `matched_transaction_id` | `UUID` | `FK (transactions.id)`, `ON DELETE SET NULL` | The actual transaction this was resolved to |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
+
+### `excluded_forecasts`
+Stores UUIDs of future projections that the user has explicitly chosen to ignore/delete from their view.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `NOT NULL`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `forecast_id` | `UUID` | `NOT NULL` | The deterministic UUID of the excluded projection |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | When the exclusion was created |
+
+### `pattern_exclusions`
+Stores rules for ignoring entire recurring patterns based on their normalized description or counterparty.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | `PK`, `DEFAULT gen_random_uuid()` | Unique identifier |
+| `user_id` | `UUID` | `NOT NULL`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `match_term` | `TEXT` | `NOT NULL` | The normalized term (e.g. first 25 chars of description) to exclude |
+| `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | When the exclusion was created |
+
+**Constraints:** `UNIQUE (user_id, match_term)`
+
+### `bridge_access_tokens`
+Stores Bridge Access Tokens (BAT) for standalone mobile sync (Hermit). These are long-lived tokens for devices that do not use standard JWT-based authentication.
+
+| Column | Type | Constraints | Description |
+|---|---|---|---|
+| `id` | `UUID` | `PK` | Unique identifier |
+| `user_id` | `UUID` | `NOT NULL`, `FK (users.id)`, `ON DELETE CASCADE` | Owning user |
+| `name` | `TEXT` | `NOT NULL` | Device name (e.g., "iPhone 15") |
+| `token_hash` | `TEXT` | `NOT NULL`, `UNIQUE` | SHA-256 hash of the token |
+| `last_used_at`| `TIMESTAMPTZ`| | Last time the token was used for sync |
 | `created_at` | `TIMESTAMPTZ` | `NOT NULL`, `DEFAULT NOW()` | Record creation timestamp |
 
 ---
@@ -410,17 +503,43 @@ To ensure data integrity and optimal query performance:
 - **Uniqueness:**
     - `users.username` and `users.email`
     - `categories(name, user_id)` composite uniqueness
-    - `content_hash` on `bank_statements`, `transactions`, `invoices`, and `payslips`
-    - `reconciliations.settlement_transaction_hash` and `reconciliations.target_transaction_hash`
+    - `content_hash` scoped to `user_id` on `bank_statements`, `transactions`, `invoices`, and `payslips`
+    - `reconciliations.settlement_transaction_hash` and `reconciliations.target_transaction_hash` scoped to `user_id`
     - `payslips(user_id, period_month_num, period_year, employer_name)` composite unique constraint.
 - **Performance Indexes:**
-    - `idx_transactions_date_amt` on `transactions(booking_date, amount)`
-    - `idx_payslips_period` on `payslips(period_year, period_month_num)`
+    - `idx_transactions_statement_id` on `transactions(bank_statement_id)`
+    - `idx_transactions_booking_date` on `transactions(booking_date)`
+    - `idx_transactions_category_id` on `transactions(category_id)`
+    - `idx_transactions_reconciliation_id` on `transactions(reconciliation_id)`
+    - `idx_reconciliations_target_transaction` on `reconciliations(target_transaction_hash)`
     - `idx_transactions_bank_account_id` on `transactions(bank_account_id)`
     - `idx_bank_statements_bank_account_id` on `bank_statements(bank_account_id)`
     - `idx_reset_tokens_hash` on `password_reset_tokens(token_hash)`
+    - `idx_reset_tokens_expires` on `password_reset_tokens(expires_at)`
+    - `idx_refresh_tokens_user_id` on `refresh_tokens(user_id)`
+    - `idx_refresh_tokens_token_hash` on `refresh_tokens(token_hash)`
+    - `idx_payslip_bonuses_payslip_id` on `payslip_bonuses(payslip_id)`
     - `idx_transactions_description_trgm` on `transactions(description)` (GIN trigram)
     - `idx_transactions_counterparty_trgm` on `transactions(counterparty_name)` (GIN trigram)
+    - `idx_planned_transactions_user_id` on `planned_transactions(user_id)`
+    - `idx_categories_user_id` on `categories(user_id)`
+    - `idx_settings_user_id` on `settings(user_id)`
+    - `idx_bank_connections_user_id` on `bank_connections(user_id)`
+    - `idx_bank_statements_user_id` on `bank_statements(user_id)`
+    - `idx_reconciliations_user_id` on `reconciliations(user_id)`
+    - `idx_transactions_user_id` on `transactions(user_id)`
+    - `idx_invoices_user_id` on `invoices(user_id)`
+    - `idx_payslips_user_id` on `payslips(user_id)`
+    - `idx_planned_transactions_date` on `planned_transactions(date)`
+    - `idx_planned_transactions_status` on `planned_transactions(status)`
+    - `idx_excluded_forecasts_user_id_forecast_id` on `excluded_forecasts(user_id, forecast_id)`
+    - `idx_pattern_exclusions_user_term` on `pattern_exclusions(user_id, match_term)`
+    - `idx_bridge_access_tokens_user_id` on `bridge_access_tokens(user_id)`
+    - `idx_bridge_access_tokens_token_hash` on `bridge_access_tokens(token_hash)` (UNIQUE)
+
+### Custom Constraints
+- **Categories**: `check_color_hex` (`color ~* '^#[a-fA-F0-9]{6}$'`)
+- **Currency**: `check_currency_len` (`length(currency) = 3`) on `bank_accounts`, `bank_statements`, `transactions`, and `invoices`.
 
 ---
 
@@ -449,17 +568,34 @@ Reconciliation prevents internal transfers from inflating analytics metrics.
 
 ## Migration History
 
-Migrations are plain SQL files in `backend/migrations/`, applied in lexicographic order.
+Migrations are plain SQL files in `backend/migrations/`, applied in **lexicographic order** by the Go migration runner (`cmd/migrate`). The runner tracks each file by filename stem and content hash in a `schema_migrations` table — only changed or new files are (re-)applied.
 
-1.  **`001_initial_schema.sql`**: Baseline schema containing all initial tables, constraints, and indices.
-2.  **`002_add_invoice_content_hash.sql`**: Adds file storage fields, `description`, and `content_hash` to the `invoices` table.
-3.  **`003_add_bank_integration.sql`**: Adds `bank_connections` and `bank_accounts` tables. Modifies `transactions` and `bank_statements` to support linking to live accounts.
-4.  **`004_add_bank_provider.sql`**: Adds `provider` column to `bank_connections` for multi-aggregator support.
-5.  **`005_add_bank_account_type.sql`**: Adds `account_type` to `bank_accounts` table and `statement_type` to `transactions`.
-6.  **`006_add_transaction_location.sql`**: Adds `location` column to `transactions` table.
-7.  **`007_add_transaction_reviewed.sql`**: Adds `reviewed` boolean column to `transactions` table for user acknowledgement.
-8.  **`008_add_password_reset_tokens.sql`**: Adds `password_reset_tokens` table for the secure forgot-password flow.
-9.  **`009_add_bank_account_sync_error.sql`**: Adds `last_sync_error` to `bank_accounts` table for transparent error reporting.
-10. **`010_add_user_tenancy.sql`**: Implements multi-tenancy by adding `user_id` to all relevant tables and updating constraints.
-11. **`011_enrich_transactions.sql`**: Adds `counterparty_name`, `counterparty_iban`, `bank_transaction_code` and mandate reference to transactions.
-12. **`012_add_fuzzy_matching.sql`**: Enables `pg_trgm` extension and adds GIN indexes for high-performance fuzzy matching of descriptions and counterparty names. Also removes redundant columns across `bank_statements`, `transactions`, `invoices`, and `payslips` to streamline the schema.
+The schema history was **squashed** at v2.0.0 (consolidating migrations 001–017). There are now two files:
+
+| File | Purpose |
+|---|---|
+| `001_initial_schema.sql` | **Full schema for fresh installs.** Creates all extensions, tables, indexes, constraints, and default seed data in one idempotent script. Use this as the authoritative reference for the complete database structure. |
+| `002_squash_catchup.sql` | **Catch-up for existing databases.** Safely applies everything from the original migrations 013–017 (variable spending flag, planned transactions, forecast exclusions, pattern exclusions, `is_payslip_verified`). Uses `IF NOT EXISTS` / `ADD COLUMN IF NOT EXISTS` guards — a no-op on fresh installs. |
+| `003_database_improvements.sql` | **Post-squash optimizations.** Adds missing multi-tenancy indexes, color/currency validation constraints, soft deletes for categories, and `refresh_tokens` for JWT revocation. |
+| `004_bridge_access_tokens.sql` | **Hermit Sync Bridge support.** Adds the `bridge_access_tokens` table for standalone mobile synchronization without JWT. |
+
+### Upgrading an Existing Installation to v2.0.0+
+
+If your database was created before the squash (i.e., it has entries like `002_add_invoice_content_hash` in `schema_migrations`), run the following **once** before deploying:
+
+```bash
+# 1. Back up first (recommended)
+make db-dump-local
+
+# 2. Rewrite the migration history and apply the catch-up
+make db-squash-upgrade
+
+# 3. Deploy / start normally
+make up
+```
+
+`make db-squash-upgrade` removes all old numbered migration entries from `schema_migrations` and runs `make db-migrate`, which stamps the real content hashes for both squashed files and applies any missing columns or tables via `002_squash_catchup.sql`.
+
+### Adding Future Migrations
+
+Add new files starting at `003_...sql`. The two squashed files (`001`, `002`) are frozen — all future schema changes go into new numbered files.

@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Eye, FileText, FileUp, Pencil, Split } from 'lucide-react';
+import { FilePreview } from '../FilePreview';
 import type { Payslip } from '../../api/types';
 import { fmtCurrency } from '../../utils/formatters';
 import { formatYearMonth } from './utils';
@@ -38,8 +39,9 @@ export function ViewPayslipModal({ payslip, onClose }: { payslip: Payslip, onClo
     );
 }
 
-export function PreviewPayslipModal({ previewUrl, payslip, onClose, onUpdate, isPending }: { 
+export function PreviewPayslipModal({ previewUrl, mimeType, payslip, onClose, onUpdate, isPending }: { 
     previewUrl: string, 
+    mimeType: string,
     payslip: Payslip,
     onClose: () => void,
     onUpdate: (id: string, data: Partial<Payslip>) => void,
@@ -66,9 +68,9 @@ export function PreviewPayslipModal({ previewUrl, payslip, onClose, onUpdate, is
                 </div>
                 
                 <div className="flex-1 flex overflow-hidden">
-                    {/* Left side: PDF Preview */}
+                    {/* Left side: Document Preview */}
                     <div className="flex-1 bg-gray-200 dark:bg-gray-950 p-2 sm:p-4">
-                        <iframe src={`${previewUrl}#toolbar=0`} className="w-full h-full rounded-xl border border-gray-300 dark:border-gray-800 shadow-inner bg-white" title="PDF Preview" />
+                        <FilePreview url={previewUrl} mimeType={mimeType} title={t('payslips.modals.previewTitle')} />
                     </div>
 
                     {/* Right side: Values form */}
@@ -120,7 +122,7 @@ export function ImportPayslipModal({ onImport, onClose, isPending, useAI }: {
                 
                 <div className="p-4 border-b border-gray-100 dark:border-gray-800">
                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('payslips.modals.selectFile')}</label>
-                    <input type="file" accept=".pdf" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-800 dark:file:text-gray-300" required />
+                    <input type="file" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif" onChange={(e) => setFile(e.target.files?.[0] || null)} className="w-full text-sm text-gray-500 file:mr-4 file:py-2 file:px-4 file:rounded-full file:border-0 file:text-sm file:font-semibold file:bg-indigo-50 file:text-indigo-700 hover:file:bg-indigo-100 dark:file:bg-gray-800 dark:file:text-gray-300" required />
                     <div className="mt-2 flex items-center gap-2">
                         <div className={`w-2 h-2 rounded-full ${useAI ? 'bg-amber-500 animate-pulse' : 'bg-blue-500'}`} />
                         <span className="text-xs text-gray-500 dark:text-gray-400">

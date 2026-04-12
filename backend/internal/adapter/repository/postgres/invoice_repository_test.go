@@ -156,7 +156,7 @@ func TestInvoiceRepository(t *testing.T) {
 
 	t.Run("GetOriginalFile_ReturnsFileData", func(t *testing.T) {
 		invID := uuid.New()
-		fileBytes := []byte("fake pdf bytes for test")
+		fileBytes := []byte("%PDF-fake pdf bytes for test")
 		hash := "filehash-" + uuid.New().String()
 		_ = repo.Save(ctx, entity.Invoice{
 			ID:                  invID,
@@ -210,7 +210,7 @@ func TestInvoiceRepository(t *testing.T) {
 				Currency: "EUR",
 			})
 		}
-		all, err := repo.FindAll(ctx, userID)
+		all, err := repo.FindAll(ctx, entity.InvoiceFilter{UserID: userID})
 		if err != nil {
 			t.Fatalf("FindAll: %v", err)
 		}

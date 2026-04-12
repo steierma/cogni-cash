@@ -23,16 +23,18 @@ var ErrInvalidCredentials = entity.ErrInvalidCredentials
 type AuthService struct {
 	repo            port.UserRepository
 	resetRepo       port.PasswordResetRepository
+	authRepo        port.AuthRepository
 	notificationSvc port.NotificationUseCase
 	settingsRepo    port.SettingsRepository
 	jwtSecret       []byte
 	logger          *slog.Logger
 }
 
-func NewAuthService(repo port.UserRepository, resetRepo port.PasswordResetRepository, notificationSvc port.NotificationUseCase, settingsRepo port.SettingsRepository, secret string, logger *slog.Logger) *AuthService {
+func NewAuthService(repo port.UserRepository, resetRepo port.PasswordResetRepository, authRepo port.AuthRepository, notificationSvc port.NotificationUseCase, settingsRepo port.SettingsRepository, secret string, logger *slog.Logger) *AuthService {
 	return &AuthService{
 		repo:            repo,
 		resetRepo:       resetRepo,
+		authRepo:        authRepo,
 		notificationSvc: notificationSvc,
 		settingsRepo:    settingsRepo,
 		jwtSecret:       []byte(secret),
@@ -44,23 +46,24 @@ func (s *AuthService) GetRepo_ForTest() any {
 	return s.repo
 }
 
-// Login verifies credentials and returns a signed JWT.
-func (s *AuthService) Login(ctx context.Context, username, password string) (string, error) {
+// Login verifies credentials and returns an AuthResponse (JWT + Refresh Token).
+func (s *AuthService) Login(ctx context.Context, username, password string) (entity.AuthResponse, error) {
 	if s.repo == nil {
-		return "", errors.New("user repository not available")
+		return entity.AuthResponse{}, errors.New("user repository not available")
 	}
 
 	user, err := s.repo.FindByUsername(ctx, username)
 	if err != nil {
 		s.logger.Warn("Login failed: user not found", "username", username)
-		return "", ErrInvalidCredentials
+		return entity.AuthResponse{}, ErrInvalidCredentials
 	}
 
 	if err := bcrypt.CompareHashAndPassword([]byte(user.PasswordHash), []byte(password)); err != nil {
 		s.logger.Warn("Login failed: invalid password", "username", username)
-		return "", ErrInvalidCredentials
+		return entity.AuthResponse{}, ErrInvalidCredentials
 	}
 
+	// Generate Access Token (JWT)
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
 		"sub": user.ID.String(),
 		"exp": time.Now().Add(24 * time.Hour).Unix(),
@@ -69,11 +72,85 @@ func (s *AuthService) Login(ctx context.Context, username, password string) (str
 	tokenString, err := token.SignedString(s.jwtSecret)
 	if err != nil {
 		s.logger.Error("Failed to sign JWT", "error", err)
-		return "", err
+		return entity.AuthResponse{}, err
+	}
+
+	// Generate Refresh Token
+	_, plainRT, err := s.generateRefreshToken(ctx, user.ID)
+	if err != nil {
+		s.logger.Error("Failed to generate refresh token", "error", err)
+		return entity.AuthResponse{}, err
 	}
 
 	s.logger.Info("User logged in successfully", "username", username, "user_id", user.ID)
-	return tokenString, nil
+	return entity.AuthResponse{
+		Token:        tokenString,
+		RefreshToken: plainRT,
+	}, nil
+}
+
+func (s *AuthService) Refresh(ctx context.Context, plainRT string) (entity.AuthResponse, error) {
+	hash := s.hashToken(plainRT)
+	rt, err := s.authRepo.FindRefreshToken(ctx, hash)
+	if err != nil {
+		return entity.AuthResponse{}, errors.New("invalid refresh token")
+	}
+
+	if rt.Revoked || time.Now().After(rt.ExpiresAt) {
+		return entity.AuthResponse{}, errors.New("refresh token expired or revoked")
+	}
+
+	// Token is valid. Issue new JWT.
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
+		"sub": rt.UserID.String(),
+		"exp": time.Now().Add(24 * time.Hour).Unix(),
+	})
+
+	tokenString, err := token.SignedString(s.jwtSecret)
+	if err != nil {
+		return entity.AuthResponse{}, fmt.Errorf("failed to sign JWT during refresh: %w", err)
+	}
+
+	s.logger.Info("JWT refreshed", "user_id", rt.UserID)
+	return entity.AuthResponse{
+		Token:        tokenString,
+		RefreshToken: plainRT, // Return the same refresh token or issue a new one?
+		// For simplicity, we keep the same refresh token.
+	}, nil
+}
+
+func (s *AuthService) Logout(ctx context.Context, plainRT string) error {
+	hash := s.hashToken(plainRT)
+	rt, err := s.authRepo.FindRefreshToken(ctx, hash)
+	if err != nil {
+		return nil // Already gone or invalid
+	}
+
+	return s.authRepo.RevokeRefreshToken(ctx, rt.ID)
+}
+
+func (s *AuthService) generateRefreshToken(ctx context.Context, userID uuid.UUID) (entity.RefreshToken, string, error) {
+	tokenBytes := make([]byte, 32)
+	if _, err := cryptoRandRead(tokenBytes); err != nil {
+		return entity.RefreshToken{}, "", err
+	}
+	plainRT := fmt.Sprintf("%x", tokenBytes)
+	hash := s.hashToken(plainRT)
+
+	rt := entity.RefreshToken{
+		ID:        uuid.New(),
+		UserID:    userID,
+		TokenHash: hash,
+		ExpiresAt: time.Now().Add(30 * 24 * time.Hour), // 30 days
+		CreatedAt: time.Now(),
+		Revoked:   false,
+	}
+
+	if err := s.authRepo.SaveRefreshToken(ctx, rt); err != nil {
+		return entity.RefreshToken{}, "", err
+	}
+
+	return rt, plainRT, nil
 }
 
 // ValidateToken parses and validates a JWT, returning the user ID (subject).
@@ -133,6 +210,9 @@ func (s *AuthService) ChangePassword(ctx context.Context, userIDStr string, oldP
 	if err := s.repo.UpdatePassword(ctx, userID, string(newHash)); err != nil {
 		return errors.New("failed to update password")
 	}
+
+	// 5. Revoke all refresh tokens for this user
+	_ = s.authRepo.RevokeAllRefreshTokens(ctx, userID)
 
 	s.logger.Info("Password updated successfully", "userID", userIDStr)
 	return nil
@@ -301,6 +381,9 @@ func (s *AuthService) ConfirmPasswordReset(ctx context.Context, token string, ne
 	if err := s.repo.UpdatePassword(ctx, t.UserID, string(newHash)); err != nil {
 		return fmt.Errorf("failed to update user password: %w", err)
 	}
+
+	// Revoke all refresh tokens for this user
+	_ = s.authRepo.RevokeAllRefreshTokens(ctx, t.UserID)
 
 	// Delete the used token
 	_ = s.resetRepo.Delete(ctx, t.ID)

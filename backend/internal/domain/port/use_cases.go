@@ -3,6 +3,7 @@ package port
 import (
 	"cogni-cash/internal/domain/entity"
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -15,7 +16,9 @@ import (
 
 // AuthUseCase covers authentication and credential management.
 type AuthUseCase interface {
-	Login(ctx context.Context, username, password string) (string, error)
+	Login(ctx context.Context, username, password string) (entity.AuthResponse, error)
+	Refresh(ctx context.Context, refreshToken string) (entity.AuthResponse, error)
+	Logout(ctx context.Context, refreshToken string) error
 	ValidateToken(tokenString string) (string, error)
 	ChangePassword(ctx context.Context, userIDStr string, oldPassword, newPassword string) error
 	EnsureAdminUser(ctx context.Context, username, plainPassword string) error
@@ -40,7 +43,7 @@ type UserUseCase interface {
 type InvoiceUseCase interface {
 	ImportFromFile(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, categoryID *uuid.UUID) (entity.Invoice, error)
 	CategorizeDocument(ctx context.Context, userID uuid.UUID, rawText string) (entity.Invoice, error)
-	GetAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error)
+	GetAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error)
 	GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error)
 	Update(ctx context.Context, invoice entity.Invoice) (entity.Invoice, error)
 	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
@@ -59,6 +62,7 @@ type TransactionUseCase interface {
 	GetTransactionAnalytics(ctx context.Context, filter entity.TransactionFilter) (entity.TransactionAnalytics, error)
 	UpdateCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
 	MarkAsReviewed(ctx context.Context, hash string, userID uuid.UUID) error
+	ToggleSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error
 
 	StartAutoCategorizeAsync(ctx context.Context, userID uuid.UUID, batchSize int) error
 	GetJobStatus() JobState
@@ -104,9 +108,30 @@ type BankUseCase interface {
 	UpdateAccountType(ctx context.Context, accountID uuid.UUID, accType entity.StatementType, userID uuid.UUID) error
 }
 
+// ForecastingUseCase covers transaction forecasting and cash flow prediction.
+type ForecastingUseCase interface {
+	GetCashFlowForecast(ctx context.Context, userID uuid.UUID, fromDate, toDate time.Time) (entity.CashFlowForecast, error)
+	ExcludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error
+	IncludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error
+
+	ExcludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error
+	IncludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error
+	ListPatternExclusions(ctx context.Context, userID uuid.UUID) ([]entity.PatternExclusion, error)
+}
+
 // NotificationUseCase covers email and system notifications.
 type NotificationUseCase interface {
 	SendWelcomeEmail(ctx context.Context, user entity.User) error
 	SendPasswordResetEmail(ctx context.Context, user entity.User, resetURL string) error
 	SendTestEmail(ctx context.Context, to string, userID uuid.UUID) error
 }
+
+// PlannedTransactionUseCase covers the management of user-defined manual transactions.
+type PlannedTransactionUseCase interface {
+	Create(ctx context.Context, pt *entity.PlannedTransaction) error
+	Update(ctx context.Context, pt *entity.PlannedTransaction) error
+	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
+	FindByUserID(ctx context.Context, userID uuid.UUID) ([]entity.PlannedTransaction, error)
+	MatchTransactions(ctx context.Context, userID uuid.UUID, txns []entity.Transaction) error
+}
+

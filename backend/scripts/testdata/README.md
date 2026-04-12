@@ -8,7 +8,7 @@ personal data is present.
 
 | File | Generator | Description |
 |---|---|---|
-| `balance/Girokonto_5437817550_Kontoauszug_20260301.pdf` | `gen_ing_pdf.go` | ING Girokonto PDF — Feb 2026, 8 transactions |
+| `balance/Girokonto_1234567890_Kontoauszug_20260301.pdf` | `gen_ing_pdf.go` | ING Girokonto PDF — Feb 2026, 8 transactions |
 | `balance/Umsatzanzeige_02_2026.csv` | *(legacy — kept for ING CSV parser tests)* | ING Girokonto CSV — Feb 2026, 58 transactions |
 | `balance/Umsatzanzeige_03_2026.csv` | `gen_csv.go` | ING Girokonto CSV — **Mar 2026, 40 transactions** — includes the Amazon Visa settlement debit |
 | `balance/Amazon_Visa_25_11_2025_bis_13_03_2026.xls` | `gen_amazon_visa.py` | Amazon Visa XLS — Nov 2025 – Mar 2026, **30 transactions summing to exactly 2 500,00 EUR** |

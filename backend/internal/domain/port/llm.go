@@ -7,7 +7,20 @@ import (
 	"github.com/google/uuid"
 )
 
-// CategorizationRequest is the input to the LLM categorization call.
+// --- Domain-Specific AI Parsers ---
+
+// BankStatementAIParser handles AI extraction exclusively for Bank Statements.
+type BankStatementAIParser interface {
+	ParseBankStatement(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.BankStatement, error)
+}
+
+// PayslipAIParser handles AI extraction exclusively for Payslips.
+type PayslipAIParser interface {
+	ParsePayslip(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.Payslip, error)
+}
+
+// --- Invoice & Transaction Interfaces ---
+
 type CategorizationRequest struct {
 	// RawText is the extracted text from a document.
 	RawText string
@@ -15,19 +28,19 @@ type CategorizationRequest struct {
 	Categories []string
 }
 
-// CategorizationResult is the structured output from the LLM.
-type CategorizationResult struct {
-	CategoryName string
-	VendorName   string
-	Amount       float64
-	Currency     string
-	InvoiceDate  string
-	Description  string
+type InvoiceCategorizationResult struct {
+	InvoiceName string
+	VendorName  string
+	Amount      float64
+	Currency    string
+	InvoiceDate string
+	Description string
 }
 
-// LLMClient is the output port for the AI categorization adapter.
-type LLMClient interface {
-	Categorize(ctx context.Context, userID uuid.UUID, req CategorizationRequest) (CategorizationResult, error)
+type InvoiceAICategorizer interface {
+	CategorizeInvoice(ctx context.Context, userID uuid.UUID, req CategorizationRequest) (InvoiceCategorizationResult, error)
+	// CategorizeInvoiceImage sends raw image bytes directly to the LLM.
+	CategorizeInvoiceImage(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, imageBytes []byte, categories []string) (InvoiceCategorizationResult, error)
 }
 
 // TransactionToCategorize holds the data needed to categorize a single transaction.
@@ -46,7 +59,6 @@ type CategorizedTransaction struct {
 	Category string `json:"category"`
 }
 
-// TransactionCategorizer handles batch LLM operations for transactions.
 type TransactionCategorizer interface {
-	CategorizeBatch(ctx context.Context, userID uuid.UUID, txns []TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]CategorizedTransaction, error)
+	CategorizeTransactionsBatch(ctx context.Context, userID uuid.UUID, txns []TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]CategorizedTransaction, error)
 }

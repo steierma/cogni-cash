@@ -11,7 +11,7 @@ type InvoiceRepository interface {
 	Save(ctx context.Context, invoice entity.Invoice) error
 	Update(ctx context.Context, invoice entity.Invoice) error
 	FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error)
-	FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error)
+	FindAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error)
 	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 
 	// Deduplication

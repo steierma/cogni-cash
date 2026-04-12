@@ -5,16 +5,17 @@ import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import {
     BarChart3, Database, Layers, Loader2, Search, MapPin,
-    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Columns, Check
+    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Columns, Check, Zap
 } from 'lucide-react';
 
 import {
     cancelAutoCategorize, fetchBankStatements, fetchCategories,
     fetchTransactions, getAutoCategorizeStatus, startAutoCategorize,
     updateTransactionCategory, fetchSettings, updateSettings,
-    markTransactionReviewed
+    markTransactionReviewed,
+    fetchPatternExclusions, excludePattern, includePattern
 } from '../api/client';
-import type { BankStatementSummary, Category, JobState, Transaction } from '../api/types';
+import type { BankStatementSummary, Category, JobState, Transaction, PatternExclusion } from '../api/types';
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 
 import TransactionFilters, { type FilterState } from '../components/transactions/TransactionFilters';
@@ -32,13 +33,15 @@ function formatChartMonth(yyyyMM: string, locale: string) {
 
 export default function TransactionsPage() {
     const { t, i18n } = useTranslation();
-    const [searchParams] = useSearchParams();
-    const preselectedStatement = searchParams.get('statement') ?? '';
+    const [searchParams, setSearchParams] = useSearchParams();
 
-    const initialFilters: FilterState = {
+    // Helper to get params with defaults
+    const getParam = (key: string, defaultValue: string = '') => searchParams.get(key) ?? defaultValue;
+
+    const emptyFilters: FilterState = {
         search: '',
         type: 'all',
-        statement: preselectedStatement,
+        statement: '',
         category: 'all',
         from: null,
         to: null,
@@ -46,20 +49,41 @@ export default function TransactionsPage() {
         amountMax: '',
     };
 
+    const initialFilters: FilterState = {
+        search: getParam('search'),
+        type: getParam('type', 'all') as any,
+        statement: getParam('statement'),
+        category: getParam('category', 'all'),
+        from: searchParams.get('from'),
+        to: searchParams.get('to'),
+        amountMin: getParam('amountMin'),
+        amountMax: getParam('amountMax'),
+    };
+
     const [applied, setApplied] = React.useState<FilterState>(initialFilters);
-    const [hasAppliedOnce, setHasAppliedOnce] = React.useState(false);
+    
+    // Check if any filter is set in initial state to trigger auto-fetch
+    const hasInitialFilters = Object.entries(initialFilters).some(([key, val]) => {
+        if (key === 'type' && val === 'all') return false;
+        if (key === 'category' && val === 'all') return false;
+        return !!val;
+    });
+
+    const [hasAppliedOnce, setHasAppliedOnce] = React.useState(hasInitialFilters);
 
     const [hideReconciled, setHideReconciled] = React.useState(() => {
         const hr = searchParams.get('hide_reconciled');
         if (hr !== null) return hr === 'true';
-        return preselectedStatement ? false : true;
+        // Default: hide reconciled unless a specific statement is selected
+        return initialFilters.statement ? false : true;
     });
 
     const [selectedHashes, setSelectedHashes] = React.useState<Set<string>>(new Set());
-    const [sortKey, setSortKey] = React.useState<SortKey>('booking_date');
-    const [sortDir, setSortDir] = React.useState<SortDir>('desc');
+    const [sortKey, setSortKey] = React.useState<SortKey>((getParam('sortKey', 'booking_date') as SortKey));
+    const [sortDir, setSortDir] = React.useState<SortDir>((getParam('sortDir', 'desc') as SortDir));
 
-    const [showVisuals, setShowVisuals] = React.useState(true);
+    const [showVisuals, setShowVisuals] = React.useState(getParam('visuals', 'true') === 'true');
+    const [includePredictions, setIncludePredictions] = React.useState(getParam('predictions', 'false') === 'true');
     const [topHitsCount, setTopHitsCount] = React.useState<number>(3);
     const [toastMessage, setToastMessage] = React.useState<string | null>(null);
 
@@ -77,8 +101,15 @@ export default function TransactionsPage() {
     });
 
     const { data: allTxns = [], isLoading: isLoadingTxns, isError } = useQuery<Transaction[]>({
-        queryKey: ['transactions', applied.statement, hideReconciled, applied.search],
-        queryFn: () => fetchTransactions(applied.statement || undefined, hideReconciled, undefined, undefined, applied.search),
+        queryKey: ['transactions', applied.statement, applied.category, hideReconciled, applied.search, includePredictions],
+        queryFn: () => fetchTransactions(
+            applied.statement || undefined,
+            hideReconciled,
+            applied.category !== 'all' ? applied.category : undefined,
+            undefined,
+            applied.search,
+            includePredictions
+        ),
         enabled: hasAppliedOnce,
     });
 
@@ -99,6 +130,11 @@ export default function TransactionsPage() {
         refetchInterval: (query) => query.state?.data?.is_running ? 1500 : false,
     });
 
+    const { data: patternExclusions = [] } = useQuery<PatternExclusion[]>({
+        queryKey: ['pattern-exclusions'],
+        queryFn: fetchPatternExclusions,
+    });
+
     const updateSettingsMut = useMutation({
         mutationFn: updateSettings,
         onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] })
@@ -109,6 +145,22 @@ export default function TransactionsPage() {
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['analytics'] });
+        },
+    });
+
+    const excludePatternMutation = useMutation({
+        mutationFn: (matchTerm: string) => excludePattern(matchTerm),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['pattern-exclusions'] });
+            qc.invalidateQueries({ queryKey: ['forecast'] });
+        },
+    });
+
+    const includePatternMutation = useMutation({
+        mutationFn: (matchTerm: string) => includePattern(matchTerm),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['pattern-exclusions'] });
+            qc.invalidateQueries({ queryKey: ['forecast'] });
         },
     });
 
@@ -179,6 +231,27 @@ export default function TransactionsPage() {
         return [days[0], days[days.length - 1]];
     }, [allTxns]);
 
+    // Update URL parameters when state changes
+    React.useEffect(() => {
+        const next = new URLSearchParams();
+        if (applied.search) next.set('search', applied.search);
+        if (applied.type !== 'all') next.set('type', applied.type);
+        if (applied.statement) next.set('statement', applied.statement);
+        if (applied.category !== 'all') next.set('category', applied.category);
+        if (applied.from) next.set('from', applied.from);
+        if (applied.to) next.set('to', applied.to);
+        if (applied.amountMin) next.set('amountMin', applied.amountMin);
+        if (applied.amountMax) next.set('amountMax', applied.amountMax);
+        
+        if (hideReconciled === false) next.set('hide_reconciled', 'false');
+        if (sortKey !== 'booking_date') next.set('sortKey', sortKey);
+        if (sortDir !== 'desc') next.set('sortDir', sortDir);
+        if (!showVisuals) next.set('visuals', 'false');
+        if (includePredictions) next.set('predictions', 'true');
+
+        setSearchParams(next, { replace: true });
+    }, [applied, hideReconciled, sortKey, sortDir, showVisuals, includePredictions, setSearchParams]);
+
     const handleApply = (newFilters: FilterState) => {
         setApplied(newFilters);
         setHasAppliedOnce(true);
@@ -186,7 +259,7 @@ export default function TransactionsPage() {
     };
 
     const handleClear = () => {
-        setApplied(initialFilters);
+        setApplied(emptyFilters);
         setHasAppliedOnce(false);
         setSelectedHashes(new Set());
     };
@@ -247,7 +320,7 @@ export default function TransactionsPage() {
 
     const totalCredit = filtered.filter((t) => t.amount > 0).reduce((s, t) => s + t.amount, 0);
     const totalDebit = filtered.filter((t) => t.amount < 0).reduce((s, t) => s + t.amount, 0);
-    const hasAppliedFilters = JSON.stringify(applied) !== JSON.stringify(initialFilters);
+    const hasAppliedFilters = JSON.stringify(applied) !== JSON.stringify(emptyFilters);
 
     const toggleSort = (key: SortKey) => {
         if (sortKey === key) setSortDir((d) => (d === 'asc' ? 'desc' : 'asc'));
@@ -449,6 +522,17 @@ export default function TransactionsPage() {
                             <BarChart3 size={14} /> {showVisuals ? t('transactions.hideCharts') : t('transactions.showCharts')}
                         </button>
                     </>
+                )}
+                {hasAppliedOnce && (
+                    <button
+                        onClick={() => setIncludePredictions(p => !p)}
+                        className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors ${includePredictions
+                            ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-100 dark:border-indigo-800/50 text-indigo-600 dark:text-indigo-400'
+                            : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'
+                        }`}
+                    >
+                        <Zap size={14} /> {t('forecasting.isPrediction')}
+                    </button>
                 )}
                 {hasAppliedOnce && (
                     <button
@@ -717,6 +801,7 @@ export default function TransactionsPage() {
                 <TransactionTable
                     transactions={filtered}
                     categories={categories}
+                    patternExclusions={patternExclusions}
                     selectedHashes={selectedHashes}
                     onToggleSelect={toggleSelect}
                     onToggleSelectAll={toggleSelectAll}
@@ -725,6 +810,13 @@ export default function TransactionsPage() {
                     onSort={toggleSort}
                     onCategoryChange={(hash, categoryId) => catMutation.mutate({ hash, categoryId })}
                     onMarkReviewed={(hash) => markReviewedMutation.mutate(hash)}
+                    onTogglePatternExclusion={(term, excluded) => {
+                        if (excluded) {
+                            excludePatternMutation.mutate(term);
+                        } else {
+                            includePatternMutation.mutate(term);
+                        }
+                    }}
                     visibleCols={visibleCols}
                 />
             )}
@@ -768,7 +860,7 @@ export default function TransactionsPage() {
                             >
                                 <option value="placeholder" disabled hidden>{t('transactions.choose')}</option>
                                 <option value="unset">{t('transactions.unset')}</option>
-                                {categories.map((c) => (
+                                {categories.filter(c => !c.deleted_at).map((c) => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </select>

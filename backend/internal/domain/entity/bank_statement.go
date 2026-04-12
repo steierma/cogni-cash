@@ -51,6 +51,9 @@ type Transaction struct {
 	ReconciliationID   *uuid.UUID      `json:"reconciliation_id,omitempty"`
 	Reviewed           bool            `json:"reviewed"`
 	StatementType      StatementType   `json:"statement_type"`
+	IsPrediction       bool            `json:"is_prediction"`      // <-- NEW Field
+	SkipForecasting    bool            `json:"skip_forecasting"`   // <-- NEW Field: Exclude historical pattern
+	IsPayslipVerified  bool            `json:"is_payslip_verified"` // <-- NEW Field: Verified against payslip
 }
 
 // BankStatement is the top-level entity representing one parsed Kontoauszug.
@@ -105,18 +108,21 @@ type BankStatementSummary struct {
 
 // TransactionFilter holds the query parameters to search and filter transactions server-side.
 type TransactionFilter struct {
-	UserID        uuid.UUID
-	StatementID   *uuid.UUID
-	CategoryID    *uuid.UUID // Replaces Category string
-	Type          string     // "credit", "debit", "all"
-	Search        string
-	FromDate      *time.Time
-	ToDate        *time.Time
-	MinAmount     *float64
-	MaxAmount     *float64
-	IsReconciled  *bool          // Filter for reconciliation status
-	Reviewed      *bool          // Filter for reviewed status
-	StatementType *StatementType // Added to support filtering by statement type (e.g., extra_account)
+	UserID             uuid.UUID
+	StatementID        *uuid.UUID
+	CategoryID         *uuid.UUID // Replaces Category string
+	Type               string     // "credit", "debit", "all"
+	Search             string
+	FromDate           *time.Time
+	ToDate             *time.Time
+	MinAmount          *float64
+	MaxAmount          *float64
+	IsReconciled       *bool          // Filter for reconciliation status
+	Reviewed           *bool          // Filter for reviewed status
+	StatementType      *StatementType // Added to support filtering by statement type (e.g., extra_account)
+	IncludePredictions bool           // <-- NEW Field
+	Limit              int            // Pagination limit
+	Offset             int            // Pagination offset
 }
 
 // CategorizationExample represents a historical categorization for few-shot learning.

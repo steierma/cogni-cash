@@ -127,7 +127,27 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 			txns = append(txns, tx)
 		}
 	}
-	return txns, nil
+
+	// Simple sort by booking date DESC to match Postgres behavior
+	// (Note: this is a basic stable sort for memory repo)
+	for i := 0; i < len(txns); i++ {
+		for j := i + 1; j < len(txns); j++ {
+			if txns[i].BookingDate.Before(txns[j].BookingDate) {
+				txns[i], txns[j] = txns[j], txns[i]
+			}
+		}
+	}
+
+	if filter.Offset >= len(txns) {
+		return []entity.Transaction{}, nil
+	}
+
+	end := len(txns)
+	if filter.Limit > 0 && filter.Offset+filter.Limit < end {
+		end = filter.Offset + filter.Limit
+	}
+
+	return txns[filter.Offset:end], nil
 }
 
 func (r *BankStatementRepository) SearchTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
@@ -233,6 +253,18 @@ func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context,
 	tx.IsReconciled = true
 	tx.Reviewed = true
 	r.transactions[contentHash] = tx
+	return nil
+}
+
+func (r *BankStatementRepository) UpdateTransactionSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tx, ok := r.transactions[hash]
+	if !ok || tx.UserID != userID {
+		return entity.ErrTransactionNotFound
+	}
+	tx.SkipForecasting = skip
+	r.transactions[hash] = tx
 	return nil
 }
 

@@ -337,9 +337,9 @@ func isBoilerplate(t string) bool {
 		return true
 	}
 	prefixes := []string{
-		"ING-DiBa AG", "Girokonto Nummer", "Kontoauszug ", "Theodor-Heuss",
+		"ING-DiBa AG", "Girokonto Nummer", "Kontoauszug ", "Theodor-Heuss-Allee",
 		"Steuernummer", "USt-IdNr", "Mitglied im", "34GKKA", "Eingerumte",
-		"Eingeräumte", "Alter Saldo", "Am Sportplatz", "und Mathias", "DE23 5001", "DE23500",
+		"Eingeräumte", "Alter Saldo", "DE12 3456", "DE12345", "DE12 3456", "DE12345",
 	}
 	for _, p := range prefixes {
 		if strings.HasPrefix(t, p) {

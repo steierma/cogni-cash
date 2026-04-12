@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"sort"
 	"strconv"
 	"time"
 
@@ -14,6 +15,21 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+// allowedBankStatementMIMETypes is the set of MIME types accepted by the bank
+// statement import endpoint. Image types are forwarded to the AI fallback parser
+// which uses the multimodal (Gemini) path to extract statement data.
+var allowedBankStatementMIMETypes = map[string]bool{
+	"application/pdf":          true,
+	"text/csv":                 true,
+	"application/vnd.ms-excel": true, // .xls
+	"application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": true, // .xlsx
+	"image/jpeg": true,
+	"image/jpg":  true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+}
 
 type updateTransactionCategoryRequest struct {
 	CategoryID string `json:"category_id"`
@@ -25,6 +41,10 @@ func (h *Handler) listBankStatements(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	summaries, err := h.bankStmtRepo.FindSummaries(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -49,6 +69,10 @@ func (h *Handler) getBankStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	stmt, err := h.bankStmtRepo.FindByID(r.Context(), id, userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -76,6 +100,10 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	useAI := r.FormValue("use_ai") == "true"
 
 	// Capture the statement type from the frontend form (e.g., "giro", "extra_account", "credit_card")
@@ -105,8 +133,21 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		mimeType := resolveMIME(fileHeader.Header.Get("Content-Type"), fileHeader.Filename)
+		if !allowedBankStatementMIMETypes[mimeType] {
+			results = append(results, importResult{
+				Filename: fileHeader.Filename,
+				Status:   "error",
+				Error:    fmt.Sprintf("unsupported file type %q — accepted: PDF, CSV, XLS, JPEG, PNG, GIF, WEBP", mimeType),
+			})
+			continue
+		}
+
+		// Images cannot be processed by the structured parsers — force AI path.
+		effectiveUseAI := useAI || allowedBankStatementMIMETypes[mimeType] && isImageMIME(mimeType)
+
 		// Pass the statementType down to the service layer.
-		stmt, err := h.bankStatementSvc.ImportFromFile(r.Context(), userID, fileHeader.Filename, fileBytes, useAI, statementType)
+		stmt, err := h.bankStatementSvc.ImportFromFile(r.Context(), userID, fileHeader.Filename, fileBytes, effectiveUseAI, statementType)
 
 		if err != nil {
 			if errors.Is(err, entity.ErrDuplicate) {
@@ -162,6 +203,10 @@ func (h *Handler) deleteBankStatement(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.bankStatementSvc.DeleteStatement(r.Context(), id, userID); err != nil {
 		h.Logger.Error("Failed to delete bank statement", "error", err, "statement_id", id)
 		writeError(w, http.StatusInternalServerError, "failed to delete bank statement")
@@ -185,6 +230,10 @@ func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Reque
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	stmt, err := h.bankStmtRepo.FindByID(r.Context(), id, userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "bank statement not found")
@@ -196,8 +245,14 @@ func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	contentType := "application/pdf"
-	filename := fmt.Sprintf("Statement_%s_%s.pdf", stmt.IBAN, stmt.StatementDate.Format("2006-01-02"))
+	contentType := http.DetectContentType(stmt.OriginalFile)
+	// http.DetectContentType may return "application/octet-stream" for binary files
+	// it doesn't recognise — fall back to PDF which is the historical default.
+	if contentType == "application/octet-stream" || contentType == "" {
+		contentType = "application/pdf"
+	}
+	ext := mimeToExt(contentType)
+	filename := fmt.Sprintf("Statement_%s_%s%s", stmt.IBAN, stmt.StatementDate.Format("2006-01-02"), ext)
 
 	w.Header().Set("Content-Type", contentType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=\"%s\"", filename))
@@ -238,6 +293,29 @@ func (h *Handler) listTransactions(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if filter.IncludePredictions && h.forecastingSvc != nil {
+		from := time.Now()
+		if filter.FromDate != nil && filter.FromDate.After(from) {
+			from = *filter.FromDate
+		}
+		to := from.AddDate(0, 0, 30)
+		if filter.ToDate != nil {
+			to = *filter.ToDate
+		}
+
+		forecast, err := h.forecastingSvc.GetCashFlowForecast(r.Context(), filter.UserID, from, to)
+		if err == nil {
+			for _, p := range forecast.Predictions {
+				p.IsPrediction = true
+				txns = append(txns, p.Transaction)
+			}
+			// Re-sort if we added predictions
+			sort.Slice(txns, func(i, j int) bool {
+				return txns[i].BookingDate.After(txns[j].BookingDate)
+			})
+		}
+	}
+
 	if txns == nil {
 		writeJSON(w, http.StatusOK, []entity.Transaction{})
 		return
@@ -274,6 +352,10 @@ func (h *Handler) updateTransactionCategory(w http.ResponseWriter, r *http.Reque
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.transactionSvc.UpdateCategory(r.Context(), contentHash, catIDPtr, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -295,7 +377,44 @@ func (h *Handler) markTransactionReviewed(w http.ResponseWriter, r *http.Request
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.transactionSvc.MarkAsReviewed(r.Context(), contentHash, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) toggleTransactionSkipForecasting(w http.ResponseWriter, r *http.Request) {
+	if h.transactionSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "service not available")
+		return
+	}
+
+	contentHash := chi.URLParam(r, "hash")
+	if contentHash == "" {
+		writeError(w, http.StatusBadRequest, "missing transaction hash")
+		return
+	}
+
+	var req struct {
+		Skip bool `json:"skip"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	if err := h.transactionSvc.ToggleSkipForecasting(r.Context(), contentHash, req.Skip, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
@@ -309,16 +428,15 @@ func (h *Handler) startAutoCategorize(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	batchSize := 10
 	if h.settingsSvc != nil {
-		if settings, err := h.settingsSvc.GetAll(r.Context(), h.getUserID(r.Context())); err == nil {
+		if settings, err := h.settingsSvc.GetAll(r.Context(), userID); err == nil {
 			if bsStr, ok := settings["auto_categorization_batch_size"]; ok {
 				if bs, err := strconv.Atoi(bsStr); err == nil && bs > 0 {
 					batchSize = bs
@@ -370,11 +488,7 @@ func (h *Handler) parseTransactionFilter(r *http.Request) entity.TransactionFilt
 		Search: q.Get("search"),
 	}
 
-	if userIDStr, ok := r.Context().Value(userIDKey).(string); ok {
-		if uid, err := uuid.Parse(userIDStr); err == nil {
-			f.UserID = uid
-		}
-	}
+	f.UserID = h.getUserID(r.Context())
 
 	if catID, err := uuid.Parse(q.Get("category_id")); err == nil {
 		f.CategoryID = &catID
@@ -411,10 +525,21 @@ func (h *Handler) parseTransactionFilter(r *http.Request) entity.TransactionFilt
 		f.Reviewed = &rev
 	}
 
+	if q.Get("include_predictions") == "true" {
+		f.IncludePredictions = true
+	}
+
 	// Add support for StatementType filtering
 	if st := q.Get("statement_type"); st != "" {
 		stType := entity.StatementType(st)
 		f.StatementType = &stType
+	}
+
+	if limit, err := strconv.Atoi(q.Get("limit")); err == nil {
+		f.Limit = limit
+	}
+	if offset, err := strconv.Atoi(q.Get("offset")); err == nil {
+		f.Offset = offset
 	}
 
 	return f

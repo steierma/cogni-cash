@@ -89,6 +89,20 @@ func (m *mockUserRepo) Delete(_ context.Context, id uuid.UUID) error {
 	return errors.New("user not found")
 }
 
+type mockAuthRepo struct {
+	tokens map[string]entity.RefreshToken
+}
+
+func (m *mockAuthRepo) SaveRefreshToken(_ context.Context, t entity.RefreshToken) error { return nil }
+func (m *mockAuthRepo) FindRefreshToken(_ context.Context, hash string) (entity.RefreshToken, error) {
+	return entity.RefreshToken{}, errors.New("not found")
+}
+func (m *mockAuthRepo) RevokeRefreshToken(_ context.Context, id uuid.UUID) error { return nil }
+func (m *mockAuthRepo) RevokeAllRefreshTokens(_ context.Context, userID uuid.UUID) error {
+	return nil
+}
+func (m *mockAuthRepo) CleanupExpiredRefreshTokens(_ context.Context) error { return nil }
+
 // setupTestAuth creates a real AuthService with a mock repo and returns a valid JWT token
 func setupTestAuth(t *testing.T) (*service.AuthService, string) {
 	// Use MinCost so tests run fast
@@ -104,14 +118,14 @@ func setupTestAuth(t *testing.T) (*service.AuthService, string) {
 	}
 
 	repo := &mockUserRepo{user: user}
-	authSvc := service.NewAuthService(repo, nil, nil, nil, "test-secret-key", setupLogger())
+	authSvc := service.NewAuthService(repo, nil, &mockAuthRepo{}, nil, nil, "test-secret-key", setupLogger())
 
-	token, err := authSvc.Login(context.Background(), "testadmin", "password")
+	authResp, err := authSvc.Login(context.Background(), "testadmin", "password")
 	if err != nil {
 		t.Fatalf("failed to login and get token: %v", err)
 	}
 
-	return authSvc, token
+	return authSvc, authResp.Token
 }
 
 // --- Mock Category Repository ---
@@ -129,17 +143,14 @@ func (m *mockCategoryRepo) Update(_ context.Context, cat entity.Category) (entit
 	return cat, nil
 }
 
-// FIX: Added userID parameter
 func (m *mockCategoryRepo) FindByID(_ context.Context, _ uuid.UUID, _ uuid.UUID) (entity.Category, error) {
 	return entity.Category{}, nil
 }
 
-// FIX: Added userID parameter
 func (m *mockCategoryRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Category, error) {
 	return m.categories, nil
 }
 
-// FIX: Added userID parameter
 func (m *mockCategoryRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
@@ -186,6 +197,10 @@ func (m *mockBankStmtRepo) MarkTransactionReviewed(_ context.Context, _ string, 
 	return nil
 }
 
+func (m *mockBankStmtRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string, _ bool, _ uuid.UUID) error {
+	return nil
+}
+
 func (m *mockBankStmtRepo) LinkTransactionToStatement(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
@@ -194,7 +209,6 @@ func (m *mockBankStmtRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) e
 	return nil
 }
 
-// Added missing method to satisfy port.BankStatementRepository
 func (m *mockBankStmtRepo) CreateTransactions(_ context.Context, txns []entity.Transaction) error {
 	m.txns = append(m.txns, txns...)
 	return nil
@@ -210,8 +224,9 @@ func setupTestUser(t *testing.T, username, role string) (*service.AuthService, s
 		Role:         role,
 	}
 	repo := &mockUserRepo{user: user}
-	authSvc := service.NewAuthService(repo, nil, nil, nil, "test-secret-key", setupLogger())
-	token, _ := authSvc.Login(context.Background(), username, "password")
+	authSvc := service.NewAuthService(repo, nil, &mockAuthRepo{}, nil, nil, "test-secret", setupLogger())
+	authResp, _ := authSvc.Login(context.Background(), "admin", "password")
+	token := authResp.Token
 	return authSvc, token
 }
 
@@ -226,7 +241,6 @@ func TestSettingsAccessControl(t *testing.T) {
 		// Use a local mock that implements GetAll to avoid nil dereference
 		handler := apphttp.NewHandler(authSvc, nil, nil, &realMockSettingsSvc{}, nil, setupLogger(), "memory", "localhost", dummyPinger)
 		// We need to inject the user service so adminMiddleware can fetch the user to check the role
-		// In the test, authSvc and userSvc can use the same repo/logic
 		userSvc := service.NewUserService(authSvc.GetRepo_ForTest().(port.UserRepository), setupLogger())
 		handler.WithUserService(userSvc)
 
@@ -263,7 +277,6 @@ func (m *realMockSettingsSvc) GetAll(ctx context.Context, userID uuid.UUID) (map
 
 func TestHealthCheck(t *testing.T) {
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(nil, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger)
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
@@ -286,7 +299,6 @@ func TestHealthCheck(t *testing.T) {
 func TestChangePassword(t *testing.T) {
 	authSvc, token := setupTestAuth(t)
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger)
 
 	r := chi.NewRouter()
@@ -334,7 +346,6 @@ func TestGetTransactionAnalytics(t *testing.T) {
 	txSvc := service.NewTransactionService(repo, nil, nil, nil, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
 		WithTransactionService(txSvc)
 
@@ -375,7 +386,6 @@ func TestListCategories_Empty(t *testing.T) {
 	mockRepo := &mockCategoryRepo{}
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryRepository(mockRepo)
 
 	r := chi.NewRouter()
@@ -406,7 +416,6 @@ func TestCreateCategory(t *testing.T) {
 	mockRepo := &mockCategoryRepo{}
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryRepository(mockRepo)
 
 	r := chi.NewRouter()
@@ -435,11 +444,9 @@ func TestDeleteBankStatement(t *testing.T) {
 	authSvc, token := setupTestAuth(t)
 	repo := &mockBankStmtRepo{}
 
-	// Updated signature for BankStatementService
 	svc := service.NewBankStatementService(repo, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, svc, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
 		WithBankStatementRepository(repo)
 
@@ -546,7 +553,6 @@ func TestUpdatePayslip_WithBonuses(t *testing.T) {
 	payslipSvc := service.NewPayslipService(repo, nil, nil, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
 		WithPayslipService(payslipSvc).
 		WithPayslipRepository(repo)
@@ -626,7 +632,6 @@ func TestGetPayslip_IncludesBonuses(t *testing.T) {
 	_ = repo.Save(context.Background(), &p)
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	// Added nil for bankSvc (5th argument)
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
 		WithPayslipRepository(repo).
 		WithPayslipService(repo)
@@ -712,6 +717,7 @@ func TestImportPayslipsBatch(t *testing.T) {
 
 type mockPayslipParser struct{}
 
+// Satisfies port.PayslipParser
 func (m *mockPayslipParser) Parse(_ context.Context, _ uuid.UUID, _ []byte) (entity.Payslip, error) {
 	return entity.Payslip{
 		PeriodMonthNum: 3,
@@ -721,4 +727,9 @@ func (m *mockPayslipParser) Parse(_ context.Context, _ uuid.UUID, _ []byte) (ent
 		NetPay:         800,
 		PayoutAmount:   800,
 	}, nil
+}
+
+// Satisfies port.PayslipAIParser
+func (m *mockPayslipParser) ParsePayslip(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.Payslip, error) {
+	return m.Parse(ctx, userID, fileBytes)
 }

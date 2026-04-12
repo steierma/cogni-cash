@@ -110,7 +110,6 @@ type geminiContent struct {
 	Parts []geminiPart `json:"parts"`
 }
 
-// geminiPart supports both plain text and inline binary blobs (multimodal).
 type geminiPart struct {
 	Text       string            `json:"text,omitempty"`
 	InlineData *geminiInlineData `json:"inline_data,omitempty"`
@@ -134,10 +133,11 @@ type geminiResponse struct {
 // --- Ollama Types (Legacy Support) ---
 
 type ollamaGenerateRequest struct {
-	Model  string `json:"model"`
-	Prompt string `json:"prompt"`
-	Stream bool   `json:"stream"`
-	Format string `json:"format"`
+	Model  string   `json:"model"`
+	Prompt string   `json:"prompt"`
+	Stream bool     `json:"stream"`
+	Format string   `json:"format"`
+	Images []string `json:"images,omitempty"`
 }
 
 type ollamaGenerateResponse struct {
@@ -157,16 +157,18 @@ type llmResponse struct {
 
 type Adapter struct {
 	settingsRepo port.SettingsRepository
+	extractor    port.InvoiceParser // Injected to handle internal fallback for PDFs
 	client       *http.Client
 	logger       *slog.Logger
 }
 
-func NewAdapter(settingsRepo port.SettingsRepository, logger *slog.Logger) *Adapter {
+func NewAdapter(settingsRepo port.SettingsRepository, extractor port.InvoiceParser, logger *slog.Logger) *Adapter {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Adapter{
 		settingsRepo: settingsRepo,
+		extractor:    extractor,
 		client: &http.Client{
 			Timeout: 2 * time.Minute,
 		},
@@ -196,26 +198,87 @@ func (a *Adapter) getLLMConfig(ctx context.Context, userID uuid.UUID) (baseURL, 
 	return strings.TrimRight(baseURL, "/"), token, model, nil
 }
 
-func (a *Adapter) ParseBankStatementText(ctx context.Context, userID uuid.UUID, text string) (entity.BankStatement, error) {
-	a.logger.Info("Starting AI bank statement parsing", "text_len", len(text), "user_id", userID)
+// ─── CORE PROCESSING ENGINE (The Internal Fallback Logic) ────────────────────
+
+// processFileWithAI determines the capabilities of the configured model and routes the file appropriately.
+// It acts as the fallback mechanism if a non-multimodal model is given a PDF.
+func (a *Adapter) processFileWithAI(ctx context.Context, userID uuid.UUID, baseURL, token, model, mimeType string, fileBytes []byte, promptTemplate string) (string, error) {
+	imageTypes := map[string]bool{
+		"image/jpeg": true, "image/jpg": true, "image/png": true, "image/gif": true, "image/webp": true,
+	}
+
+	isGemini := strings.Contains(baseURL, "googleapis.com")
+	isPDF := mimeType == "application/pdf"
+	isImage := imageTypes[mimeType]
+
+	// Path 1: Native Multimodal Processing
+	if isImage || (isGemini && isPDF) {
+		a.logger.Info("Routing to native multimodal endpoint")
+		systemPrompt := strings.ReplaceAll(promptTemplate, "\nTEXT:\n{{TEXT}}", "")
+		systemPrompt = strings.ReplaceAll(systemPrompt, "\nSource Text:\n{{TEXT}}", "")
+		systemPrompt = strings.ReplaceAll(systemPrompt, "{{TEXT}}", "")
+
+		if isGemini {
+			return a.doGeminiMultimodalRequest(ctx, baseURL, token, model, systemPrompt, mimeType, fileBytes)
+		}
+		return a.doOllamaRequest(ctx, baseURL, token, model, systemPrompt, []string{base64.StdEncoding.EncodeToString(fileBytes)})
+	}
+
+	// Path 2: Internal Fallback for Text and PDFs without native multimodal support
+	a.logger.Info("Routing to text-only endpoint (triggering internal extraction if needed)")
+
+	var rawText string
+	if isPDF {
+		if a.extractor == nil {
+			return "", fmt.Errorf("cannot process PDF: multimodal not supported by provider and text extractor is not configured")
+		}
+		extracted, err := a.extractor.Extract(ctx, userID, fileBytes, mimeType)
+		if err != nil || extracted == "" {
+			return "", fmt.Errorf("internal fallback text extraction failed: %w", err)
+		}
+		rawText = extracted
+	} else {
+		// Plain text files
+		rawText = string(fileBytes)
+	}
+
+	finalPrompt := strings.ReplaceAll(promptTemplate, "{{TEXT}}", rawText)
+	return a.doTextOnlyRequest(ctx, baseURL, token, model, finalPrompt)
+}
+
+func (a *Adapter) doTextOnlyRequest(ctx context.Context, baseURL, token, model, prompt string) (string, error) {
+	if strings.Contains(baseURL, "googleapis.com") {
+		return a.doAIRequest(ctx, baseURL, token, model, prompt)
+	}
+	return a.doOllamaRequest(ctx, baseURL, token, model, prompt, nil)
+}
+
+// ─── BANK STATEMENT PARSING ──────────────────────────────────────────────────
+
+func (a *Adapter) ParseBankStatement(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.BankStatement, error) {
+	a.logger.Info("AI bank statement parsing initiated", "file", fileName, "mime_type", mimeType, "user_id", userID)
+
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return entity.BankStatement{}, err
+	}
+
 	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_statement_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
 		promptTemplate = defaultStatementPromptTemplate
 	}
 
-	prompt := strings.ReplaceAll(promptTemplate, "{{TEXT}}", text)
-	a.logger.Info("Sending statement extraction prompt to LLM", "prompt_len", len(prompt))
-
-	rawResp, err := a.doRequest(ctx, userID, prompt)
+	rawResp, err := a.processFileWithAI(ctx, userID, baseURL, token, model, mimeType, fileBytes, promptTemplate)
 	if err != nil {
-		a.logger.Error("LLM request failed for statement extraction", "error", err)
 		return entity.BankStatement{}, err
 	}
 
-	a.logger.Info("Received raw response from LLM for statement extraction", "raw_response", rawResp)
+	return a.unmarshalBankStatement(rawResp)
+}
+
+func (a *Adapter) unmarshalBankStatement(rawResp string) (entity.BankStatement, error) {
 	rawResp = cleanJSONResponse(rawResp)
 
-	// Temporary struct to handle string-based dates from the LLM
 	type llmTx struct {
 		BookingDate         string  `json:"booking_date"`
 		Amount              float64 `json:"amount"`
@@ -242,7 +305,6 @@ func (a *Adapter) ParseBankStatementText(ctx context.Context, userID uuid.UUID, 
 		return entity.BankStatement{}, fmt.Errorf("llm adapter: parse json: %w", err)
 	}
 
-	// Map strings to time.Time gracefully
 	stmtDate, _ := time.Parse("2006-01-02", res.StatementDate)
 	if stmtDate.IsZero() {
 		stmtDate = time.Now()
@@ -274,12 +336,81 @@ func (a *Adapter) ParseBankStatementText(ctx context.Context, userID uuid.UUID, 
 		})
 	}
 
-	a.logger.Info("parsed bank statement", "raw", rawResp)
 	return stmt, nil
 }
 
-func (a *Adapter) Categorize(ctx context.Context, userID uuid.UUID, req port.CategorizationRequest) (port.CategorizationResult, error) {
-	a.logger.Info("Starting single categorization", "categories", req.Categories, "text_len", len(req.RawText), "user_id", userID)
+// ─── PAYSLIP PARSING ─────────────────────────────────────────────────────────
+
+func (a *Adapter) ParsePayslip(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.Payslip, error) {
+	a.logger.Info("AI payslip parsing initiated", "file", fileName, "mime_type", mimeType, "user_id", userID)
+
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return entity.Payslip{}, err
+	}
+
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_payslip_prompt", userID)
+	if strings.TrimSpace(promptTemplate) == "" {
+		promptTemplate = defaultPayslipPromptTemplate
+	}
+
+	rawResp, err := a.processFileWithAI(ctx, userID, baseURL, token, model, mimeType, fileBytes, promptTemplate)
+	if err != nil {
+		return entity.Payslip{}, err
+	}
+
+	return a.unmarshalPayslip(rawResp)
+}
+
+func (a *Adapter) unmarshalPayslip(rawResp string) (entity.Payslip, error) {
+	rawResp = cleanJSONResponse(rawResp)
+
+	var res struct {
+		PeriodMonthNum   int     `json:"period_month_num"`
+		PeriodYear       int     `json:"period_year"`
+		EmployerName     string  `json:"employer_name"`
+		TaxClass         string  `json:"tax_class"`
+		TaxID            string  `json:"tax_id"`
+		GrossPay         float64 `json:"gross_pay"`
+		NetPay           float64 `json:"net_pay"`
+		PayoutAmount     float64 `json:"payout_amount"`
+		CustomDeductions float64 `json:"custom_deductions"`
+		Bonuses          []struct {
+			Description string  `json:"description"`
+			Amount      float64 `json:"amount"`
+		} `json:"bonuses"`
+	}
+
+	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
+		a.logger.Error("failed to unmarshal AI payslip", "err", err, "raw", rawResp)
+		return entity.Payslip{}, fmt.Errorf("llm adapter: parse payslip json: %w", err)
+	}
+
+	payslip := entity.Payslip{
+		PeriodMonthNum:   res.PeriodMonthNum,
+		PeriodYear:       res.PeriodYear,
+		EmployerName:     res.EmployerName,
+		TaxClass:         res.TaxClass,
+		TaxID:            res.TaxID,
+		GrossPay:         res.GrossPay,
+		NetPay:           res.NetPay,
+		PayoutAmount:     res.PayoutAmount,
+		CustomDeductions: res.CustomDeductions,
+	}
+
+	for _, b := range res.Bonuses {
+		payslip.Bonuses = append(payslip.Bonuses, entity.Bonus{
+			Description: b.Description,
+			Amount:      b.Amount,
+		})
+	}
+
+	return payslip, nil
+}
+
+// ─── INVOICE & TRANSACTION PARSING ───────────────────────────────────────────
+
+func (a *Adapter) CategorizeInvoice(ctx context.Context, userID uuid.UUID, req port.CategorizationRequest) (port.InvoiceCategorizationResult, error) {
 	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_single_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
 		promptTemplate = defaultSinglePromptTemplate
@@ -287,34 +418,85 @@ func (a *Adapter) Categorize(ctx context.Context, userID uuid.UUID, req port.Cat
 
 	prompt := strings.ReplaceAll(promptTemplate, "{{CATEGORIES}}", strings.Join(req.Categories, ", "))
 	prompt = strings.ReplaceAll(prompt, "{{TEXT}}", req.RawText)
-	a.logger.Info("Sending single categorization prompt to LLM", "prompt", prompt)
 
-	rawResp, err := a.doRequest(ctx, userID, prompt)
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
-		a.logger.Error("LLM request failed for single categorization", "error", err)
-		return port.CategorizationResult{}, err
+		return port.InvoiceCategorizationResult{}, err
 	}
 
-	a.logger.Info("Received raw response from LLM for single categorization", "raw_response", rawResp)
+	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	if err != nil {
+		a.logger.Error("LLM request failed for single categorization", "error", err)
+		return port.InvoiceCategorizationResult{}, err
+	}
+
 	rawResp = cleanJSONResponse(rawResp)
 
 	var res llmResponse
 	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
 		a.logger.Error("failed to unmarshal single categorization", "err", err, "raw", rawResp)
-		return port.CategorizationResult{}, fmt.Errorf("llm adapter: parse json: %w", err)
+		return port.InvoiceCategorizationResult{}, fmt.Errorf("llm adapter: parse json: %w", err)
 	}
 
-	return port.CategorizationResult{
-		CategoryName: strings.TrimSpace(res.CategoryName),
-		VendorName:   strings.TrimSpace(res.VendorName),
-		Amount:       res.Amount,
-		Currency:     res.Currency,
-		InvoiceDate:  res.InvoiceDate,
-		Description:  res.Description,
+	return port.InvoiceCategorizationResult{
+		InvoiceName: strings.TrimSpace(res.CategoryName),
+		VendorName:  strings.TrimSpace(res.VendorName),
+		Amount:      res.Amount,
+		Currency:    res.Currency,
+		InvoiceDate: res.InvoiceDate,
+		Description: res.Description,
 	}, nil
 }
 
-func (a *Adapter) CategorizeBatch(ctx context.Context, userID uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
+func (a *Adapter) CategorizeInvoiceImage(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, imageBytes []byte, categories []string) (port.InvoiceCategorizationResult, error) {
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return port.InvoiceCategorizationResult{}, err
+	}
+
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_single_prompt", userID)
+	if strings.TrimSpace(promptTemplate) == "" {
+		promptTemplate = defaultSinglePromptTemplate
+	}
+
+	catStr := strings.Join(categories, ", ")
+	systemPrompt := strings.ReplaceAll(promptTemplate, "{{CATEGORIES}}", catStr)
+	systemPrompt = strings.ReplaceAll(systemPrompt, "\n\nTEXT:\n{{TEXT}}", "")
+	systemPrompt = strings.ReplaceAll(systemPrompt, "\nTEXT:\n{{TEXT}}", "")
+	systemPrompt = strings.ReplaceAll(systemPrompt, "{{TEXT}}", "")
+
+	var rawResp string
+	isGemini := strings.Contains(baseURL, "googleapis.com")
+
+	if isGemini {
+		rawResp, err = a.doGeminiMultimodalRequest(ctx, baseURL, token, model, systemPrompt, mimeType, imageBytes)
+	} else {
+		images := []string{base64.StdEncoding.EncodeToString(imageBytes)}
+		rawResp, err = a.doOllamaRequest(ctx, baseURL, token, model, systemPrompt, images)
+	}
+
+	if err != nil {
+		return port.InvoiceCategorizationResult{}, err
+	}
+
+	rawResp = cleanJSONResponse(rawResp)
+
+	var res llmResponse
+	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
+		return port.InvoiceCategorizationResult{}, fmt.Errorf("llm adapter: parse image categorization json: %w", err)
+	}
+
+	return port.InvoiceCategorizationResult{
+		InvoiceName: strings.TrimSpace(res.CategoryName),
+		VendorName:  strings.TrimSpace(res.VendorName),
+		Amount:      res.Amount,
+		Currency:    res.Currency,
+		InvoiceDate: res.InvoiceDate,
+		Description: res.Description,
+	}, nil
+}
+
+func (a *Adapter) CategorizeTransactionsBatch(ctx context.Context, userID uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
 	a.logger.Info("Starting batch categorization", "txn_count", len(txns), "categories_count", len(categories), "examples_count", len(examples), "user_id", userID)
 	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_batch_prompt", userID)
 	if strings.TrimSpace(promptTemplate) == "" {
@@ -328,15 +510,17 @@ func (a *Adapter) CategorizeBatch(ctx context.Context, userID uuid.UUID, txns []
 	prompt = strings.ReplaceAll(prompt, "{{EXAMPLES}}", string(examplesJSON))
 	prompt = strings.ReplaceAll(prompt, "{{DATA}}", string(txnsJSON))
 
-	a.logger.Info("Sending batch categorization prompt to LLM", "prompt", prompt)
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return nil, err
+	}
 
-	rawResp, err := a.doRequest(ctx, userID, prompt)
+	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
 	if err != nil {
 		a.logger.Error("LLM request failed for batch categorization", "error", err)
 		return nil, err
 	}
 
-	a.logger.Info("Received raw response from LLM for batch categorization", "raw_response", rawResp)
 	rawResp = cleanJSONResponse(rawResp)
 
 	var results []port.CategorizedTransaction
@@ -370,41 +554,61 @@ func (a *Adapter) CategorizeBatch(ctx context.Context, userID uuid.UUID, txns []
 	return results, nil
 }
 
-func (a *Adapter) doRequest(ctx context.Context, userID uuid.UUID, prompt string) (string, error) {
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
-	if err != nil {
-		return "", err
-	}
+// ─── HTTP REQUEST HELPERS ────────────────────────────────────────────────────
 
-	if strings.Contains(baseURL, "googleapis.com") {
-		return a.doAIRequest(ctx, baseURL, token, model, prompt)
-	}
-	return a.doOllamaRequest(ctx, baseURL, token, model, prompt)
-}
-
-func (a *Adapter) doAIRequest(ctx context.Context, url, token, model, prompt string) (string, error) {
+func (a *Adapter) doGeminiMultimodalRequest(ctx context.Context, url, token, model, prompt, mimeType string, fileBytes []byte) (string, error) {
 	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", url, model, token)
-	a.logger.Info("making request to gemini", "url", url, "model", model)
-
 	payload, _ := json.Marshal(geminiRequest{
-		Contents: []geminiContent{{Parts: []geminiPart{{Text: prompt}}}},
+		Contents: []geminiContent{{
+			Parts: []geminiPart{
+				{Text: prompt},
+				{InlineData: &geminiInlineData{
+					MimeType: mimeType,
+					Data:     base64.StdEncoding.EncodeToString(fileBytes),
+				}},
+			},
+		}},
 	})
-
-	a.logger.Debug("gemini request details", "endpoint", endpoint, "payload", string(payload))
 
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		a.logger.Error("gemini request failed", "error", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
-	a.logger.Info("gemini response received", "status", resp.StatusCode, "body", string(bodyBytes))
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("gemini multimodal api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
 
+	var gResp geminiResponse
+	if err := json.Unmarshal(bodyBytes, &gResp); err != nil {
+		return "", fmt.Errorf("failed to decode gemini response: %w", err)
+	}
+	if len(gResp.Candidates) > 0 && len(gResp.Candidates[0].Content.Parts) > 0 {
+		return gResp.Candidates[0].Content.Parts[0].Text, nil
+	}
+	return "", fmt.Errorf("empty response from gemini")
+}
+
+func (a *Adapter) doAIRequest(ctx context.Context, url, token, model, prompt string) (string, error) {
+	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", url, model, token)
+	payload, _ := json.Marshal(geminiRequest{
+		Contents: []geminiContent{{Parts: []geminiPart{{Text: prompt}}}},
+	})
+	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("gemini api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -415,169 +619,21 @@ func (a *Adapter) doAIRequest(ctx context.Context, url, token, model, prompt str
 	}
 
 	if len(gResp.Candidates) > 0 && len(gResp.Candidates[0].Content.Parts) > 0 {
-		resText := gResp.Candidates[0].Content.Parts[0].Text
-		a.logger.Info("successfully generated gemini response", "response", resText)
-		return resText, nil
+		return gResp.Candidates[0].Content.Parts[0].Text, nil
 	}
 	return "", fmt.Errorf("empty response from gemini")
 }
 
-func (a *Adapter) ParsePayslipText(ctx context.Context, userID uuid.UUID, text string) (entity.Payslip, error) {
-	a.logger.Info("Starting AI payslip text parsing", "text_len", len(text), "user_id", userID)
-	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_payslip_prompt", userID)
-	if strings.TrimSpace(promptTemplate) == "" {
-		promptTemplate = defaultPayslipPromptTemplate
-	}
-
-	prompt := strings.ReplaceAll(promptTemplate, "{{TEXT}}", text)
-	a.logger.Info("Sending payslip extraction prompt to LLM", "prompt_len", len(prompt))
-
-	rawResp, err := a.doRequest(ctx, userID, prompt)
-	if err != nil {
-		a.logger.Error("LLM request failed for payslip extraction", "error", err)
-		return entity.Payslip{}, err
-	}
-
-	a.logger.Info("Received raw response from LLM for payslip extraction", "raw_response", rawResp)
-	return a.unmarshalPayslip(rawResp)
-}
-
-// ParsePayslipDocument satisfies the LLMPayslipParser interface used by the AI payslip parser.
-// For AI, it sends the raw document bytes as a multimodal (inline_data) request.
-// For Ollama (text-only), it falls back to the prompt-based text approach with a placeholder.
-func (a *Adapter) ParsePayslipDocument(ctx context.Context, userID uuid.UUID, mimeType string, data []byte) (entity.Payslip, error) {
-	a.logger.Info("Starting AI payslip document parsing (multimodal)", "mime_type", mimeType, "data_len", len(data), "user_id", userID)
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
-	if err != nil {
-		return entity.Payslip{}, err
-	}
-
-	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_payslip_prompt", userID)
-	if strings.TrimSpace(promptTemplate) == "" {
-		promptTemplate = defaultPayslipPromptTemplate
-	}
-	// Strip the {{TEXT}} placeholder for multimodal requests — the document IS the input
-	systemPrompt := strings.ReplaceAll(promptTemplate, "\nSource Text:\n{{TEXT}}", "")
-
-	var rawResp string
-	if strings.Contains(baseURL, "googleapis.com") {
-		a.logger.Info("Sending multimodal payslip extraction request to AI")
-		// AI multimodal: send text prompt + inline binary document
-		endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", baseURL, model, token)
-		payload, _ := json.Marshal(geminiRequest{
-			Contents: []geminiContent{{
-				Parts: []geminiPart{
-					{Text: systemPrompt},
-					{InlineData: &geminiInlineData{
-						MimeType: mimeType,
-						Data:     base64.StdEncoding.EncodeToString(data),
-					}},
-				},
-			}},
-		})
-
-		req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
-		req.Header.Set("Content-Type", "application/json")
-
-		resp, err := a.client.Do(req)
-		if err != nil {
-			a.logger.Error("AI multimodal request failed", "error", err)
-			return entity.Payslip{}, err
-		}
-		defer resp.Body.Close()
-
-		bodyBytes, _ := io.ReadAll(resp.Body)
-		a.logger.Info("AI multimodal response received", "status", resp.StatusCode, "body", string(bodyBytes))
-
-		if resp.StatusCode != http.StatusOK {
-			return entity.Payslip{}, fmt.Errorf("gemini multimodal api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
-		}
-
-		var gResp geminiResponse
-		if err := json.Unmarshal(bodyBytes, &gResp); err != nil {
-			return entity.Payslip{}, fmt.Errorf("failed to decode gemini multimodal response: %w", err)
-		}
-		if len(gResp.Candidates) > 0 && len(gResp.Candidates[0].Content.Parts) > 0 {
-			rawResp = gResp.Candidates[0].Content.Parts[0].Text
-			a.logger.Info("Received raw response from AI for multimodal payslip extraction", "raw_response", rawResp)
-		} else {
-			return entity.Payslip{}, fmt.Errorf("empty multimodal response from gemini")
-		}
-	} else {
-		a.logger.Info("Falling back to text-only payslip extraction for Ollama")
-		// Ollama fallback: can't send binary blobs, so use the data as a UTF-8 text hint
-		rawResp, err = a.doOllamaRequest(ctx, baseURL, token, model,
-			strings.ReplaceAll(promptTemplate, "{{TEXT}}", "[Binary document — extract fields from PDF text above]"),
-		)
-		if err != nil {
-			return entity.Payslip{}, err
-		}
-		a.logger.Info("Received raw response from Ollama for payslip extraction fallback", "raw_response", rawResp)
-	}
-
-	return a.unmarshalPayslip(rawResp)
-}
-
-// unmarshalPayslip is shared by ParsePayslipText and ParsePayslipDocument.
-func (a *Adapter) unmarshalPayslip(rawResp string) (entity.Payslip, error) {
-	rawResp = cleanJSONResponse(rawResp)
-
-	var res struct {
-		PeriodMonthNum   int     `json:"period_month_num"`
-		PeriodYear       int     `json:"period_year"`
-		EmployerName     string  `json:"employer_name"` // Added EmployerName to the struct
-		TaxClass         string  `json:"tax_class"`
-		TaxID            string  `json:"tax_id"`
-		GrossPay         float64 `json:"gross_pay"`
-		NetPay           float64 `json:"net_pay"`
-		PayoutAmount     float64 `json:"payout_amount"`
-		CustomDeductions float64 `json:"custom_deductions"`
-		Bonuses          []struct {
-			Description string  `json:"description"`
-			Amount      float64 `json:"amount"`
-		} `json:"bonuses"`
-	}
-
-	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
-		a.logger.Error("failed to unmarshal AI payslip", "err", err, "raw", rawResp)
-		return entity.Payslip{}, fmt.Errorf("llm adapter: parse payslip json: %w", err)
-	}
-
-	payslip := entity.Payslip{
-		PeriodMonthNum:   res.PeriodMonthNum,
-		PeriodYear:       res.PeriodYear,
-		EmployerName:     res.EmployerName, // Mapped the extracted value
-		TaxClass:         res.TaxClass,
-		TaxID:            res.TaxID,
-		GrossPay:         res.GrossPay,
-		NetPay:           res.NetPay,
-		PayoutAmount:     res.PayoutAmount,
-		CustomDeductions: res.CustomDeductions,
-	}
-
-	for _, b := range res.Bonuses {
-		payslip.Bonuses = append(payslip.Bonuses, entity.Bonus{
-			Description: b.Description,
-			Amount:      b.Amount,
-		})
-	}
-
-	a.logger.Info("successfully parsed payslip via LLM", "month", payslip.PeriodMonthNum, "net_pay", payslip.NetPay)
-	return payslip, nil
-}
-
-func (a *Adapter) doOllamaRequest(ctx context.Context, url, token, model, prompt string) (string, error) {
-	a.logger.Info("making request to ollama", "url", url, "model", model)
+func (a *Adapter) doOllamaRequest(ctx context.Context, url, token, model, prompt string, images []string) (string, error) {
 	payload, _ := json.Marshal(ollamaGenerateRequest{
 		Model:  model,
 		Prompt: prompt,
 		Stream: false,
 		Format: "json",
+		Images: images,
 	})
 
 	fullURL := url + "/api/generate"
-	a.logger.Debug("ollama request details", "url", fullURL, "payload", string(payload))
-
 	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
@@ -586,14 +642,11 @@ func (a *Adapter) doOllamaRequest(ctx context.Context, url, token, model, prompt
 
 	resp, err := a.client.Do(req)
 	if err != nil {
-		a.logger.Error("ollama request failed", "error", err)
 		return "", err
 	}
 	defer resp.Body.Close()
 
 	bodyBytes, _ := io.ReadAll(resp.Body)
-	a.logger.Info("ollama response received", "status", resp.StatusCode, "body", string(bodyBytes))
-
 	if resp.StatusCode != http.StatusOK {
 		return "", fmt.Errorf("ollama api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
 	}
@@ -602,8 +655,6 @@ func (a *Adapter) doOllamaRequest(ctx context.Context, url, token, model, prompt
 	if err := json.Unmarshal(bodyBytes, &oResp); err != nil {
 		return "", fmt.Errorf("failed to decode ollama response: %w", err)
 	}
-
-	a.logger.Info("successfully generated ollama response", "response", oResp.Response)
 	return oResp.Response, nil
 }
 

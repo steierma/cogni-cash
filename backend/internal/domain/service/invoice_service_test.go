@@ -14,14 +14,26 @@ import (
 	"github.com/google/uuid"
 )
 
-// ── Mock LLMClient ───────────────────────────────────────────────────────────
+// ── Mock AICategorizer ───────────────────────────────────────────────────────
 
-type mockLLMClient struct {
-	result port.CategorizationResult
-	err    error
+type mockAICategorizer struct {
+	result      port.InvoiceCategorizationResult
+	imageResult port.InvoiceCategorizationResult
+	err         error
+	imageErr    error
 }
 
-func (m *mockLLMClient) Categorize(_ context.Context, _ uuid.UUID, _ port.CategorizationRequest) (port.CategorizationResult, error) {
+func (m *mockAICategorizer) CategorizeInvoice(_ context.Context, _ uuid.UUID, _ port.CategorizationRequest) (port.InvoiceCategorizationResult, error) {
+	return m.result, m.err
+}
+
+func (m *mockAICategorizer) CategorizeInvoiceImage(_ context.Context, _ uuid.UUID, _ string, _ string, _ []byte, _ []string) (port.InvoiceCategorizationResult, error) {
+	if m.imageErr != nil {
+		return port.InvoiceCategorizationResult{}, m.imageErr
+	}
+	if m.imageResult != (port.InvoiceCategorizationResult{}) {
+		return m.imageResult, nil
+	}
 	return m.result, m.err
 }
 
@@ -73,7 +85,7 @@ func (m *mockInvoiceRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID)
 	return entity.Invoice{}, entity.ErrInvoiceNotFound
 }
 
-func (m *mockInvoiceRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Invoice, error) {
+func (m *mockInvoiceRepo) FindAll(_ context.Context, _ entity.InvoiceFilter) ([]entity.Invoice, error) {
 	return m.saved, m.err
 }
 
@@ -117,8 +129,12 @@ type mockCatRepo struct {
 func (m *mockCatRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Category, error) {
 	return m.cats, nil
 }
-func (m *mockCatRepo) Save(_ context.Context, cat entity.Category) (entity.Category, error) { return cat, nil }
-func (m *mockCatRepo) Update(_ context.Context, cat entity.Category) (entity.Category, error) { return cat, nil }
+func (m *mockCatRepo) Save(_ context.Context, cat entity.Category) (entity.Category, error) {
+	return cat, nil
+}
+func (m *mockCatRepo) Update(_ context.Context, cat entity.Category) (entity.Category, error) {
+	return cat, nil
+}
 func (m *mockCatRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.Category, error) {
 	for _, c := range m.cats {
 		if c.ID == id {
@@ -139,26 +155,26 @@ var defaultCategories = []entity.Category{
 
 var dummyUserID = uuid.New()
 
-func newTestInvoiceSvc(llm port.LLMClient, repo *mockInvoiceRepo) *service.InvoiceService {
+func newTestInvoiceSvc(aiCategorizer port.InvoiceAICategorizer, repo *mockInvoiceRepo) *service.InvoiceService {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	catRepo := &mockCatRepo{cats: defaultCategories}
-	return service.NewInvoiceService(repo, catRepo, &mockInvoiceParser{text: "extracted text"}, llm, logger)
+	return service.NewInvoiceService(repo, catRepo, &mockInvoiceParser{text: "extracted text"}, aiCategorizer, logger)
 }
 
 // ── CategorizeDocument tests ─────────────────────────────────────────────────
 
 func TestCategorizeDocument_HappyPath(t *testing.T) {
-	llm := &mockLLMClient{
-		result: port.CategorizationResult{
-			CategoryName: "Software",
-			VendorName:   "Acme Corp",
-			Amount:       99.99,
-			Currency:     "EUR",
-			Description:  "Annual license",
+	aiCategorizer := &mockAICategorizer{
+		result: port.InvoiceCategorizationResult{
+			InvoiceName: "Software",
+			VendorName:  "Acme Corp",
+			Amount:      99.99,
+			Currency:    "EUR",
+			Description: "Annual license",
 		},
 	}
 	repo := &mockInvoiceRepo{}
-	svc := newTestInvoiceSvc(llm, repo)
+	svc := newTestInvoiceSvc(aiCategorizer, repo)
 
 	inv, err := svc.CategorizeDocument(context.Background(), dummyUserID, "Invoice for annual software license – €99.99")
 	if err != nil {
@@ -182,7 +198,7 @@ func TestCategorizeDocument_HappyPath(t *testing.T) {
 }
 
 func TestCategorizeDocument_EmptyRawText_ReturnsError(t *testing.T) {
-	svc := newTestInvoiceSvc(&mockLLMClient{}, &mockInvoiceRepo{})
+	svc := newTestInvoiceSvc(&mockAICategorizer{}, &mockInvoiceRepo{})
 
 	_, err := svc.CategorizeDocument(context.Background(), dummyUserID, "")
 	if !errors.Is(err, service.ErrEmptyRawText) {
@@ -192,7 +208,7 @@ func TestCategorizeDocument_EmptyRawText_ReturnsError(t *testing.T) {
 
 func TestCategorizeDocument_LLMError_PropagatesError(t *testing.T) {
 	llmErr := errors.New("llm unavailable")
-	svc := newTestInvoiceSvc(&mockLLMClient{err: llmErr}, &mockInvoiceRepo{})
+	svc := newTestInvoiceSvc(&mockAICategorizer{err: llmErr}, &mockInvoiceRepo{})
 
 	_, err := svc.CategorizeDocument(context.Background(), dummyUserID, "some invoice text")
 	if !errors.Is(err, llmErr) {
@@ -201,7 +217,7 @@ func TestCategorizeDocument_LLMError_PropagatesError(t *testing.T) {
 }
 
 func TestCategorizeDocument_UncategorizedFallback(t *testing.T) {
-	svc := newTestInvoiceSvc(&mockLLMClient{result: port.CategorizationResult{}}, &mockInvoiceRepo{})
+	svc := newTestInvoiceSvc(&mockAICategorizer{result: port.InvoiceCategorizationResult{}}, &mockInvoiceRepo{})
 
 	inv, err := svc.CategorizeDocument(context.Background(), dummyUserID, "some invoice text")
 	if err != nil {
@@ -213,12 +229,12 @@ func TestCategorizeDocument_UncategorizedFallback(t *testing.T) {
 }
 
 func TestCategorizeDocument_RepositoryError_PropagatesError(t *testing.T) {
-	llm := &mockLLMClient{
-		result: port.CategorizationResult{CategoryName: "Software", VendorName: "v", Amount: 1, Currency: "EUR"},
+	aiCategorizer := &mockAICategorizer{
+		result: port.InvoiceCategorizationResult{InvoiceName: "Software", VendorName: "v", Amount: 1, Currency: "EUR"},
 	}
 	repoErr := errors.New("db write error")
 	repo := &mockInvoiceRepo{err: repoErr}
-	svc := newTestInvoiceSvc(llm, repo)
+	svc := newTestInvoiceSvc(aiCategorizer, repo)
 
 	_, err := svc.CategorizeDocument(context.Background(), dummyUserID, "some invoice text")
 	if !errors.Is(err, repoErr) {
@@ -229,17 +245,17 @@ func TestCategorizeDocument_RepositoryError_PropagatesError(t *testing.T) {
 // ── ImportFromFile tests ─────────────────────────────────────────────────────
 
 func TestImportFromFile_HappyPath(t *testing.T) {
-	llm := &mockLLMClient{
-		result: port.CategorizationResult{
-			CategoryName: "Software",
-			VendorName:   "Acme Corp",
-			Amount:       49.99,
-			Currency:     "EUR",
-			Description:  "SaaS subscription",
+	aiCategorizer := &mockAICategorizer{
+		result: port.InvoiceCategorizationResult{
+			InvoiceName: "Software",
+			VendorName:  "Acme Corp",
+			Amount:      49.99,
+			Currency:    "EUR",
+			Description: "SaaS subscription",
 		},
 	}
 	repo := &mockInvoiceRepo{}
-	svc := newTestInvoiceSvc(llm, repo)
+	svc := newTestInvoiceSvc(aiCategorizer, repo)
 
 	fileBytes := []byte("fake pdf content")
 	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "invoice.pdf", "application/pdf", fileBytes, nil)
@@ -265,7 +281,7 @@ func TestImportFromFile_DuplicateHash_ReturnsError(t *testing.T) {
 			{ID: uuid.New(), UserID: dummyUserID, ContentHash: "badbadbadbad"}, // hash won't match below
 		},
 	}
-	svc := newTestInvoiceSvc(&mockLLMClient{}, repo)
+	svc := newTestInvoiceSvc(&mockAICategorizer{}, repo)
 
 	_, _ = svc.ImportFromFile(context.Background(), dummyUserID, "a.pdf", "application/pdf", fileBytes, nil)
 
@@ -277,11 +293,11 @@ func TestImportFromFile_DuplicateHash_ReturnsError(t *testing.T) {
 }
 
 func TestImportFromFile_CallerCategoryOverridesLLM(t *testing.T) {
-	llm := &mockLLMClient{
-		result: port.CategorizationResult{CategoryName: "Software", VendorName: "v", Amount: 1, Currency: "EUR"},
+	aiCategorizer := &mockAICategorizer{
+		result: port.InvoiceCategorizationResult{InvoiceName: "Software", VendorName: "v", Amount: 1, Currency: "EUR"},
 	}
 	repo := &mockInvoiceRepo{}
-	svc := newTestInvoiceSvc(llm, repo)
+	svc := newTestInvoiceSvc(aiCategorizer, repo)
 
 	overrideCatID := uuid.New()
 	inv, err := svc.ImportFromFile(context.Background(), dummyUserID, "inv.pdf", "application/pdf", []byte("pdf"), &overrideCatID)
@@ -297,8 +313,8 @@ func TestImportFromFile_CallerCategoryOverridesLLM(t *testing.T) {
 
 func TestUpdate_ChangesVendorAndAmount(t *testing.T) {
 	repo := &mockInvoiceRepo{}
-	svc := newTestInvoiceSvc(&mockLLMClient{
-		result: port.CategorizationResult{VendorName: "OldCo", Amount: 10, Currency: "EUR"},
+	svc := newTestInvoiceSvc(&mockAICategorizer{
+		result: port.InvoiceCategorizationResult{VendorName: "OldCo", Amount: 10, Currency: "EUR"},
 	}, repo)
 
 	inv, _ := svc.CategorizeDocument(context.Background(), dummyUserID, "text")
@@ -319,7 +335,7 @@ func TestUpdate_ChangesVendorAndAmount(t *testing.T) {
 
 func TestUpdate_NotFound_ReturnsError(t *testing.T) {
 	repo := &mockInvoiceRepo{}
-	svc := newTestInvoiceSvc(&mockLLMClient{}, repo)
+	svc := newTestInvoiceSvc(&mockAICategorizer{}, repo)
 
 	_, err := svc.Update(context.Background(), entity.Invoice{ID: uuid.New(), UserID: dummyUserID})
 	if !errors.Is(err, entity.ErrInvoiceNotFound) {
@@ -329,8 +345,8 @@ func TestUpdate_NotFound_ReturnsError(t *testing.T) {
 
 func TestDelete_RemovesInvoice(t *testing.T) {
 	repo := &mockInvoiceRepo{}
-	svc := newTestInvoiceSvc(&mockLLMClient{
-		result: port.CategorizationResult{VendorName: "v", Amount: 1, Currency: "EUR"},
+	svc := newTestInvoiceSvc(&mockAICategorizer{
+		result: port.InvoiceCategorizationResult{VendorName: "v", Amount: 1, Currency: "EUR"},
 	}, repo)
 
 	inv, _ := svc.CategorizeDocument(context.Background(), dummyUserID, "text")
@@ -344,7 +360,7 @@ func TestDelete_RemovesInvoice(t *testing.T) {
 }
 
 func TestDelete_NotFound_ReturnsError(t *testing.T) {
-	svc := newTestInvoiceSvc(&mockLLMClient{}, &mockInvoiceRepo{})
+	svc := newTestInvoiceSvc(&mockAICategorizer{}, &mockInvoiceRepo{})
 
 	err := svc.Delete(context.Background(), uuid.New(), dummyUserID)
 	if !errors.Is(err, entity.ErrInvoiceNotFound) {
@@ -354,15 +370,15 @@ func TestDelete_NotFound_ReturnsError(t *testing.T) {
 
 func TestGetAll_ReturnsSavedInvoices(t *testing.T) {
 	repo := &mockInvoiceRepo{}
-	svc := newTestInvoiceSvc(&mockLLMClient{
-		result: port.CategorizationResult{VendorName: "v", Amount: 1, Currency: "EUR"},
+	svc := newTestInvoiceSvc(&mockAICategorizer{
+		result: port.InvoiceCategorizationResult{VendorName: "v", Amount: 1, Currency: "EUR"},
 	}, repo)
 
 	for i := 0; i < 3; i++ {
 		_, _ = svc.CategorizeDocument(context.Background(), dummyUserID, "text")
 	}
 
-	all, err := svc.GetAll(context.Background(), dummyUserID)
+	all, err := svc.GetAll(context.Background(), entity.InvoiceFilter{UserID: dummyUserID})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

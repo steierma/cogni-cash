@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/http"
+	"strings"
 	"time"
 
 	"log/slog"
@@ -122,15 +124,29 @@ func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID u
 }
 
 // FindAll returns all Invoices ordered by creation time descending.
-func (r *InvoiceRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error) {
-	r.Logger.Info("Finding all invoices", "user_id", userID)
-	rows, err := r.pool.Query(ctx, `
+func (r *InvoiceRepository) FindAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error) {
+	r.Logger.Info("Finding all invoices", "user_id", filter.UserID)
+	
+	query := `
 		SELECT id, user_id, category_id, vendor, amount, currency, invoice_date,
 		       content_hash, original_file_name,
 		       description
 		FROM invoices
 		WHERE user_id = $1
-		ORDER BY created_at DESC`, userID)
+		ORDER BY created_at DESC`
+	
+	args := []any{filter.UserID}
+
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
+
+	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("invoice repo: find all: %w", err)
 	}
@@ -193,7 +209,13 @@ func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, u
 	if name != nil {
 		nameStr = *name
 	}
-	return content, "application/pdf", nameStr, nil
+	
+	mimeType := http.DetectContentType(content)
+	if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
+		mimeType = mimeType[:idx]
+	}
+	
+	return content, mimeType, nameStr, nil
 }
 
 // ── scanner helper ──────────────────────────────────────────────────────────

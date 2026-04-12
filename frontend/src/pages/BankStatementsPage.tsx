@@ -2,6 +2,7 @@ import { useMemo, useState, useRef, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
+import { FilePreview } from '../components/FilePreview';
 import {
     deleteBankStatement, downloadBankStatement, fetchBankStatements, fetchBankStatementBlob, importBankStatement,
     fetchSettings, updateSettings
@@ -175,7 +176,7 @@ export default function BankStatementsPage() {
             const blob = await fetchBankStatementBlob(id);
             const type = blob.type.toLowerCase();
 
-            if (type.includes('pdf')) {
+            if (type.includes('pdf') || type.startsWith('image/')) {
                 const url = URL.createObjectURL(blob);
                 setPreviewData({ url, text: null, type, statementId: id });
             } else if (type.includes('csv')) {
@@ -275,7 +276,7 @@ export default function BankStatementsPage() {
                         multiple
                         className="hidden"
                         ref={inputRef}
-                        accept=".pdf,.csv,.xls,.xlsx"
+                        accept=".pdf,.csv,.xls,.xlsx,.png,.jpg,.jpeg,.webp,.gif"
                         onChange={(e) => e.target.files && handleFiles(e.target.files)}
                     />
                     <div className={`p-2 rounded-lg transition-colors ${dragOver ? 'bg-indigo-200 dark:bg-indigo-800 text-indigo-700 dark:text-indigo-300' : 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'}`}>
@@ -661,7 +662,7 @@ function PreviewStatementModal({
             <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                 <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
                     <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                        {data.type?.includes('pdf') ? <FileText className="text-fuchsia-500" size={20} /> : <FileSpreadsheet className="text-emerald-500" size={20} />}
+                        {data.type?.includes('pdf') ? <FileText className="text-fuchsia-500" size={20} /> : data.type?.startsWith('image/') ? <Eye className="text-blue-500" size={20} /> : <FileSpreadsheet className="text-emerald-500" size={20} />}
                         {t('bankStatements.modal.previewTitle')}
                     </h3>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
@@ -670,8 +671,8 @@ function PreviewStatementModal({
                 </div>
                 <div className="flex-1 w-full bg-gray-200 dark:bg-gray-950 p-2 sm:p-4 overflow-hidden flex flex-col">
                     {data.url ? (
-                        // PDF View
-                        <iframe src={`${data.url}#toolbar=0`} className="w-full h-full rounded-xl border border-gray-300 dark:border-gray-800 shadow-inner bg-white" title={t('common.pdfPreview')} />
+                        // PDF or Image View
+                        <FilePreview url={data.url} mimeType={data.type || ''} title={t('bankStatements.modal.previewTitle')} />
                     ) : data.text !== null ? (
                         // CSV View
                         <div className="w-full h-full rounded-xl border border-gray-300 dark:border-gray-700 shadow-inner bg-gray-50 dark:bg-gray-900 overflow-auto p-4 md:p-6">

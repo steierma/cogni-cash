@@ -5,10 +5,10 @@ import {useTranslation} from 'react-i18next';
 import {
     AlertCircle, ArrowRight, Calendar, ChevronRight, Landmark,
     TrendingDown, TrendingUp, Wallet, BarChart3, PieChart,
-    PiggyBank, LayoutDashboard, Unlink
+    PiggyBank, LayoutDashboard, Unlink, Zap
 } from 'lucide-react';
-import {fetchBankStatements, fetchTransactions, fetchAnalytics, fetchPayslips} from '../api/client';
-import type {BankStatementSummary, Transaction, TransactionAnalytics, Payslip} from '../api/types';
+import {fetchBankStatements, fetchTransactions, fetchAnalytics, fetchPayslips, fetchForecast} from '../api/client';
+import type {BankStatementSummary, Transaction, TransactionAnalytics, Payslip, CashFlowForecast} from '../api/types';
 import {fmtCurrency, fmtDate} from '../utils/formatters';
 import CategoryBadge from '../components/CategoryBadge';
 
@@ -144,6 +144,63 @@ function StatementCard({stmt}: { stmt: BankStatementSummary }) {
                 </span>
             </div>
         </Link>
+    );
+}
+
+function ForecastingWidget() {
+    const {t} = useTranslation();
+    const {data: forecast, isLoading} = useQuery<CashFlowForecast>({
+        queryKey: ['forecast', '30'],
+        queryFn: () => {
+            const toDate = new Date();
+            toDate.setDate(toDate.getDate() + 30);
+            return fetchForecast(undefined, toDate.toISOString().split('T')[0]);
+        },
+    });
+
+    if (isLoading || !forecast || forecast.predictions.length === 0) return null;
+
+    const upcoming = forecast.predictions.slice(0, 4);
+
+    return (
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2">
+                    <Zap size={18} className="text-indigo-500 dark:text-indigo-400"/>
+                    <h2 className="text-base font-semibold text-gray-800 dark:text-gray-200">{t('dashboard.forecasting.title')}</h2>
+                </div>
+                <Link
+                    to="/forecasting"
+                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1"
+                >
+                    {t('dashboard.forecasting.viewAll')} <ChevronRight size={14}/>
+                </Link>
+            </div>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+                {upcoming.sort((a, b) => new Date(a.booking_date).getTime() - new Date(b.booking_date).getTime()).map((p, idx) => (
+                    <div key={idx}
+                         className="p-4 rounded-xl bg-gray-50 dark:bg-gray-800/50 border border-gray-100 dark:border-gray-700/50 hover:border-indigo-200 dark:hover:border-indigo-900/50 transition-colors group">
+                        <div className="flex justify-between items-start mb-2">
+                            <span
+                                className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-tight">{fmtDate(p.booking_date)}</span>
+                            <span
+                                className={`text-xs font-bold ${p.amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-gray-100'}`}>
+                                {fmtCurrency(p.amount, p.currency)}
+                            </span>
+                        </div>
+                        <p className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate leading-tight"
+                           title={p.description}>
+                            {p.description}
+                        </p>
+                        <div className="mt-2 flex items-center gap-1.5">
+                            <div className="w-1.5 h-1.5 rounded-full bg-indigo-500"/>
+                            <span className="text-[10px] font-bold text-indigo-500/80 dark:text-indigo-400/80 uppercase">Expected</span>
+                        </div>
+                    </div>
+                ))}
+            </div>
+        </div>
     );
 }
 
@@ -375,6 +432,9 @@ export default function DashboardPage() {
                     </div>
                 </div>
             )}
+
+            {/* Forecasting Widget */}
+            {!isLoading && <ForecastingWidget />}
 
             {/* Swipeable Statements Section */}
             <div>

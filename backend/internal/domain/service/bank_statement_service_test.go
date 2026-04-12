@@ -116,6 +116,10 @@ func (m *mockRepo) MarkTransactionReviewed(_ context.Context, _ string, _ uuid.U
 	return nil
 }
 
+func (m *mockRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string, _ bool, _ uuid.UUID) error {
+	return nil
+}
+
 func (m *mockRepo) LinkTransactionToStatement(_ context.Context, id uuid.UUID, stmtID uuid.UUID, _ uuid.UUID) error {
 	m.linkedTxIDs = append(m.linkedTxIDs, id)
 	m.linkedStmtIDs = append(m.linkedStmtIDs, stmtID)
@@ -127,55 +131,13 @@ func (m *mockRepo) CreateTransactions(_ context.Context, txns []entity.Transacti
 	return nil
 }
 
-type mockCategoryRepo struct {
-	saved []entity.Category
-	err   error
-}
-
-func (m *mockCategoryRepo) Save(_ context.Context, cat entity.Category) (entity.Category, error) {
-	if m.err != nil {
-		return entity.Category{}, m.err
-	}
-	for _, existing := range m.saved {
-		if existing.Name == cat.Name {
-			return existing, nil
-		}
-	}
-	if cat.ID == uuid.Nil {
-		cat.ID = uuid.New()
-	}
-	m.saved = append(m.saved, cat)
-	return cat, nil
-}
-
-func (m *mockCategoryRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.Category, error) {
-	return m.saved, nil
-}
-
-func (m *mockCategoryRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.Category, error) {
-	for _, c := range m.saved {
-		if c.ID == id {
-			return c, nil
-		}
-	}
-	return entity.Category{}, errors.New("not found")
-}
-
-func (m *mockCategoryRepo) Update(_ context.Context, cat entity.Category) (entity.Category, error) {
-	return cat, nil
-}
-
-func (m *mockCategoryRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
-	return nil
-}
-
 type mockCategorizer struct {
 	results []port.CategorizedTransaction
 	err     error
 	calls   int
 }
 
-func (m *mockCategorizer) CategorizeBatch(ctx context.Context, _ uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
+func (m *mockCategorizer) CategorizeTransactionsBatch(ctx context.Context, _ uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
 	m.calls++
 	if m.err != nil {
 		return nil, m.err

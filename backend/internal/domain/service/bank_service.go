@@ -16,20 +16,22 @@ import (
 )
 
 type BankService struct {
-	repo         port.BankRepository
-	stmtRepo     port.BankStatementRepository
-	settingsRepo port.SettingsRepository
-	provider     port.BankProvider
-	logger       *slog.Logger
+	repo             port.BankRepository
+	stmtRepo         port.BankStatementRepository
+	settingsRepo     port.SettingsRepository
+	plannedTxService port.PlannedTransactionUseCase
+	provider         port.BankProvider
+	logger           *slog.Logger
 }
 
-func NewBankService(repo port.BankRepository, stmtRepo port.BankStatementRepository, settingsRepo port.SettingsRepository, provider port.BankProvider, logger *slog.Logger) *BankService {
+func NewBankService(repo port.BankRepository, stmtRepo port.BankStatementRepository, settingsRepo port.SettingsRepository, plannedTxService port.PlannedTransactionUseCase, provider port.BankProvider, logger *slog.Logger) *BankService {
 	return &BankService{
-		repo:         repo,
-		stmtRepo:     stmtRepo,
-		settingsRepo: settingsRepo,
-		provider:     provider,
-		logger:       logger,
+		repo:             repo,
+		stmtRepo:         stmtRepo,
+		settingsRepo:     settingsRepo,
+		plannedTxService: plannedTxService,
+		provider:         provider,
+		logger:           logger,
 	}
 }
 
@@ -63,7 +65,7 @@ func (s *BankService) CreateConnection(ctx context.Context, userID uuid.UUID, in
 
 func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, requisitionID string, code string) error {
 	s.logger.Info("Finishing bank connection", "requisition_id", requisitionID, "user_id", userID)
-	conn, err := s.repo.GetConnectionByRequisition(ctx, requisitionID)
+	conn, err := s.repo.GetConnectionByRequisition(ctx, requisitionID, userID)
 	if err != nil {
 		return err
 	}
@@ -89,7 +91,7 @@ func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, re
 	// If sessionID changed (Enable Banking), update it in the database
 	if sessionID != requisitionID {
 		s.logger.Info("Updating session ID for connection", "old", requisitionID, "new", sessionID)
-		if err := s.repo.UpdateRequisitionID(ctx, conn.ID, sessionID); err != nil {
+		if err := s.repo.UpdateRequisitionID(ctx, conn.ID, sessionID, userID); err != nil {
 			return fmt.Errorf("failed to update session id: %w", err)
 		}
 		requisitionID = sessionID
@@ -107,13 +109,13 @@ func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, re
 		for i := range accounts {
 			accounts[i].ConnectionID = conn.ID
 		}
-		if err := s.repo.UpsertAccounts(ctx, accounts); err != nil {
+		if err := s.repo.UpsertAccounts(ctx, accounts, userID); err != nil {
 			return err
 		}
 	}
 
 	s.logger.Info("Bank connection finalized", "connection_id", conn.ID, "status", status, "user_id", conn.UserID)
-	return s.repo.UpdateConnectionStatus(ctx, conn.ID, status)
+	return s.repo.UpdateConnectionStatus(ctx, conn.ID, status, userID)
 }
 
 func (s *BankService) GetConnections(ctx context.Context, userID uuid.UUID) ([]entity.BankConnection, error) {
@@ -123,7 +125,7 @@ func (s *BankService) GetConnections(ctx context.Context, userID uuid.UUID) ([]e
 	}
 
 	for i := range conns {
-		accs, err := s.repo.GetAccountsByConnectionID(ctx, conns[i].ID)
+		accs, err := s.repo.GetAccountsByConnectionID(ctx, conns[i].ID, userID)
 		if err == nil {
 			conns[i].Accounts = accs
 		}
@@ -159,7 +161,7 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, user
 	txns, balance, err := s.provider.FetchTransactions(ctx, userID, acc.ProviderAccountID, &dateFrom, nil)
 	if err != nil {
 		errStr := err.Error()
-		_ = s.repo.UpdateAccountBalance(ctx, acc.ID, acc.Balance, time.Now(), &errStr)
+		_ = s.repo.UpdateAccountBalance(ctx, acc.ID, acc.Balance, time.Now(), &errStr, userID)
 		return err
 	}
 
@@ -172,12 +174,12 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, user
 
 	if err := s.stmtRepo.CreateTransactions(ctx, txns); err != nil {
 		errStr := "Failed to save transactions: " + err.Error()
-		_ = s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), &errStr)
+		_ = s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), &errStr, userID)
 		return err
 	}
 
 	s.logger.Info("Sync completed for account", "account_id", acc.ID, "new_txns", len(txns), "new_balance", balance, "user_id", userID)
-	return s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), nil)
+	return s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), nil, userID)
 }
 
 func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) error {
@@ -201,7 +203,7 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 			continue
 		}
 
-		accs, err := s.repo.GetAccountsByConnectionID(ctx, conn.ID)
+		accs, err := s.repo.GetAccountsByConnectionID(ctx, conn.ID, userID)
 		if err != nil {
 			continue
 		}
@@ -211,7 +213,7 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 			if err != nil {
 				s.logger.Error("failed to sync account", "account_id", acc.ID, "user_id", userID, "error", err)
 				errStr := err.Error()
-				_ = s.repo.UpdateAccountBalance(ctx, acc.ID, acc.Balance, time.Now(), &errStr)
+				_ = s.repo.UpdateAccountBalance(ctx, acc.ID, acc.Balance, time.Now(), &errStr, userID)
 				continue
 			}
 			s.logger.Info("fetched transactions for account", "account_id", acc.ID, "user_id", userID, "transaction_count", len(txns), "balance", balance)
@@ -227,11 +229,11 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 			if err := s.stmtRepo.CreateTransactions(ctx, txns); err != nil {
 				s.logger.Error("failed to save synced transactions", "account_id", acc.ID, "user_id", userID, "error", err)
 				errStr := "Failed to save: " + err.Error()
-				_ = s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), &errStr)
+				_ = s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), &errStr, userID)
 				continue
 			}
 
-			if err := s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), nil); err != nil {
+			if err := s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), nil, userID); err != nil {
 				s.logger.Error("failed to update account balance", "account_id", acc.ID, "user_id", userID, "error", err)
 			}
 		}

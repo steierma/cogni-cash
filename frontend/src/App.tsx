@@ -13,6 +13,7 @@ import ReconcilePage from './pages/ReconcilePage';
 import BankStatementsPage from './pages/BankStatementsPage';
 import BankConnectionsPage from './pages/BankConnectionsPage';
 import PayslipsPage from './pages/PayslipsPage';
+import ForecastingPage from './pages/ForecastingPage';
 import LoginPage from './pages/LoginPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import UsersPage from './pages/UsersPage';
@@ -59,6 +60,7 @@ export default function App() {
                 <Route element={<ProtectedRoutes />}>
                     <Route path="/" element={<DashboardPage />} />
                     <Route path="/analytics" element={<AnalyticsPage />} />
+                    <Route path="/forecasting" element={<ForecastingPage />} />
                     <Route path="/transactions" element={<TransactionsPage />} />
                     <Route path="/invoices" element={<InvoicesPage />} />
                     <Route path="/payslips" element={<PayslipsPage />} />

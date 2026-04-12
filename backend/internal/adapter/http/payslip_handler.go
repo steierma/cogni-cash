@@ -14,18 +14,36 @@ import (
 	"github.com/google/uuid"
 )
 
+// allowedPayslipMIMETypes is the set of MIME types accepted by the payslip import endpoints.
+// Image types are accepted because the AI payslip parser supports multimodal requests.
+var allowedPayslipMIMETypes = map[string]bool{
+	"application/pdf": true,
+	"image/jpeg":      true,
+	"image/jpg":       true,
+	"image/png":       true,
+	"image/gif":       true,
+	"image/webp":      true,
+}
+
 // listPayslips handles GET /api/v1/payslips/
 func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	filter := entity.PayslipFilter{
 		UserID:   userID,
 		Employer: r.URL.Query().Get("employer"),
+	}
+
+	q := r.URL.Query()
+	if limit, err := strconv.Atoi(q.Get("limit")); err == nil {
+		filter.Limit = limit
+	}
+	if offset, err := strconv.Atoi(q.Get("offset")); err == nil {
+		filter.Offset = offset
 	}
 
 	payslips, err := h.payslipSvc.GetAll(r.Context(), filter)
@@ -43,12 +61,11 @@ func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
 
 // getPayslipSummary handles GET /api/v1/payslips/summary
 func (h *Handler) getPayslipSummary(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	summary, err := h.payslipSvc.GetSummary(r.Context(), userID)
 	if err != nil {
@@ -62,12 +79,11 @@ func (h *Handler) getPayslipSummary(w http.ResponseWriter, r *http.Request) {
 
 // getPayslip handles GET /api/v1/payslips/{id}
 func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -87,12 +103,11 @@ func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
 
 // importPayslip handles POST /api/v1/payslips/import
 func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	const maxUpload = 10 << 20 // 10 MB hard cap
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
@@ -114,9 +129,14 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" {
-		mimeType = "application/pdf" // Fallback assumption
+	mimeType := resolveMIME(header.Header.Get("Content-Type"), header.Filename)
+	if mimeType == "application/octet-stream" {
+		mimeType = "application/pdf"
+	}
+	if !allowedPayslipMIMETypes[mimeType] {
+		writeError(w, http.StatusUnsupportedMediaType,
+			fmt.Sprintf("unsupported file type %q — accepted types: PDF, JPEG, PNG, GIF, WEBP", mimeType))
+		return
 	}
 
 	// Parse the Force AI flag
@@ -192,12 +212,11 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 
 // updatePayslip handles PUT /api/v1/payslips/{id}
 func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -270,12 +289,11 @@ func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
 
 // deletePayslip handles DELETE /api/v1/payslips/{id}
 func (h *Handler) deletePayslip(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -294,12 +312,11 @@ func (h *Handler) deletePayslip(w http.ResponseWriter, r *http.Request) {
 
 // downloadPayslipFile handles GET /api/v1/payslips/{id}/download
 func (h *Handler) downloadPayslipFile(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id := chi.URLParam(r, "id")
 	if id == "" {
@@ -363,6 +380,10 @@ func (h *Handler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	response := batchImportResponse{
 		Successful: make([]*entity.Payslip, 0),
@@ -389,9 +410,16 @@ func (h *Handler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
-		mimeType := fileHeader.Header.Get("Content-Type")
-		if mimeType == "" {
+		mimeType := resolveMIME(fileHeader.Header.Get("Content-Type"), fileHeader.Filename)
+		if mimeType == "application/octet-stream" {
 			mimeType = "application/pdf"
+		}
+		if !allowedPayslipMIMETypes[mimeType] {
+			response.Failed = append(response.Failed, batchImportError{
+				Filename: fileHeader.Filename,
+				Error:    fmt.Sprintf("unsupported file type %q — accepted: PDF, JPEG, PNG, GIF, WEBP", mimeType),
+			})
+			continue
 		}
 
 		// Call the service (passing nil for manual overrides in a batch context, and false for useAI)

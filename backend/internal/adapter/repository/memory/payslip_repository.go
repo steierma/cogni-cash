@@ -3,6 +3,8 @@ package memory
 import (
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 	"sync"
 
 	"cogni-cash/internal/domain/entity"
@@ -82,7 +84,26 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 			payslips = append(payslips, p)
 		}
 	}
-	return payslips, nil
+
+	// Simple sort by period DESC
+	for i := 0; i < len(payslips); i++ {
+		for j := i + 1; j < len(payslips); j++ {
+			if payslips[i].PeriodYear < payslips[j].PeriodYear || (payslips[i].PeriodYear == payslips[j].PeriodYear && payslips[i].PeriodMonthNum < payslips[j].PeriodMonthNum) {
+				payslips[i], payslips[j] = payslips[j], payslips[i]
+			}
+		}
+	}
+
+	if filter.Offset >= len(payslips) {
+		return []entity.Payslip{}, nil
+	}
+
+	end := len(payslips)
+	if filter.Limit > 0 && filter.Offset+filter.Limit < end {
+		end = filter.Offset + filter.Limit
+	}
+
+	return payslips[filter.Offset:end], nil
 }
 
 func (r *PayslipRepository) FindByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error) {
@@ -124,7 +145,16 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 	if !ok || p.UserID != userID {
 		return nil, "", "", entity.ErrPayslipNotFound
 	}
-	return p.OriginalFileContent, "application/pdf", p.OriginalFileName, nil
+	
+	mimeType := "application/octet-stream"
+	if len(p.OriginalFileContent) > 0 {
+		mimeType = http.DetectContentType(p.OriginalFileContent)
+		if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
+			mimeType = mimeType[:idx]
+		}
+	}
+	
+	return p.OriginalFileContent, mimeType, p.OriginalFileName, nil
 }
 
 func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (entity.PayslipSummary, error) {

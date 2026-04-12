@@ -37,7 +37,7 @@ export default function PayslipsPage() {
     const [editingPayslip, setEditingPayslip] = useState<Payslip | null>(null);
     const [viewingPayslip, setViewingPayslip] = useState<Payslip | null>(null);
     const [previewingPayslip, setPreviewingPayslip] = useState<Payslip | null>(null);
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [previewInfo, setPreviewInfo] = useState<{url: string, mimeType: string} | null>(null);
     const [isPreviewLoading, setIsPreviewLoading] = useState<string | null>(null);
     const [batchResults, setBatchResults] = useState<{ successful: Payslip[], failed: { filename: string, error: string }[] } | null>(null);
 
@@ -179,8 +179,8 @@ export default function PayslipsPage() {
             setIsPreviewLoading(id);
             const p = payslips.find(ps => ps.id === id);
             if (p) setPreviewingPayslip(p);
-            const url = await getPayslipPreviewUrl(id);
-            setPreviewUrl(url);
+            const info = await getPayslipPreviewUrl(id);
+            setPreviewInfo(info);
         } catch {
             alert("Could not load the document preview.");
         } finally {
@@ -189,10 +189,10 @@ export default function PayslipsPage() {
     };
 
     const closePreview = () => {
-        if (previewUrl) {
-            URL.revokeObjectURL(previewUrl);
+        if (previewInfo) {
+            URL.revokeObjectURL(previewInfo.url);
         }
-        setPreviewUrl(null);
+        setPreviewInfo(null);
         setPreviewingPayslip(null);
     };
 
@@ -319,7 +319,7 @@ export default function PayslipsPage() {
                     }} onDragLeave={() => setDragOver(false)} onDrop={onDrop} onClick={() => inputRef.current?.click()}
                     className={`flex-1 w-full border-2 border-dashed rounded-xl p-4 flex items-center justify-center gap-4 cursor-pointer transition-all duration-200 ${dragOver ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20' : 'border-gray-300 dark:border-gray-700 hover:border-indigo-400 bg-gray-50 dark:bg-gray-800/30'}`}
                 >
-                    <input type="file" className="hidden" ref={inputRef} accept=".pdf"
+                    <input type="file" className="hidden" ref={inputRef} accept=".pdf,.png,.jpg,.jpeg,.webp,.gif"
                            onChange={(e) => e.target.files && handleFiles(e.target.files)}/>
                     <div
                         className="p-2 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg text-indigo-600 dark:text-indigo-400">
@@ -553,9 +553,10 @@ export default function PayslipsPage() {
 
             {/* Modals */}
             {viewingPayslip && <ViewPayslipModal payslip={viewingPayslip} onClose={() => setViewingPayslip(null)}/>}
-            {previewUrl && previewingPayslip && (
+            {previewInfo && previewingPayslip && (
                 <PreviewPayslipModal 
-                    previewUrl={previewUrl} 
+                    previewUrl={previewInfo.url} 
+                    mimeType={previewInfo.mimeType}
                     payslip={previewingPayslip} 
                     onClose={closePreview}
                     onUpdate={(id, data) => updateMutation.mutate({id, data})}

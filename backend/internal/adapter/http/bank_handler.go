@@ -19,6 +19,10 @@ func (h *Handler) listBankInstitutions(w http.ResponseWriter, r *http.Request) {
 	isSandbox := r.URL.Query().Get("sandbox") == "true"
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	insts, err := h.bankSvc.GetInstitutions(r.Context(), userID, country, isSandbox)
 	if err != nil {
 		h.Logger.Error("failed to list institutions", "error", err)
@@ -43,6 +47,10 @@ func (h *Handler) createBankConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	conn, err := h.bankSvc.CreateConnection(r.Context(), userID, req.InstitutionID, req.InstitutionName, req.Country, req.RedirectURL, req.Sandbox)
 	if err != nil {
 		h.Logger.Error("failed to create bank connection", "error", err)
@@ -64,6 +72,10 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.bankSvc.FinishConnection(r.Context(), userID, req.RequisitionID, req.Code); err != nil {
 		h.Logger.Error("failed to finish bank connection", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to complete bank link")
@@ -75,6 +87,10 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) listBankConnections(w http.ResponseWriter, r *http.Request) {
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	conns, err := h.bankSvc.GetConnections(r.Context(), userID)
 	if err != nil {
 		h.Logger.Error("failed to list bank connections", "error", err)
@@ -94,6 +110,10 @@ func (h *Handler) deleteBankConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.bankSvc.DeleteConnection(r.Context(), id, userID); err != nil {
 		h.Logger.Error("failed to delete bank connection", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to delete connection")
@@ -105,6 +125,10 @@ func (h *Handler) deleteBankConnection(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) syncAllBankAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 
 	go func() {
 		ctx := context.Background() // Fresh context for background task
@@ -133,6 +157,10 @@ func (h *Handler) updateBankAccountType(w http.ResponseWriter, r *http.Request) 
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.bankSvc.UpdateAccountType(r.Context(), id, entity.StatementType(req.AccountType), userID); err != nil {
 		h.Logger.Error("failed to update account type", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to update account type")

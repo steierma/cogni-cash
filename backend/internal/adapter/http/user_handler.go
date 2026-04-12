@@ -125,7 +125,12 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	currentUserID, _ := r.Context().Value(userIDKey).(string)
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+	currentUserID := userID.String()
 
 	h.Logger.Info("Attempting to delete user", "target_id", id, "requested_by", currentUserID)
 

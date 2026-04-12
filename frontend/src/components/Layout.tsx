@@ -4,7 +4,7 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
     ArrowLeftRight, BarChart3, Briefcase, ChevronLeft, ChevronRight, FileText, Landmark,
-    LayoutDashboard, Link2, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List
+    LayoutDashboard, Link2, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List, Zap
 } from 'lucide-react';
 import {fetchSettings, updateSettings, fetchMe, logout, fetchSystemInfo} from '../api/client';
 import type { User, SystemInfo } from '../api/types';
@@ -15,6 +15,7 @@ const ALL_NAV_GROUPS = [
         items: [
             {to: '/', i18nKeyLabel: 'layout.dashboard', Icon: LayoutDashboard},
             {to: '/analytics', i18nKeyLabel: 'layout.analytics', Icon: BarChart3},
+            {to: '/forecasting', i18nKeyLabel: 'layout.forecasting', Icon: Zap},
         ]
     },
     {

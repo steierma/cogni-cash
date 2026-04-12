@@ -1,11 +1,13 @@
-import React, { useRef, useState, useMemo } from 'react';
+import React, { useRef, useState, useMemo, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import {
     Trash2, Download, Edit2, Upload, X, Search, Database,
     ChevronUp, ChevronDown, Loader2, Filter, BarChart3,
     TrendingUp, Store, CheckSquare, Square, Layers, FileText
 } from 'lucide-react';
+import { FilePreview } from '../components/FilePreview';
 import {
     deleteInvoice, fetchInvoices, importInvoice,
     downloadInvoiceFile, updateInvoice, fetchCategories, getInvoicePreviewUrl,
@@ -32,16 +34,58 @@ const initialFilters: FilterState = {
 
 export default function InvoicesPage() {
     const { t, i18n } = useTranslation();
+    const [searchParams, setSearchParams] = useSearchParams();
     const qc = useQueryClient();
     const fileInputRef = useRef<HTMLInputElement>(null);
 
     // --- State ---
-    const [draftFilters, setDraftFilters] = useState<FilterState>(initialFilters);
-    const [appliedFilters, setAppliedFilters] = useState<FilterState>(initialFilters);
+    const [dragOver, setDragOver] = useState(false);
 
-    const [sortKey, setSortKey] = useState<SortKey>('issued_at');
-    const [sortDir, setSortDir] = useState<SortDir>('desc');
-    const [showVisuals, setShowVisuals] = useState(true);
+    const initialFiltersFromURL: FilterState = useMemo(() => {
+        return {
+            search: searchParams.get('search') || '',
+            category: searchParams.get('category') || 'all',
+            from: searchParams.get('from') || '',
+            to: searchParams.get('to') || '',
+            amountMin: searchParams.get('amountMin') || '',
+            amountMax: searchParams.get('amountMax') || ''
+        };
+    }, [searchParams]);
+
+    const [draftFilters, setDraftFilters] = useState<FilterState>(initialFiltersFromURL);
+    const [appliedFilters, setAppliedFilters] = useState<FilterState>(initialFiltersFromURL);
+
+    const [sortKey, setSortKey] = useState<SortKey>(() => {
+        const sk = searchParams.get('sortKey') as SortKey;
+        if (['issued_at', 'vendor', 'category', 'description', 'amount'].includes(sk)) return sk;
+        return 'issued_at';
+    });
+    const [sortDir, setSortDir] = useState<SortDir>(() => {
+        const sd = searchParams.get('sortDir') as SortDir;
+        return sd === 'asc' ? 'asc' : 'desc';
+    });
+    const [showVisuals, setShowVisuals] = useState(searchParams.get('visuals') !== 'false');
+
+    // Update URL when state changes
+    useEffect(() => {
+        const next = new URLSearchParams();
+        if (appliedFilters.search) next.set('search', appliedFilters.search);
+        if (appliedFilters.category !== 'all') next.set('category', appliedFilters.category);
+        if (appliedFilters.from) next.set('from', appliedFilters.from);
+        if (appliedFilters.to) next.set('to', appliedFilters.to);
+        if (appliedFilters.amountMin) next.set('amountMin', appliedFilters.amountMin);
+        if (appliedFilters.amountMax) next.set('amountMax', appliedFilters.amountMax);
+        
+        if (sortKey !== 'issued_at') next.set('sortKey', sortKey);
+        if (sortDir !== 'desc') next.set('sortDir', sortDir);
+        if (!showVisuals) next.set('visuals', 'false');
+
+        const currentStr = searchParams.toString();
+        const nextStr = next.toString();
+        if (currentStr !== nextStr) {
+            setSearchParams(next, { replace: true });
+        }
+    }, [appliedFilters, sortKey, sortDir, showVisuals, setSearchParams, searchParams]);
 
     // Batch Selection
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
@@ -54,7 +98,7 @@ export default function InvoicesPage() {
     const [editCurrency, setEditCurrency] = useState('EUR');
     const [editIssuedAt, setEditIssuedAt] = useState('');
 
-    const [previewUrl, setPreviewUrl] = useState<string | null>(null);
+    const [previewInfo, setPreviewInfo] = useState<{url: string, mimeType: string} | null>(null);
     const [isPreviewLoading, setIsPreviewLoading] = useState<string | null>(null);
 
     // --- Data Fetching ---
@@ -107,6 +151,20 @@ export default function InvoicesPage() {
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
+    const handleFiles = (files: FileList | File[]) => {
+        const file = files[0];
+        if (file) {
+            importMutation.mutate(file);
+        }
+        if (fileInputRef.current) fileInputRef.current.value = '';
+    };
+
+    const onDrop = (e: React.DragEvent) => {
+        e.preventDefault();
+        setDragOver(false);
+        if (e.dataTransfer.files?.length > 0) handleFiles(e.dataTransfer.files);
+    };
+
     const openEditModal = (inv: Invoice) => {
         setEditingInvoice(inv);
         setEditDesc(inv.description || '');
@@ -136,8 +194,8 @@ export default function InvoicesPage() {
     const handlePreview = async (id: string) => {
         try {
             setIsPreviewLoading(id);
-            const url = await getInvoicePreviewUrl(id);
-            setPreviewUrl(url);
+            const info = await getInvoicePreviewUrl(id);
+            setPreviewInfo(info);
         } catch {
             alert(t('invoices.previewFailed'));
         } finally {
@@ -146,8 +204,8 @@ export default function InvoicesPage() {
     };
 
     const closePreview = () => {
-        if (previewUrl) URL.revokeObjectURL(previewUrl);
-        setPreviewUrl(null);
+        if (previewInfo) URL.revokeObjectURL(previewInfo.url);
+        setPreviewInfo(null);
     };
 
     const toggleSort = (key: SortKey) => {
@@ -287,7 +345,7 @@ export default function InvoicesPage() {
                             <BarChart3 size={16} /> <span className="hidden sm:inline">{showVisuals ? t('transactions.hideCharts') : t('transactions.showCharts')}</span>
                         </button>
                     )}
-                    <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.png,.jpg,.jpeg" onChange={handleFileChange} />
+                    <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif" onChange={handleFileChange} />
                     <button
                         onClick={() => fileInputRef.current?.click()}
                         disabled={importMutation.isPending}
@@ -296,6 +354,41 @@ export default function InvoicesPage() {
                         {importMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
                         <span className="hidden sm:inline">{importMutation.isPending ? t('invoices.uploading') : t('invoices.import')}</span>
                     </button>
+                </div>
+            </div>
+
+            {/* Quick Upload Dropzone (New, aligning with other pages) */}
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-center animate-in fade-in duration-500">
+                <div
+                    onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
+                    onDragLeave={() => setDragOver(false)}
+                    onDrop={onDrop}
+                    onClick={() => fileInputRef.current?.click()}
+                    className={`flex-1 w-full border-2 border-dashed rounded-xl p-6 flex items-center justify-center gap-4 cursor-pointer transition-all duration-200 ${
+                        dragOver ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 scale-[1.01]' : 'border-gray-300 dark:border-gray-700 hover:border-indigo-400 bg-gray-50 dark:bg-gray-800/30 hover:bg-gray-100 dark:hover:bg-gray-800/50'
+                    }`}
+                >
+                    <div className={`p-3 rounded-xl transition-colors ${dragOver ? 'bg-indigo-200 dark:bg-indigo-800 text-indigo-700 dark:text-indigo-300' : 'bg-indigo-100 dark:bg-indigo-900/40 text-indigo-600 dark:text-indigo-400'}`}>
+                        <Upload size={24} />
+                    </div>
+                    <div>
+                        {importMutation.isPending ? (
+                            <p className="text-sm font-medium text-gray-900 dark:text-gray-100 animate-pulse">{t('invoices.uploading')}</p>
+                        ) : (
+                            <>
+                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">
+                                    <span className="text-indigo-600 dark:text-indigo-400">{t('bankStatements.import.clickToUpload')}</span> {t('bankStatements.import.orDrag')}
+                                </p>
+                                <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{t('payslips.pdfFormat')}</p>
+                            </>
+                        )}
+                    </div>
+                </div>
+
+                <div className="flex flex-col gap-3 w-full md:w-auto md:min-w-[180px] justify-center items-center md:items-stretch">
+                    <div className="text-[10px] text-gray-400 dark:text-gray-500 text-center px-2 leading-relaxed">
+                        {t('invoices.subtitle')}
+                    </div>
                 </div>
             </div>
 
@@ -338,7 +431,7 @@ export default function InvoicesPage() {
                         >
                             <option value="all">{t('transactions.filters.allCategories')}</option>
                             <option value="uncategorized">⚠️ {t('transactions.filters.uncategorizedOnly')}</option>
-                            {categories.map((c: Category) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                            {categories.filter(c => !c.deleted_at || c.id === draftFilters.category).map((c: Category) => <option key={c.id} value={c.id}>{c.name}</option>)}
                         </select>
                     </div>
                 </div>
@@ -558,7 +651,7 @@ export default function InvoicesPage() {
                                                 style={currentCat ? { color: currentCat.color, borderColor: currentCat.color + '55' } : undefined}
                                             >
                                                 <option value="">{t('transactions.table.unset')}</option>
-                                                {categories.map((c) => (
+                                                {categories.filter(c => !c.deleted_at || c.id === currentCat?.id).map((c) => (
                                                     <option key={c.id} value={c.id}>{c.name}</option>
                                                 ))}
                                             </select>
@@ -643,7 +736,7 @@ export default function InvoicesPage() {
                             >
                                 <option value="placeholder" disabled hidden>{t('invoices.choose')}</option>
                                 <option value="unset">{t('invoices.unset')}</option>
-                                {categories.map((c: Category) => (
+                                {categories.filter(c => !c.deleted_at).map((c: Category) => (
                                     <option key={c.id} value={c.id}>{c.name}</option>
                                 ))}
                             </select>
@@ -722,7 +815,7 @@ export default function InvoicesPage() {
                                     className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent block p-2.5 outline-none"
                                 >
                                     <option value="">{t('common.none')}</option>
-                                    {categories.map((c: Category) => (
+                                    {categories.filter(c => !c.deleted_at || c.id === editCatId).map((c: Category) => (
                                         <option key={c.id} value={c.id}>{c.name}</option>
                                     ))}
                                 </select>
@@ -759,7 +852,7 @@ export default function InvoicesPage() {
             )}
 
             {/* PDF Preview Modal */}
-            {previewUrl && (
+            {previewInfo && (
                 <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
                     <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                         <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
@@ -772,7 +865,7 @@ export default function InvoicesPage() {
                             </button>
                         </div>
                         <div className="flex-1 w-full bg-gray-200 dark:bg-gray-950 p-2 sm:p-4">
-                            <iframe src={`${previewUrl}#toolbar=0`} className="w-full h-full rounded-xl border border-gray-300 dark:border-gray-800 shadow-inner bg-white" title={t('invoices.previewTitle')} />
+                            <FilePreview url={previewInfo.url} mimeType={previewInfo.mimeType} title={t('invoices.previewTitle')} />
                         </div>
                     </div>
                 </div>

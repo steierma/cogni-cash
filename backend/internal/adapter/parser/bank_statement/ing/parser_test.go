@@ -20,7 +20,7 @@ func pdfPath() string {
 	for range [5]struct{}{} {
 		root = filepath.Dir(root)
 	}
-	return filepath.Join(root, "balance", "Girokonto_5437817550_Kontoauszug_20260301.pdf")
+	return filepath.Join(root, "balance", "Girokonto_1234567890_Kontoauszug_20260301.pdf")
 }
 
 func TestINGParser_ParseRealPDF(t *testing.T) {

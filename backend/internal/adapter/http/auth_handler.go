@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 // maxFieldLen is the maximum byte length accepted for username / password
@@ -18,6 +20,10 @@ const authTokenCookieName = "auth_token"
 type loginRequest struct {
 	Username string `json:"username"`
 	Password string `json:"password"`
+}
+
+type refreshRequest struct {
+	RefreshToken string `json:"refresh_token"`
 }
 
 type changePasswordRequest struct {
@@ -51,7 +57,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := h.authSvc.Login(r.Context(), req.Username, req.Password)
+	authResponse, err := h.authSvc.Login(r.Context(), req.Username, req.Password)
 	if err != nil {
 		writeError(w, http.StatusUnauthorized, "invalid credentials")
 		return
@@ -60,7 +66,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	// Set HttpOnly cookie for web clients
 	http.SetCookie(w, &http.Cookie{
 		Name:     authTokenCookieName,
-		Value:    token,
+		Value:    authResponse.Token,
 		Path:     "/",
 		HttpOnly: true,
 		Secure:   r.TLS != nil, // Set Secure only if request is HTTPS
@@ -80,10 +86,59 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	})
 
 	h.Logger.Info("Successful login", "username", req.Username)
-	writeJSON(w, http.StatusOK, map[string]string{"token": token})
+	writeJSON(w, http.StatusOK, authResponse)
+}
+
+func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if req.RefreshToken == "" {
+		writeError(w, http.StatusBadRequest, "refresh_token is required")
+		return
+	}
+
+	authResponse, err := h.authSvc.Refresh(r.Context(), req.RefreshToken)
+	if err != nil {
+		writeError(w, http.StatusUnauthorized, err.Error())
+		return
+	}
+
+	// Set HttpOnly cookie for web clients
+	http.SetCookie(w, &http.Cookie{
+		Name:     authTokenCookieName,
+		Value:    authResponse.Token,
+		Path:     "/",
+		HttpOnly: true,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+
+	// Set non-HttpOnly cookie for UI session tracking
+	http.SetCookie(w, &http.Cookie{
+		Name:     "cogni_cash_logged_in",
+		Value:    "true",
+		Path:     "/",
+		HttpOnly: false,
+		Secure:   r.TLS != nil,
+		SameSite: http.SameSiteLaxMode,
+		Expires:  time.Now().Add(24 * time.Hour),
+	})
+
+	writeJSON(w, http.StatusOK, authResponse)
 }
 
 func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+	// Optional: Revoke refresh token if provided in body
+	var req refreshRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
+		_ = h.authSvc.Logout(r.Context(), req.RefreshToken)
+	}
+
 	http.SetCookie(w, &http.Cookie{
 		Name:     authTokenCookieName,
 		Value:    "",
@@ -123,13 +178,13 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	if err := h.authSvc.ChangePassword(r.Context(), userID, req.OldPassword, req.NewPassword); err != nil {
+	if err := h.authSvc.ChangePassword(r.Context(), userID.String(), req.OldPassword, req.NewPassword); err != nil {
 		writeError(w, http.StatusBadRequest, err.Error())
 		return
 	}
@@ -195,6 +250,19 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 
 func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// 1. Check for Bridge Access Token (BAT)
+		bridgeToken := r.Header.Get("X-Bridge-Token")
+		if bridgeToken != "" && h.bridgeTokenSvc != nil {
+			userID, err := h.bridgeTokenSvc.ValidateToken(r.Context(), bridgeToken)
+			if err == nil {
+				ctx := context.WithValue(r.Context(), userIDKey, userID)
+				next.ServeHTTP(w, r.WithContext(ctx))
+				return
+			}
+			h.Logger.Warn("Invalid bridge token attempted", "token_prefix", bridgeToken[:4])
+		}
+
+		// 2. Fallback to standard JWT (Bearer or Cookie)
 		var tokenStr string
 		authHeader := r.Header.Get("Authorization")
 
@@ -226,20 +294,20 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 
 func (h *Handler) adminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userIDStr, ok := r.Context().Value(userIDKey).(string)
-		if !ok {
+		userID := h.getUserID(r.Context())
+		if userID == uuid.Nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
 		}
 
-		user, err := h.userSvc.GetUser(r.Context(), userIDStr)
+		user, err := h.userSvc.GetUser(r.Context(), userID.String())
 		if err != nil {
 			writeError(w, http.StatusInternalServerError, "failed to verify user permissions")
 			return
 		}
 
 		if user.Role != "admin" {
-			h.Logger.Warn("Forbidden action attempted by non-admin", "user_id", userIDStr, "path", r.URL.Path)
+			h.Logger.Warn("Forbidden action attempted by non-admin", "user_id", userID.String(), "path", r.URL.Path)
 			writeError(w, http.StatusForbidden, "forbidden: administrator access required")
 			return
 		}

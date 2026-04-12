@@ -27,13 +27,11 @@ import (
 	smtpadapter "cogni-cash/internal/adapter/email/smtp"
 	httpAdapter "cogni-cash/internal/adapter/http"
 	llmadapter "cogni-cash/internal/adapter/ollama"
-	aiparser "cogni-cash/internal/adapter/parser/bank_statement/ai"
 	amazonvisaparser "cogni-cash/internal/adapter/parser/bank_statement/amazonvisa"
 	ingparser "cogni-cash/internal/adapter/parser/bank_statement/ing"
 	ingcsvparser "cogni-cash/internal/adapter/parser/bank_statement/ingcsv"
 	vwparser "cogni-cash/internal/adapter/parser/bank_statement/vw"
 	invoiceparser "cogni-cash/internal/adapter/parser/invoice"
-	payslipaiparser "cogni-cash/internal/adapter/parser/payslip/ai"
 	cariadparser "cogni-cash/internal/adapter/parser/payslip/cariad"
 	memrepo "cogni-cash/internal/adapter/repository/memory"
 	pgrepo "cogni-cash/internal/adapter/repository/postgres"
@@ -81,7 +79,11 @@ func main() {
 	var reconciliationRepo port.ReconciliationRepository
 	var settingsRepo port.SettingsRepository
 	var payslipRepo port.PayslipRepository
+	var authRepo port.AuthRepository
 	var passwordResetRepo port.PasswordResetRepository
+	var plannedTransactionRepo port.PlannedTransactionRepository
+	var forecastingRepo port.ForecastingRepository
+	var bridgeTokenRepo port.BridgeAccessTokenRepository
 
 	if storageMode == "memory" {
 		logger.Info("Using in-memory storage mode")
@@ -96,7 +98,11 @@ func main() {
 		reconciliationRepo = memrepo.NewReconciliationRepository()
 		settingsRepo = memrepo.NewSettingsRepository(userRepo)
 		payslipRepo = memrepo.NewPayslipRepository()
+		authRepo = memrepo.NewAuthRepository()
 		passwordResetRepo = memrepo.NewPasswordResetRepository()
+		plannedTransactionRepo = memrepo.NewPlannedTransactionRepository()
+		forecastingRepo = memrepo.NewForecastingRepository()
+		bridgeTokenRepo = memrepo.NewBridgeAccessTokenRepository()
 
 		dbPinger = func(ctx context.Context) error { return nil }
 		dbHost = "memory"
@@ -133,7 +139,11 @@ func main() {
 		reconciliationRepo = pgrepo.NewReconciliationRepository(pool, bankStmtRepo, logger)
 		settingsRepo = pgrepo.NewSettingsRepository(pool, userRepo, logger)
 		payslipRepo = pgrepo.NewPayslipRepository(pool)
+		authRepo = pgrepo.NewAuthRepository(pool, logger)
 		passwordResetRepo = pgrepo.NewPasswordResetRepository(pool, logger)
+		plannedTransactionRepo = pgrepo.NewPlannedTransactionRepository(pool, logger)
+		forecastingRepo = pgrepo.NewForecastingRepository(pool)
+		bridgeTokenRepo = pgrepo.NewBridgeAccessTokenRepository(pool, logger)
 	}
 
 	admin, _ := userRepo.FindByUsername(appCtx, "admin")
@@ -151,27 +161,38 @@ func main() {
 	}
 
 	// --- Instantiate Services ---
-	authSvc := service.NewAuthService(userRepo, passwordResetRepo, nil, settingsRepo, jwtSecret, logger)
+	authSvc := service.NewAuthService(userRepo, passwordResetRepo, authRepo, nil, settingsRepo, jwtSecret, logger)
 	if err := authSvc.EnsureAdminUser(appCtx, adminUsername, adminPassword); err != nil {
 		logger.Error("Failed to seed default admin user", "error", err)
 	}
 
 	userSvc := service.NewUserService(userRepo, logger)
-	llmClient := llmadapter.NewAdapter(settingsRepo, logger)
 	settingsSvc := service.NewSettingsService(settingsRepo, logger)
 
 	emailProvider := smtpadapter.NewAdapter(settingsRepo, logger)
 	notificationSvc := service.NewNotificationService(emailProvider, userRepo, logger)
 
+	bridgeTokenSvc := service.NewBridgeAccessTokenService(bridgeTokenRepo)
+
 	// Inject notificationSvc into authSvc after it's created
-	authSvc = service.NewAuthService(userRepo, passwordResetRepo, notificationSvc, settingsRepo, jwtSecret, logger)
+	authSvc = service.NewAuthService(userRepo, passwordResetRepo, authRepo, notificationSvc, settingsRepo, jwtSecret, logger)
 
 	invoiceFileParser := invoiceparser.NewParser()
+
+	// Inject the text extractor into the LLM adapter so it can handle the fallback internally
+	llmClient := llmadapter.NewAdapter(settingsRepo, invoiceFileParser, logger)
+
 	invoiceSvc := service.NewInvoiceService(invoiceRepo, categoryRepo, invoiceFileParser, llmClient, logger)
 
-	bankStatementSvc := service.NewBankStatementService(bankStmtRepo, logger)
-	transactionSvc := service.NewTransactionService(bankStmtRepo, categoryRepo, settingsRepo, llmClient, logger)
 	reconciliationSvc := service.NewReconciliationService(bankStmtRepo, reconciliationRepo, logger)
+	plannedTransactionSvc := service.NewPlannedTransactionService(plannedTransactionRepo)
+
+	// Inject the LLMClient (which satisfies port.BankStatementAIParser)
+	bankStatementSvc := service.NewBankStatementService(bankStmtRepo, logger).
+		WithPlannedTransactionService(plannedTransactionSvc).
+		WithAIParser(llmClient)
+
+	transactionSvc := service.NewTransactionService(bankStmtRepo, categoryRepo, settingsRepo, llmClient, logger)
 
 	var bankProvider port.BankProvider
 	if storageMode == "memory" {
@@ -180,7 +201,8 @@ func main() {
 		bankProvider = dynamicbank.NewAdapter(settingsRepo, ebPrivateKey, logger)
 	}
 
-	bankSvc := service.NewBankService(bankRepo, bankStmtRepo, settingsRepo, bankProvider, logger)
+	bankSvc := service.NewBankService(bankRepo, bankStmtRepo, settingsRepo, plannedTransactionSvc, bankProvider, logger)
+	forecastingSvc := service.NewForecastingService(bankStmtRepo, bankRepo, categoryRepo, payslipRepo, plannedTransactionRepo, forecastingRepo, logger)
 
 	// If using dynamic adapter (Postgres mode), decide if we allow mock interception
 	if storageMode != "memory" {
@@ -189,19 +211,18 @@ func main() {
 		}
 	}
 
-	aiFallbackParser := aiparser.NewParser(llmClient, logger)
-	bankStatementSvc.WithFallbackParser(aiFallbackParser)
-
 	// --- Parser Registration ---
-	bankStatementSvc.RegisterParser(".pdf", vwparser.NewParser())
+	vwParser := vwparser.NewParser()
+	bankStatementSvc.RegisterParser(".pdf", vwParser)
+	bankStatementSvc.RegisterParser(".csv", vwParser)
 	bankStatementSvc.RegisterParser(".pdf", ingparser.NewParser(logger))
 	bankStatementSvc.RegisterParser(".csv", ingcsvparser.NewParser(logger))
 	bankStatementSvc.RegisterParser(".xls", amazonvisaparser.NewParser(logger))
 
 	// --- Payslip Service ---
 	cariadParser := cariadparser.NewParser(logger)
-	aiPayslipParser := payslipaiparser.NewPayslipParser(llmClient, logger)
-	payslipSvc := service.NewPayslipService(payslipRepo, cariadParser, aiPayslipParser, logger)
+	// Inject the LLMClient (which satisfies port.PayslipAIParser)
+	payslipSvc := service.NewPayslipService(payslipRepo, cariadParser, llmClient, logger)
 
 	// --- Background Workers ---
 	go func() {
@@ -355,6 +376,9 @@ func main() {
 	handler.WithTransactionService(transactionSvc)
 	handler.WithNotificationService(notificationSvc)
 	handler.WithReconciliationService(reconciliationSvc)
+	handler.WithForecastingService(forecastingSvc)
+	handler.WithPlannedTransactionService(plannedTransactionSvc)
+	handler.WithBridgeTokenService(bridgeTokenSvc)
 	handler.WithBankService(bankSvc)
 	handler.WithBankStatementRepository(bankStmtRepo)
 	handler.WithCategoryRepository(categoryRepo)
@@ -509,7 +533,6 @@ func runPayslipJSONImport(ctx context.Context, svc *service.PayslipService, user
 func loadEnableBankingKey(logger *slog.Logger) (*rsa.PrivateKey, error) {
 	keyString := os.Getenv("ENABLEBANKING_PRIVATE_KEY")
 	if keyString != "" {
-		// Repariert escappte Zeilenumbrüche, die in manchen .env Setups entstehen
 		keyString = strings.ReplaceAll(keyString, "\\n", "\n")
 		return parseRSAPem([]byte(keyString))
 	}
@@ -627,7 +650,7 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 		LastSyncedAt:      time.Now(),
 		AccountType:       entity.StatementTypeGiro,
 	}
-	_ = bankRepo.UpsertAccounts(ctx, []entity.BankAccount{acc})
+	_ = bankRepo.UpsertAccounts(ctx, []entity.BankAccount{acc}, adminID)
 
 	// 4. Seed Bank Statements and Transactions (last 3 months)
 	now := time.Now()

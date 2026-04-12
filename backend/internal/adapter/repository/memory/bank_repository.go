@@ -67,12 +67,11 @@ func (r *BankRepository) GetConnection(ctx context.Context, id uuid.UUID, userID
 	return &conn, nil
 }
 
-
-func (r *BankRepository) GetConnectionByRequisition(ctx context.Context, requisitionID string) (*entity.BankConnection, error) {
+func (r *BankRepository) GetConnectionByRequisition(ctx context.Context, requisitionID string, userID uuid.UUID) (*entity.BankConnection, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, conn := range r.connections {
-		if conn.RequisitionID == requisitionID {
+		if conn.RequisitionID == requisitionID && conn.UserID == userID {
 			return &conn, nil
 		}
 	}
@@ -91,11 +90,11 @@ func (r *BankRepository) GetConnectionsByUserID(ctx context.Context, userID uuid
 	return conns, nil
 }
 
-func (r *BankRepository) UpdateConnectionStatus(ctx context.Context, id uuid.UUID, status entity.ConnectionStatus) error {
+func (r *BankRepository) UpdateConnectionStatus(ctx context.Context, id uuid.UUID, status entity.ConnectionStatus, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	conn, ok := r.connections[id]
-	if !ok {
+	if !ok || conn.UserID != userID {
 		return entity.ErrBankConnectionNotFound
 	}
 	conn.Status = status
@@ -103,11 +102,11 @@ func (r *BankRepository) UpdateConnectionStatus(ctx context.Context, id uuid.UUI
 	return nil
 }
 
-func (r *BankRepository) UpdateRequisitionID(ctx context.Context, id uuid.UUID, requisitionID string) error {
+func (r *BankRepository) UpdateRequisitionID(ctx context.Context, id uuid.UUID, requisitionID string, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	conn, ok := r.connections[id]
-	if !ok {
+	if !ok || conn.UserID != userID {
 		return entity.ErrBankConnectionNotFound
 	}
 	conn.RequisitionID = requisitionID
@@ -135,7 +134,7 @@ func (r *BankRepository) DeleteConnection(ctx context.Context, id uuid.UUID, use
 	return nil
 }
 
-func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.BankAccount) error {
+func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.BankAccount, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for i := range accounts {
@@ -174,34 +173,57 @@ func (r *BankRepository) GetAccountByID(ctx context.Context, id uuid.UUID, userI
 	return &acc, nil
 }
 
-func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connectionID uuid.UUID) ([]entity.BankAccount, error) {
+func (r *BankRepository) GetAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]entity.BankAccount, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var accs []entity.BankAccount
 	for _, acc := range r.accounts {
-		if acc.ConnectionID == connectionID {
+		conn, ok := r.connections[acc.ConnectionID]
+		if ok && conn.UserID == userID {
 			accs = append(accs, acc)
 		}
 	}
 	return accs, nil
 }
 
-func (r *BankRepository) GetAccountByProviderID(ctx context.Context, providerAccountID string) (*entity.BankAccount, error) {
+func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connectionID uuid.UUID, userID uuid.UUID) ([]entity.BankAccount, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var accs []entity.BankAccount
+	for _, acc := range r.accounts {
+		if acc.ConnectionID == connectionID {
+			conn, ok := r.connections[connectionID]
+			if ok && conn.UserID == userID {
+				accs = append(accs, acc)
+			}
+		}
+	}
+	return accs, nil
+}
+
+func (r *BankRepository) GetAccountByProviderID(ctx context.Context, providerAccountID string, userID uuid.UUID) (*entity.BankAccount, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, acc := range r.accounts {
 		if acc.ProviderAccountID == providerAccountID {
-			return &acc, nil
+			conn, ok := r.connections[acc.ConnectionID]
+			if ok && conn.UserID == userID {
+				return &acc, nil
+			}
 		}
 	}
 	return nil, entity.ErrBankAccountNotFound
 }
 
-func (r *BankRepository) UpdateAccountBalance(ctx context.Context, id uuid.UUID, balance float64, syncedAt interface{}, errorMsg *string) error {
+func (r *BankRepository) UpdateAccountBalance(ctx context.Context, id uuid.UUID, balance float64, syncedAt interface{}, errorMsg *string, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	acc, ok := r.accounts[id]
 	if !ok {
+		return entity.ErrBankAccountNotFound
+	}
+	conn, ok := r.connections[acc.ConnectionID]
+	if !ok || conn.UserID != userID {
 		return entity.ErrBankAccountNotFound
 	}
 	acc.Balance = balance

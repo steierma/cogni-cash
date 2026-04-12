@@ -4,6 +4,8 @@ import (
 	"cogni-cash/internal/domain/entity"
 	"context"
 	"fmt"
+	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -103,6 +105,15 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 
 	query += " ORDER BY period_year DESC, period_month_num DESC, created_at DESC"
 
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
+
 	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -120,7 +131,7 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 		if err != nil {
 			return nil, err
 		}
-		p.Bonuses, err = r.findBonuses(ctx, p.ID)
+		p.Bonuses, err = r.findBonuses(ctx, p.ID, p.UserID)
 		if err != nil {
 			return nil, err
 		}
@@ -129,10 +140,10 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 	return payslips, nil
 }
 
-func (r *PayslipRepository) findBonuses(ctx context.Context, payslipID string) ([]entity.Bonus, error) {
+func (r *PayslipRepository) findBonuses(ctx context.Context, payslipID string, userID uuid.UUID) ([]entity.Bonus, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT description, amount FROM payslip_bonuses WHERE payslip_id = $1 ORDER BY created_at`,
-		payslipID,
+		`SELECT b.description, b.amount FROM payslip_bonuses b JOIN payslips p ON b.payslip_id = p.id WHERE b.payslip_id = $1 AND p.user_id = $2 ORDER BY b.created_at`,
+		payslipID, userID,
 	)
 	if err != nil {
 		return nil, err
@@ -167,7 +178,7 @@ func (r *PayslipRepository) FindByID(ctx context.Context, id string, userID uuid
 		return p, err
 	}
 
-	p.Bonuses, err = r.findBonuses(ctx, p.ID)
+	p.Bonuses, err = r.findBonuses(ctx, p.ID, p.UserID)
 	return p, err
 }
 
@@ -204,7 +215,7 @@ func (r *PayslipRepository) Update(ctx context.Context, p *entity.Payslip) error
 		}
 	}
 
-	if _, err = tx.Exec(ctx, `DELETE FROM payslip_bonuses WHERE payslip_id = $1`, p.ID); err != nil {
+	if _, err = tx.Exec(ctx, `DELETE FROM payslip_bonuses WHERE payslip_id = $1 AND payslip_id IN (SELECT id FROM payslips WHERE id = $1 AND user_id = $2)`, p.ID, p.UserID); err != nil {
 		return fmt.Errorf("payslip repo update delete bonuses: %w", err)
 	}
 	for _, b := range p.Bonuses {
@@ -231,7 +242,16 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 
 	query := `SELECT original_file_content, original_file_name FROM payslips WHERE id = $1 AND user_id = $2`
 	err := r.db.QueryRow(ctx, query, id, userID).Scan(&content, &filename)
-	return content, "application/pdf", filename, err
+	
+	mimeType := "application/octet-stream"
+	if err == nil && len(content) > 0 {
+		mimeType = http.DetectContentType(content)
+		if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
+			mimeType = mimeType[:idx]
+		}
+	}
+	
+	return content, mimeType, filename, err
 }
 
 func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (entity.PayslipSummary, error) {

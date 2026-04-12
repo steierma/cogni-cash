@@ -16,9 +16,9 @@ func TestBankRepository(t *testing.T) {
 
 	t.Run("Create_and_GetConnection", func(t *testing.T) {
 		conn := &entity.BankConnection{
-			ID:             uuid.New(),
-			UserID:         userID,
-			InstitutionID:  "bank1",
+			ID:            uuid.New(),
+			UserID:        userID,
+			InstitutionID: "bank1",
 			RequisitionID: "req1",
 		}
 		err := repo.CreateConnection(ctx, conn)
@@ -45,7 +45,7 @@ func TestBankRepository(t *testing.T) {
 			ProviderAccountID: "acc1",
 			IBAN:              "DE123",
 		}
-		err := repo.UpsertAccounts(ctx, []entity.BankAccount{acc})
+		err := repo.UpsertAccounts(ctx, []entity.BankAccount{acc}, userID)
 		if err != nil {
 			t.Fatalf("UpsertAccounts: %v", err)
 		}
@@ -63,7 +63,7 @@ func TestBankRepository(t *testing.T) {
 		connID := uuid.New()
 		_ = repo.CreateConnection(ctx, &entity.BankConnection{ID: connID, UserID: userID})
 		accID := uuid.New()
-		_ = repo.UpsertAccounts(ctx, []entity.BankAccount{{ID: accID, ConnectionID: connID, ProviderAccountID: "p1"}})
+		_ = repo.UpsertAccounts(ctx, []entity.BankAccount{{ID: accID, ConnectionID: connID, ProviderAccountID: "p1"}}, userID)
 
 		err := repo.DeleteConnection(ctx, connID, userID)
 		if err != nil {

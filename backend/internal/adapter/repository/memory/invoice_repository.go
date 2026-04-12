@@ -2,6 +2,8 @@ package memory
 
 import (
 	"context"
+	"net/http"
+	"strings"
 	"sync"
 
 	"cogni-cash/internal/domain/entity"
@@ -69,16 +71,27 @@ func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID u
 	return invoice, nil
 }
 
-func (r *InvoiceRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error) {
+func (r *InvoiceRepository) FindAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	var invoices []entity.Invoice
-	for _, inv := range r.invoices {
-		if inv.UserID == userID {
+	for _, id := range r.order {
+		inv := r.invoices[id]
+		if inv.UserID == filter.UserID {
 			invoices = append(invoices, inv)
 		}
 	}
-	return invoices, nil
+
+	if filter.Offset >= len(invoices) {
+		return []entity.Invoice{}, nil
+	}
+
+	end := len(invoices)
+	if filter.Limit > 0 && filter.Offset+filter.Limit < end {
+		end = filter.Offset + filter.Limit
+	}
+
+	return invoices[filter.Offset:end], nil
 }
 
 func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
@@ -103,14 +116,23 @@ func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string
 	return false, nil
 }
 
-func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) (content []byte, mimeType string, fileName string, err error) {
+func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	inv, ok := r.invoices[id]
 	if !ok || inv.UserID != userID {
 		return nil, "", "", entity.ErrInvoiceNotFound
 	}
-	return inv.OriginalFileContent, "application/pdf", inv.OriginalFileName, nil
+
+	mimeType := "application/octet-stream"
+	if len(inv.OriginalFileContent) > 0 {
+		mimeType = http.DetectContentType(inv.OriginalFileContent)
+		if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
+			mimeType = mimeType[:idx]
+		}
+	}
+
+	return inv.OriginalFileContent, mimeType, inv.OriginalFileName, nil
 }
 
 var _ port.InvoiceRepository = (*InvoiceRepository)(nil)

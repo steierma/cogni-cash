@@ -6,7 +6,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"math"
+	"net/http"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -15,7 +17,6 @@ import (
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
-	"log/slog"
 
 	"github.com/google/uuid"
 )
@@ -27,10 +28,11 @@ var ErrDuplicate = entity.ErrDuplicate
 var normalizeTxnTextRe = regexp.MustCompile(`[^a-z0-9]+`)
 
 type BankStatementService struct {
-	parsers        map[string][]port.BankStatementParser
-	fallbackParser port.BankStatementParser
-	repo           port.BankStatementRepository
-	Logger         *slog.Logger
+	parsers          map[string][]port.BankStatementParser
+	repo             port.BankStatementRepository
+	plannedTxService port.PlannedTransactionUseCase
+	aiParser         port.BankStatementAIParser
+	Logger           *slog.Logger
 }
 
 func NewBankStatementService(repo port.BankStatementRepository, logger *slog.Logger) *BankStatementService {
@@ -44,8 +46,14 @@ func NewBankStatementService(repo port.BankStatementRepository, logger *slog.Log
 	}
 }
 
-func (s *BankStatementService) WithFallbackParser(parser port.BankStatementParser) *BankStatementService {
-	s.fallbackParser = parser
+func (s *BankStatementService) WithPlannedTransactionService(svc port.PlannedTransactionUseCase) *BankStatementService {
+	s.plannedTxService = svc
+	return s
+}
+
+// WithAIParser injects the abstract AI Parser port
+func (s *BankStatementService) WithAIParser(parser port.BankStatementAIParser) *BankStatementService {
+	s.aiParser = parser
 	return s
 }
 
@@ -65,10 +73,18 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 	var parseErr error
 	parsedSuccessfully := false
 
+	mimeType := http.DetectContentType(fileBytes)
+	if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
+		mimeType = mimeType[:idx]
+	}
+	if mimeType == "application/octet-stream" && strings.HasSuffix(ext, ".pdf") {
+		mimeType = "application/pdf"
+	}
+
 	if useAI {
-		if s.fallbackParser != nil {
+		if s.aiParser != nil {
 			s.Logger.Info("Attempting AI parser exclusively as requested", "file", fileName, "user_id", userID)
-			stmt, parseErr = s.fallbackParser.Parse(ctx, userID, fileBytes)
+			stmt, parseErr = s.aiParser.ParseBankStatement(ctx, userID, fileName, mimeType, fileBytes)
 			if parseErr == nil {
 				if err := stmt.IsValid(); err == nil {
 					parsedSuccessfully = true
@@ -261,6 +277,13 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 	}
 
 	s.Logger.Info("Bank statement imported successfully", "id", stmt.ID, "content_hash", stmt.ContentHash, "user_id", userID, "imported_count", len(stmt.Transactions), "skipped_count", len(stmt.SkippedTransactions))
+
+	if s.plannedTxService != nil && len(stmt.Transactions) > 0 {
+		if err := s.plannedTxService.MatchTransactions(ctx, userID, stmt.Transactions); err != nil {
+			s.Logger.Error("Failed to match planned transactions", "error", err, "user_id", userID)
+		}
+	}
+
 	return stmt, nil
 }
 

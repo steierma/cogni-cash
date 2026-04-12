@@ -29,8 +29,8 @@ func TestReconciliationRepository(t *testing.T) {
 
 	_, _ = globalPool.Exec(ctx, `INSERT INTO bank_statements (id, user_id, content_hash) VALUES ($1, $2, 'cc_statement_hash')`, stmtID, userID)
 
-	_, _ = globalPool.Exec(ctx, `INSERT INTO transactions (id, user_id, bank_statement_id, booking_date, valuta_date, amount, transaction_type, content_hash) VALUES ($1, $2, $3, $4, $4, -500.00, 'debit', $5)`, uuid.New(), userID, stmtID, time.Now().UTC(), settlementHash)
-	_, _ = globalPool.Exec(ctx, `INSERT INTO transactions (id, user_id, bank_statement_id, booking_date, valuta_date, amount, transaction_type, content_hash) VALUES ($1, $2, $3, $4, $4, 500.00, 'credit', $5)`, uuid.New(), userID, stmtID, time.Now().UTC(), targetHash)
+	_, _ = globalPool.Exec(ctx, `INSERT INTO transactions (id, user_id, bank_statement_id, booking_date, valuta_date, amount, transaction_type, content_hash, is_payslip_verified) VALUES ($1, $2, $3, $4, $4, -500.00, 'debit', $5, false)`, uuid.New(), userID, stmtID, time.Now().UTC(), settlementHash)
+	_, _ = globalPool.Exec(ctx, `INSERT INTO transactions (id, user_id, bank_statement_id, booking_date, valuta_date, amount, transaction_type, content_hash, is_payslip_verified) VALUES ($1, $2, $3, $4, $4, 500.00, 'credit', $5, false)`, uuid.New(), userID, stmtID, time.Now().UTC(), targetHash)
 
 	t.Run("Save, Find, and Delete Reconciliations", func(t *testing.T) {
 		rec := entity.Reconciliation{

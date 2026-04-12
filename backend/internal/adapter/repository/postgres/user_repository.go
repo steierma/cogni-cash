@@ -131,7 +131,7 @@ func (r *UserRepository) Upsert(ctx context.Context, user entity.User) error {
 			email = EXCLUDED.email,
 			full_name = EXCLUDED.full_name,
 			address = EXCLUDED.address,
-			role = EXCLUDED.role`
+			role = EXCLUDED.role -- user_id implicitly matched (users table)`
 	// NOTE: password_hash is intentionally excluded from the UPDATE clause.
 	// The password set on first insert is only ever changed through the
 	// dedicated UpdatePassword method (Settings page / resetpw CLI).

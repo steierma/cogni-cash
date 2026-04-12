@@ -6,6 +6,7 @@ import (
 	"encoding/hex"
 	"fmt"
 	"log/slog"
+	"strings"
 	"time"
 
 	"cogni-cash/internal/domain/entity"
@@ -13,6 +14,16 @@ import (
 
 	"github.com/google/uuid"
 )
+
+// imageMIMETypes is the set of image MIME types that bypass text extraction
+// and go directly to the LLM via the multimodal CategorizeInvoiceImage path.
+var imageMIMETypes = map[string]bool{
+	"image/jpeg": true,
+	"image/jpg":  true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
+}
 
 // ErrInvoiceDuplicate is returned when an invoice with the same content hash already exists.
 var ErrInvoiceDuplicate = entity.ErrInvoiceDuplicate
@@ -31,11 +42,11 @@ var ErrEmptyRawText = entity.ErrEmptyRawText
 //
 // It depends exclusively on ports and has no infrastructure imports.
 type InvoiceService struct {
-	invoiceRepo  port.InvoiceRepository
-	categoryRepo port.CategoryRepository
-	parser       port.InvoiceParser // extracts text from invoice files (PDF, …)
-	llm          port.LLMClient
-	logger       *slog.Logger
+	invoiceRepo   port.InvoiceRepository
+	categoryRepo  port.CategoryRepository
+	parser        port.InvoiceParser // extracts text from invoice files (PDF, …)
+	aiCategorizer port.InvoiceAICategorizer
+	logger        *slog.Logger
 }
 
 // NewInvoiceService creates a new InvoiceService.
@@ -43,18 +54,18 @@ func NewInvoiceService(
 	invoiceRepo port.InvoiceRepository,
 	categoryRepo port.CategoryRepository,
 	parser port.InvoiceParser,
-	llm port.LLMClient,
+	aiCategorizer port.InvoiceAICategorizer,
 	logger *slog.Logger,
 ) *InvoiceService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &InvoiceService{
-		invoiceRepo:  invoiceRepo,
-		categoryRepo: categoryRepo,
-		parser:       parser,
-		llm:          llm,
-		logger:       logger,
+		invoiceRepo:   invoiceRepo,
+		categoryRepo:  categoryRepo,
+		parser:        parser,
+		aiCategorizer: aiCategorizer,
+		logger:        logger,
 	}
 }
 
@@ -65,6 +76,8 @@ func NewInvoiceService(
 // ImportFromFile reads the file bytes, checks for duplicates via SHA-256, extracts
 // text from the file, calls the LLM for categorization, and persists the invoice.
 // Returns ErrInvoiceDuplicate when the same file was already imported.
+// Image files (JPEG, PNG, GIF, WEBP) bypass text extraction and are sent
+// directly to the LLM via the multimodal CategorizeInvoiceImage path.
 func (s *InvoiceService) ImportFromFile(
 	ctx context.Context,
 	userID uuid.UUID,
@@ -85,32 +98,71 @@ func (s *InvoiceService) ImportFromFile(
 		return entity.Invoice{}, fmt.Errorf("%w: %s", ErrInvoiceDuplicate, contentHash)
 	}
 
-	// 2. Extract text from the byte slice directly
-	rawText, err := s.parser.Extract(ctx, userID, fileBytes, mimeType)
-	if err != nil || rawText == "" {
-		s.logger.Warn("Text extraction failed or returned empty; using filename as fallback raw text",
-			"file", fileName, "error", err, "user_id", userID)
-		rawText = fileName // minimal fallback so LLM still gets something
+	normMIME := strings.ToLower(strings.TrimSpace(mimeType))
+
+	var invoice entity.Invoice
+
+	if imageMIMETypes[normMIME] {
+		// 2a. Image path — skip text extraction, go directly to multimodal LLM
+		s.logger.Info("Image file detected, using multimodal LLM path",
+			"file", fileName, "mime", mimeType, "user_id", userID)
+
+		categories, err := s.categoryRepo.FindAll(ctx, userID)
+		if err != nil {
+			return entity.Invoice{}, fmt.Errorf("fetch categories: %w", err)
+		}
+		catNames := make([]string, len(categories))
+		for i, c := range categories {
+			catNames[i] = c.Name
+		}
+
+		result, err := s.aiCategorizer.CategorizeInvoiceImage(ctx, userID, fileName, normMIME, fileBytes, catNames)
+		if err != nil {
+			s.logger.Error("Multimodal image categorization failed", "error", err, "user_id", userID)
+			return entity.Invoice{}, fmt.Errorf("invoice service: image categorization: %w", err)
+		}
+
+		cat := s.resolveCategory(result.InvoiceName, categories)
+		vendor := entity.Vendor{ID: uuid.New(), Name: result.VendorName}
+
+		invoice = entity.Invoice{
+			ID:          uuid.New(),
+			UserID:      userID,
+			Vendor:      vendor,
+			CategoryID:  &cat.ID,
+			Amount:      result.Amount,
+			Currency:    result.Currency,
+			IssuedAt:    time.Now().UTC(),
+			Description: result.Description,
+		}
+	} else {
+		// 2b. Non-image path — extract text then categorize via text prompt
+		rawText, err := s.parser.Extract(ctx, userID, fileBytes, mimeType)
+		if err != nil || rawText == "" {
+			s.logger.Warn("Text extraction failed or returned empty; using filename as fallback raw text",
+				"file", fileName, "error", err, "user_id", userID)
+			rawText = fileName // minimal fallback so LLM still gets something
+		}
+
+		// 3. CategorizeInvoice via LLM
+		invoice, err = s.categorize(ctx, userID, rawText)
+		if err != nil {
+			return entity.Invoice{}, err
+		}
 	}
 
-	// 3. Categorize via LLM
-	invoice, err := s.categorize(ctx, userID, rawText)
-	if err != nil {
-		return entity.Invoice{}, err
-	}
-
-	// 5. Caller-supplied category overrides LLM result
+	// 4. Caller-supplied category overrides LLM result
 	if categoryID != nil {
 		invoice.CategoryID = categoryID
 	}
 
-	// 6. Attach file metadata
+	// 5. Attach file metadata
 	invoice.UserID = userID
 	invoice.ContentHash = contentHash
 	invoice.OriginalFileName = fileName
 	invoice.OriginalFileContent = fileBytes
 
-	// 7. Persist
+	// 6. Persist
 	if err := s.invoiceRepo.Save(ctx, invoice); err != nil {
 		return entity.Invoice{}, fmt.Errorf("invoice service: save: %w", err)
 	}
@@ -142,8 +194,8 @@ func (s *InvoiceService) CategorizeDocument(ctx context.Context, userID uuid.UUI
 // ── CRUD ───────────────────────────────────────────────────────────────────
 
 // GetAll returns every invoice ordered by issued_at desc.
-func (s *InvoiceService) GetAll(ctx context.Context, userID uuid.UUID) ([]entity.Invoice, error) {
-	return s.invoiceRepo.FindAll(ctx, userID)
+func (s *InvoiceService) GetAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error) {
+	return s.invoiceRepo.FindAll(ctx, filter)
 }
 
 // GetByID returns a single invoice or ErrInvoiceNotFound.
@@ -193,7 +245,7 @@ func (s *InvoiceService) categorize(ctx context.Context, userID uuid.UUID, rawTe
 	}
 
 	s.logger.Info("Calling LLM for invoice categorization", "categories", catNames, "user_id", userID)
-	result, err := s.llm.Categorize(ctx, userID, port.CategorizationRequest{
+	result, err := s.aiCategorizer.CategorizeInvoice(ctx, userID, port.CategorizationRequest{
 		RawText:    rawText,
 		Categories: catNames,
 	})
@@ -202,7 +254,7 @@ func (s *InvoiceService) categorize(ctx context.Context, userID uuid.UUID, rawTe
 		return entity.Invoice{}, err
 	}
 
-	cat := s.resolveCategory(result.CategoryName, categories)
+	cat := s.resolveCategory(result.InvoiceName, categories)
 	vendor := entity.Vendor{ID: uuid.New(), Name: result.VendorName}
 
 	return entity.Invoice{
@@ -226,13 +278,4 @@ func (s *InvoiceService) resolveCategory(name string, categories []entity.Catego
 		}
 	}
 	return entity.Category{ID: uuid.New(), Name: "Uncategorized"}
-}
-
-func fileExtFromName(name string) string {
-	for i := len(name) - 1; i >= 0; i-- {
-		if name[i] == '.' {
-			return name[i:]
-		}
-	}
-	return ""
 }

@@ -52,6 +52,12 @@ var ErrReconciliationNotFound = errors.New("reconciliation not found")
 // ErrTransactionNotFound is returned when a referenced transaction cannot be located.
 var ErrTransactionNotFound = errors.New("transaction not found")
 
+// ErrPlannedTransactionNotFound is returned when a referenced planned transaction cannot be located.
+var ErrPlannedTransactionNotFound = errors.New("planned transaction not found")
+
+// ErrInvalidPlannedTransaction is returned when a planned transaction validation fails.
+var ErrInvalidPlannedTransaction = errors.New("invalid planned transaction")
+
 // ErrSameAccount is returned when trying to reconcile two transactions from the same account type.
 var ErrSameAccount = errors.New("source and target must be from different accounts")
 

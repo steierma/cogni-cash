@@ -11,8 +11,9 @@ import (
 )
 
 type categoryRequest struct {
-	Name  string `json:"name"`
-	Color string `json:"color"`
+	Name               string `json:"name"`
+	Color              string `json:"color"`
+	IsVariableSpending bool   `json:"is_variable_spending"`
 }
 
 func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
@@ -20,12 +21,11 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "category repository not available")
 		return
 	}
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	cats, err := h.categoryRepo.FindAll(r.Context(), userID)
 	if err != nil {
@@ -43,12 +43,11 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "category repository not available")
 		return
 	}
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	var req categoryRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil || req.Name == "" {
@@ -59,9 +58,10 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 		req.Color = "#6366f1"
 	}
 	cat, err := h.categoryRepo.Save(r.Context(), entity.Category{
-		UserID: userID,
-		Name:   req.Name,
-		Color:  req.Color,
+		UserID:             userID,
+		Name:               req.Name,
+		Color:              req.Color,
+		IsVariableSpending: req.IsVariableSpending,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -75,12 +75,11 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "category repository not available")
 		return
 	}
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -96,10 +95,11 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 		req.Color = "#6366f1"
 	}
 	cat, err := h.categoryRepo.Update(r.Context(), entity.Category{
-		ID:     id,
-		UserID: userID,
-		Name:   req.Name,
-		Color:  req.Color,
+		ID:                 id,
+		UserID:             userID,
+		Name:               req.Name,
+		Color:              req.Color,
+		IsVariableSpending: req.IsVariableSpending,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -113,12 +113,11 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusServiceUnavailable, "category repository not available")
 		return
 	}
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id, err := uuid.Parse(chi.URLParam(r, "id"))
 	if err != nil {
@@ -130,4 +129,37 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) restoreCategory(w http.ResponseWriter, r *http.Request) {
+	if h.categoryRepo == nil {
+		writeError(w, http.StatusServiceUnavailable, "category repository not available")
+		return
+	}
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid category id")
+		return
+	}
+
+	// Fetch the category to preserve existing name/color
+	cat, err := h.categoryRepo.FindByID(r.Context(), id, userID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "category not found")
+		return
+	}
+
+	cat.DeletedAt = nil // Clear deleted_at
+	restored, err := h.categoryRepo.Update(r.Context(), cat)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusOK, restored)
 }

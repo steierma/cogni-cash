@@ -22,11 +22,16 @@ var ErrPayslipDuplicate = entity.ErrPayslipDuplicate
 type PayslipService struct {
 	repo         port.PayslipRepository
 	staticParser port.PayslipParser
-	aiParser     port.PayslipParser
+	aiParser     port.PayslipAIParser
 	logger       *slog.Logger
 }
 
-func NewPayslipService(repo port.PayslipRepository, staticParser port.PayslipParser, aiParser port.PayslipParser, logger *slog.Logger) *PayslipService {
+func NewPayslipService(
+	repo port.PayslipRepository,
+	staticParser port.PayslipParser,
+	aiParser port.PayslipAIParser,
+	logger *slog.Logger,
+) *PayslipService {
 	return &PayslipService{
 		repo:         repo,
 		staticParser: staticParser,
@@ -53,7 +58,7 @@ func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, fileName,
 
 	if useAI {
 		s.logger.Info("Force AI Parsing requested. Bypassing static parser.", "user_id", userID)
-		payslip, parseErr = s.aiParser.Parse(ctx, userID, fileBytes)
+		payslip, parseErr = s.aiParser.ParsePayslip(ctx, userID, fileName, mimeType, fileBytes)
 		if parseErr != nil {
 			return nil, fmt.Errorf("failed to parse payslip with forced AI: %w", parseErr)
 		}
@@ -67,8 +72,7 @@ func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, fileName,
 			if !canSkipAI {
 				s.logger.Warn("Static parser failed or returned incomplete data. Triggering AI fallback.", "file", fileName, "static_error", parseErr, "user_id", userID)
 
-				var aiErr error
-				aiPayslip, aiErr := s.aiParser.Parse(ctx, userID, fileBytes)
+				aiPayslip, aiErr := s.aiParser.ParsePayslip(ctx, userID, fileName, mimeType, fileBytes)
 				if aiErr != nil {
 					return nil, fmt.Errorf("failed to parse payslip with AI fallback: %w", aiErr)
 				}
@@ -165,7 +169,6 @@ func (s *PayslipService) GetSummary(ctx context.Context, userID uuid.UUID) (enti
 	return s.repo.GetSummary(ctx, userID)
 }
 
-// JSONPayslipEntry represents a single record in the payslip bulk-import JSON manifest.
 type JSONPayslipEntry struct {
 	PeriodMonthNum   int            `json:"period_month_num"`
 	PeriodYear       int            `json:"period_year"`

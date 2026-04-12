@@ -76,8 +76,8 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			INSERT INTO transactions
 			        (id, user_id, bank_statement_id, booking_date, valuta_date,
 			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
-			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, skip_forecasting, is_payslip_verified)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21)
 			ON CONFLICT (content_hash, user_id) DO NOTHING`,
 			uuid.New(),
 			stmt.UserID,
@@ -98,6 +98,8 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			t.CounterpartyIban,
 			t.BankTransactionCode,
 			t.MandateReference,
+			t.SkipForecasting,
+			t.IsPayslipVerified,
 		)
 	}
 
@@ -132,8 +134,8 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			INSERT INTO transactions
 			        (id, user_id, bank_account_id, booking_date, valuta_date,
 			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
-			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, skip_forecasting, is_payslip_verified)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21)
 			ON CONFLICT (content_hash, user_id) DO NOTHING`,
 			t.ID,
 			t.UserID,
@@ -154,6 +156,8 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			t.CounterpartyIban,
 			t.BankTransactionCode,
 			t.MandateReference,
+			t.SkipForecasting,
+			t.IsPayslipVerified,
 		)
 	}
 
@@ -173,7 +177,7 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
 	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.skip_forecasting, t.is_payslip_verified
 	        FROM transactions t		LEFT JOIN bank_statements b ON t.bank_statement_id = b.id
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
 		WHERE t.user_id = $1`
@@ -234,6 +238,15 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 
 	query += " ORDER BY t.booking_date DESC, t.id"
 
+	if filter.Limit > 0 {
+		args = append(args, filter.Limit)
+		query += fmt.Sprintf(" LIMIT $%d", len(args))
+	}
+	if filter.Offset > 0 {
+		args = append(args, filter.Offset)
+		query += fmt.Sprintf(" OFFSET $%d", len(args))
+	}
+
 	rows, err := r.pool.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: find transactions: %w", err)
@@ -257,7 +270,7 @@ func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID u
 	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
 	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.skip_forecasting, t.is_payslip_verified
 	        FROM transactions t		JOIN bank_statements b ON t.bank_statement_id = b.id
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
 		WHERE t.bank_statement_id = $1 AND t.user_id = $2
@@ -306,6 +319,8 @@ func scanTransaction(row scanner) (entity.Transaction, error) {
 		&cpIban,
 		&bankTxCode,
 		&mandateRef,
+		&t.SkipForecasting,
+		&t.IsPayslipVerified,
 	); err != nil {
 		return entity.Transaction{}, err
 	}
@@ -638,6 +653,13 @@ func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context,
 		return fmt.Errorf("bank_statement repo: transaction not found for reconciliation: %s", contentHash)
 	}
 	return nil
+}
+
+func (r *BankStatementRepository) UpdateTransactionSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE transactions SET skip_forecasting = $1
+		WHERE content_hash = $2 AND user_id = $3`, skip, hash, userID)
+	return err
 }
 
 func (r *BankStatementRepository) LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error {

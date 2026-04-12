@@ -134,7 +134,7 @@ export default function TransactionFilters({
                             </>
                         )}
 
-                        {categories.map((c) => (
+                        {categories.filter(c => !c.deleted_at || c.id === localDraft.category).map((c) => (
                             <option key={c.id} value={c.id}>{c.name}</option>
                         ))}
                     </select>

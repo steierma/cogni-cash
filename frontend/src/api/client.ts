@@ -1,9 +1,11 @@
-import axios, {type AxiosResponse} from 'axios';
+import axios, {type AxiosResponse, type InternalAxiosRequestConfig} from 'axios';
 import type {
+    AuthResponse,
     BankConnection,
     BankInstitution,
     BankStatement,
     BankStatementSummary,
+    CashFlowForecast,
     Category,
     ImportBatchResponse,
     Invoice,
@@ -15,7 +17,12 @@ import type {
     SystemInfo,
     Transaction,
     TransactionAnalytics,
-    User
+    User,
+    PlannedTransaction,
+    CreatePlannedTransactionRequest,
+    UpdatePlannedTransactionRequest,
+    BridgeAccessToken,
+    CreateBridgeTokenResponse
 } from './types';
 
 const api = axios.create({
@@ -27,10 +34,24 @@ const api = axios.create({
 
 api.interceptors.response.use(
     (response: AxiosResponse) => response,
-    (error: unknown) => {
+    async (error: unknown) => {
         if (axios.isAxiosError(error) && error.response?.status === 401) {
-            if (window.location.pathname !== '/login') {
-                window.location.href = '/login';
+            const originalRequest = error.config as InternalAxiosRequestConfig & { _retry?: boolean };
+            if (originalRequest && !originalRequest._retry && window.location.pathname !== '/login') {
+                originalRequest._retry = true;
+                const refreshToken = localStorage.getItem('refresh_token');
+                if (refreshToken) {
+                    try {
+                        const res = await axios.post<AuthResponse>('/api/v1/auth/refresh/', { refresh_token: refreshToken });
+                        localStorage.setItem('refresh_token', res.data.refresh_token);
+                        return api(originalRequest);
+                    } catch (refreshError) {
+                        localStorage.removeItem('refresh_token');
+                        window.location.href = '/login';
+                    }
+                } else {
+                    window.location.href = '/login';
+                }
             }
         }
         return Promise.reject(error);
@@ -53,11 +74,19 @@ export const sendTestEmail = (to: string): Promise<void> =>
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 
-export const login = (username: string, password: string): Promise<{ token: string }> =>
-    api.post<{ token: string }>('login/', {username, password}).then((r: AxiosResponse<{ token: string }>) => r.data);
+export const login = (username: string, password: string): Promise<AuthResponse> =>
+    api.post<AuthResponse>('login/', {username, password}).then((r: AxiosResponse<AuthResponse>) => {
+        if (r.data.refresh_token) {
+            localStorage.setItem('refresh_token', r.data.refresh_token);
+        }
+        return r.data;
+    });
 
-export const logout = (): Promise<void> =>
-    api.post('logout/').then(() => undefined);
+export const logout = (): Promise<void> => {
+    const refreshToken = localStorage.getItem('refresh_token');
+    localStorage.removeItem('refresh_token');
+    return api.post('logout/', { refresh_token: refreshToken }).then(() => undefined);
+};
 
 export const changePassword = (oldPassword: string, newPassword: string): Promise<void> =>
     api.post('auth/change-password/', {
@@ -134,12 +163,16 @@ export const updateInvoice = (id: string, data: InvoiceUpdatePayload): Promise<I
 export const deleteInvoice = (id: string): Promise<void> =>
     api.delete(`invoices/${id}/`).then(() => undefined);
 
-export const getInvoicePreviewUrl = async (id: string): Promise<string> => {
+export const getInvoicePreviewUrl = async (id: string): Promise<{ url: string; mimeType: string }> => {
     const response = await api.get<Blob>(`invoices/${id}/download/`, {
         responseType: 'blob',
     });
-    const blob = new Blob([response.data], {type: 'application/pdf'});
-    return window.URL.createObjectURL(blob);
+    const mimeType = response.headers['content-type'] || 'application/pdf';
+    const blob = new Blob([response.data], {type: mimeType});
+    return {
+        url: window.URL.createObjectURL(blob),
+        mimeType
+    };
 };
 
 export const downloadInvoiceFile = async (id: string, vendorName?: string): Promise<void> => {
@@ -158,6 +191,10 @@ export const downloadInvoiceFile = async (id: string, vendorName?: string): Prom
     } else {
         const contentType = response.headers['content-type'] as string | undefined;
         if (contentType === 'application/pdf') filename += '.pdf';
+        else if (contentType === 'image/jpeg') filename += '.jpg';
+        else if (contentType === 'image/png') filename += '.png';
+        else if (contentType === 'image/gif') filename += '.gif';
+        else if (contentType === 'image/webp') filename += '.webp';
         else filename += '.pdf'; // Fallback
     }
 
@@ -249,7 +286,8 @@ export const fetchTransactions = (
     hideReconciled: boolean = true,
     categoryId?: string,
     reviewed?: boolean,
-    search?: string
+    search?: string,
+    includePredictions: boolean = false
 ): Promise<Transaction[]> =>
     api.get<Transaction[]>('transactions/', {
         params: {
@@ -257,9 +295,18 @@ export const fetchTransactions = (
             hide_reconciled: hideReconciled,
             category_id: categoryId || undefined,
             reviewed: reviewed,
-            search: search || undefined
+            search: search || undefined,
+            include_predictions: includePredictions
         }
     }).then((r: AxiosResponse<Transaction[]>) => r.data ?? []);
+
+export const fetchForecast = (fromDate?: string, toDate?: string): Promise<CashFlowForecast> =>
+    api.get<CashFlowForecast>('transactions/forecast/', {
+        params: {
+            from: fromDate,
+            to: toDate
+        }
+    }).then((r: AxiosResponse<CashFlowForecast>) => r.data);
 
 export const fetchAnalytics = (hideReconciled: boolean = true): Promise<TransactionAnalytics> =>
     api.get<TransactionAnalytics>('transactions/analytics/', {
@@ -271,6 +318,24 @@ export const updateTransactionCategory = (contentHash: string, categoryId: strin
 
 export const markTransactionReviewed = (contentHash: string): Promise<void> =>
     api.patch(`transactions/${contentHash}/review/`).then(() => undefined);
+
+export const patchTransactionSkipForecasting = (contentHash: string, skip: boolean): Promise<void> =>
+    api.patch(`transactions/${contentHash}/skip-forecasting/`, {skip}).then(() => undefined);
+
+export const excludeForecastProjection = (id: string): Promise<void> =>
+    api.post(`transactions/forecast/exclude/${id}/`).then(() => undefined);
+
+export const includeForecastProjection = (id: string): Promise<void> =>
+    api.post(`transactions/forecast/include/${id}/`).then(() => undefined);
+
+export const fetchPatternExclusions = (): Promise<any[]> =>
+    api.get<any[]>('transactions/forecast/patterns/exclusions/').then((r: AxiosResponse<any[]>) => r.data ?? []);
+
+export const excludePattern = (matchTerm: string): Promise<void> =>
+    api.post('transactions/forecast/patterns/exclude/', {match_term: matchTerm}).then(() => undefined);
+
+export const includePattern = (matchTerm: string): Promise<void> =>
+    api.post('transactions/forecast/patterns/include/', {match_term: matchTerm}).then(() => undefined);
 
 export const startAutoCategorize = (): Promise<{ message: string }> =>
     api.post<{ message: string }>('transactions/auto-categorize/start/').then(r => r.data);
@@ -286,14 +351,17 @@ export const cancelAutoCategorize = (): Promise<{ message: string }> =>
 export const fetchCategories = (): Promise<Category[]> =>
     api.get<Category[]>('categories/').then((r: AxiosResponse<Category[]>) => r.data ?? []);
 
-export const createCategory = (name: string, color: string): Promise<Category> =>
-    api.post<Category>('categories/', {name, color}).then((r: AxiosResponse<Category>) => r.data);
+export const createCategory = (name: string, color: string, isVariableSpending: boolean = false): Promise<Category> =>
+    api.post<Category>('categories/', {name, color, is_variable_spending: isVariableSpending}).then((r: AxiosResponse<Category>) => r.data);
 
-export const updateCategory = (id: string, name: string, color: string): Promise<Category> =>
-    api.put<Category>(`categories/${id}/`, {name, color}).then((r: AxiosResponse<Category>) => r.data);
+export const updateCategory = (id: string, name: string, color: string, isVariableSpending: boolean = false): Promise<Category> =>
+    api.put<Category>(`categories/${id}/`, {name, color, is_variable_spending: isVariableSpending}).then((r: AxiosResponse<Category>) => r.data);
 
 export const deleteCategory = (id: string): Promise<void> =>
     api.delete(`categories/${id}/`).then(() => undefined);
+
+export const restoreCategory = (id: string): Promise<Category> =>
+    api.post<Category>(`categories/${id}/restore/`).then((r: AxiosResponse<Category>) => r.data);
 
 // ── Health ────────────────────────────────────────────────────────────────────
 
@@ -314,7 +382,7 @@ export const createReconciliation = (
         .then((r) => r.data);
 
 export const fetchReconciliationSuggestions = async (windowDays: number = 7): Promise<ReconciliationPairSuggestion[]> => {
-    const response = await api.get(`reconciliations/suggestions/?window=${windowDays}`);
+    const response = await api.get(`reconciliations/suggestions/`, {params: {window: windowDays}});
     return response.data;
 };
 
@@ -335,13 +403,17 @@ export const fetchPayslipSummary = (): Promise<PayslipSummary> =>
 export const fetchPayslip = (id: string): Promise<Payslip> =>
     api.get<Payslip>(`payslips/${id}/`).then((r: AxiosResponse<Payslip>) => r.data);
 
-export const getPayslipPreviewUrl = async (id: string): Promise<string> => {
+export const getPayslipPreviewUrl = async (id: string): Promise<{ url: string; mimeType: string }> => {
     const response = await api.get<Blob>(`payslips/${id}/download/`, {
         responseType: 'blob',
     });
 
-    const blob = new Blob([response.data], {type: 'application/pdf'});
-    return window.URL.createObjectURL(blob);
+    const mimeType = response.headers['content-type'] || 'application/pdf';
+    const blob = new Blob([response.data], {type: mimeType});
+    return {
+        url: window.URL.createObjectURL(blob),
+        mimeType
+    };
 };
 
 export const importPayslip = async ({file, overrides, useAI}: {
@@ -394,10 +466,21 @@ export const downloadPayslipFile = async (id: string, originalName: string): Pro
         responseType: 'blob',
     });
 
+    const contentType = response.headers['content-type'] as string | undefined;
+    let filename = originalName || `payslip-${id}.pdf`;
+
+    if (!originalName) {
+        if (contentType === 'application/pdf') filename = `payslip-${id}.pdf`;
+        else if (contentType === 'image/jpeg') filename = `payslip-${id}.jpg`;
+        else if (contentType === 'image/png') filename = `payslip-${id}.png`;
+        else if (contentType === 'image/gif') filename = `payslip-${id}.gif`;
+        else if (contentType === 'image/webp') filename = `payslip-${id}.webp`;
+    }
+
     const url = window.URL.createObjectURL(new Blob([response.data]));
     const link = document.createElement('a');
     link.href = url;
-    link.setAttribute('download', originalName || `payslip-${id}.pdf`);
+    link.setAttribute('download', filename);
     document.body.appendChild(link);
     link.click();
 
@@ -432,3 +515,28 @@ export const updateBankAccountType = (accountId: string, accountType: string): P
 
 export const syncBankAccounts = (): Promise<{ message: string }> =>
     api.post<{ message: string }>('bank/sync/').then(r => r.data);
+
+// --- Planned Transactions ---
+
+export const fetchPlannedTransactions = (): Promise<PlannedTransaction[]> =>
+    api.get<PlannedTransaction[]>('planned-transactions/').then(r => r.data ?? []);
+
+export const createPlannedTransaction = (data: CreatePlannedTransactionRequest): Promise<PlannedTransaction> =>
+    api.post<PlannedTransaction>('planned-transactions/', data).then(r => r.data);
+
+export const updatePlannedTransaction = (id: string, data: UpdatePlannedTransactionRequest): Promise<PlannedTransaction> =>
+    api.put<PlannedTransaction>(`planned-transactions/${id}/`, data).then(r => r.data);
+
+export const deletePlannedTransaction = (id: string): Promise<void> =>
+    api.delete(`planned-transactions/${id}/`).then(() => undefined);
+
+// ── Bridge Tokens ────────────────────────────────────────────────────────────
+
+export const fetchBridgeTokens = (): Promise<BridgeAccessToken[]> =>
+    api.get<BridgeAccessToken[]>('bridge-tokens/').then(r => r.data ?? []);
+
+export const createBridgeToken = (name: string): Promise<CreateBridgeTokenResponse> =>
+    api.post<CreateBridgeTokenResponse>('bridge-tokens/', {name}).then(r => r.data);
+
+export const revokeBridgeToken = (id: string): Promise<void> =>
+    api.delete(`bridge-tokens/${id}/`).then(() => undefined);

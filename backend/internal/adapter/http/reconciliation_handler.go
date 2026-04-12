@@ -23,12 +23,11 @@ func (h *Handler) getReconciliationSuggestions(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	matchWindowDays := 7
 	windowQuery := r.URL.Query().Get("window")
@@ -58,12 +57,11 @@ func (h *Handler) createReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	var req createReconciliationRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -98,12 +96,11 @@ func (h *Handler) listReconciliations(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	recs, err := h.reconciliationRepo.FindAll(r.Context(), userID)
 	if err != nil {
@@ -123,12 +120,11 @@ func (h *Handler) deleteReconciliation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	idParam := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idParam)

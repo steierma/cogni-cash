@@ -6,6 +6,8 @@ import (
 	"net/http"
 	"os"
 	"time"
+
+	"github.com/google/uuid"
 )
 
 func (h *Handler) healthCheck(w http.ResponseWriter, _ *http.Request) {
@@ -27,6 +29,10 @@ func (h *Handler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
 	bankProvider := "enablebanking"
 	if h.settingsSvc != nil {
 		userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 		if val, err := h.settingsSvc.Get(r.Context(), "bank_provider", userID); err == nil && val != "" {
 			bankProvider = val
 		}
@@ -60,6 +66,10 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	settings, err := h.settingsSvc.GetAll(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
@@ -82,6 +92,10 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.settingsSvc.UpdateMultiple(r.Context(), payload, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update settings")
 		return
@@ -110,6 +124,10 @@ func (h *Handler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
 	if err := h.notificationSvc.SendTestEmail(r.Context(), payload.To, userID); err != nil {
 		h.Logger.Error("Test email failed", "to", payload.To, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send test email: "+err.Error())

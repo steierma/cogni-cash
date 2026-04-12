@@ -79,4 +79,19 @@ func TestInvoiceRepository(t *testing.T) {
 			t.Error("FindByID: expected error after deletion")
 		}
 	})
+
+	t.Run("FindAll_Pagination", func(t *testing.T) {
+		repo := NewInvoiceRepository()
+		for i := 0; i < 5; i++ {
+			_ = repo.Save(ctx, entity.Invoice{ID: uuid.New(), UserID: userID, Amount: float64(i)})
+		}
+
+		all, _ := repo.FindAll(ctx, entity.InvoiceFilter{UserID: userID, Limit: 2, Offset: 1})
+		if len(all) != 2 {
+			t.Errorf("expected 2 invoices, got %d", len(all))
+		}
+		if all[0].Amount != 1.0 || all[1].Amount != 2.0 {
+			t.Errorf("unexpected amounts: %f, %f", all[0].Amount, all[1].Amount)
+		}
+	})
 }

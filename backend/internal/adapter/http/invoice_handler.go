@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 	"time"
 
 	"cogni-cash/internal/domain/entity"
@@ -13,6 +14,27 @@ import (
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
 )
+
+// allowedMIMETypes is the set of MIME types accepted by the invoice import endpoint.
+var allowedMIMETypes = map[string]bool{
+	"application/pdf": true,
+	"image/jpeg":      true,
+	"image/jpg":       true,
+	"image/png":       true,
+	"image/gif":       true,
+	"image/webp":      true,
+}
+
+// extToMIME maps common file extensions to their canonical MIME type so we can
+// fill in the content-type when the browser doesn't provide it.
+var extToMIME = map[string]string{
+	".pdf":  "application/pdf",
+	".jpg":  "image/jpeg",
+	".jpeg": "image/jpeg",
+	".png":  "image/png",
+	".gif":  "image/gif",
+	".webp": "image/webp",
+}
 
 // ── request / response types ─────────────────────────────────────────────────
 
@@ -29,14 +51,24 @@ type updateInvoiceRequest struct {
 
 // GET /api/v1/invoices/
 func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
-	invoices, err := h.invoiceSvc.GetAll(r.Context(), userID)
+	filter := entity.InvoiceFilter{
+		UserID: userID,
+	}
+	q := r.URL.Query()
+	if limit, err := strconv.Atoi(q.Get("limit")); err == nil {
+		filter.Limit = limit
+	}
+	if offset, err := strconv.Atoi(q.Get("offset")); err == nil {
+		filter.Offset = offset
+	}
+
+	invoices, err := h.invoiceSvc.GetAll(r.Context(), filter)
 	if err != nil {
 		h.Logger.Error("Failed to list invoices", "error", err, "user_id", userID)
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -50,12 +82,11 @@ func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/invoices/{id}
 func (h *Handler) getInvoice(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id, err := parseUUID(r, "id")
 	if err != nil {
@@ -75,13 +106,13 @@ func (h *Handler) getInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/v1/invoices/import   (multipart/form-data, field "file")
+// Accepts: application/pdf, image/jpeg, image/png, image/gif, image/webp
 func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	const maxUpload = 32 << 20 // 32 MB
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
@@ -103,9 +134,20 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	mimeType := header.Header.Get("Content-Type")
-	if mimeType == "" {
+	// Resolve the MIME type via the shared helper (prefers Content-Type header,
+	// falls back to extension-based detection).
+	mimeType := resolveMIME(header.Header.Get("Content-Type"), header.Filename)
+
+	// Default to PDF if we still could not determine the type
+	if mimeType == "application/octet-stream" {
 		mimeType = "application/pdf"
+	}
+
+	// Validate against the allowed set
+	if !allowedMIMETypes[mimeType] {
+		writeError(w, http.StatusUnsupportedMediaType,
+			fmt.Sprintf("unsupported file type %q — accepted types: PDF, JPEG, PNG, GIF, WEBP", mimeType))
+		return
 	}
 
 	// Optional: caller-specified category override
@@ -134,12 +176,11 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 
 // PUT /api/v1/invoices/{id}
 func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id, err := parseUUID(r, "id")
 	if err != nil {
@@ -196,12 +237,11 @@ func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
 
 // DELETE /api/v1/invoices/{id}
 func (h *Handler) deleteInvoice(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id, err := parseUUID(r, "id")
 	if err != nil {
@@ -221,12 +261,11 @@ func (h *Handler) deleteInvoice(w http.ResponseWriter, r *http.Request) {
 
 // GET /api/v1/invoices/{id}/download
 func (h *Handler) downloadInvoiceFile(w http.ResponseWriter, r *http.Request) {
-	userIDStr, ok := r.Context().Value(userIDKey).(string)
-	if !ok {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	userID, _ := uuid.Parse(userIDStr)
 
 	id, err := parseUUID(r, "id")
 	if err != nil {
@@ -249,7 +288,7 @@ func (h *Handler) downloadInvoiceFile(w http.ResponseWriter, r *http.Request) {
 		fileName = "invoice"
 	}
 	w.Header().Set("Content-Type", mimeType)
-	w.Header().Set("Content-Disposition", fmt.Sprintf(`attachment; filename="%s"`, fileName))
+	w.Header().Set("Content-Disposition", fmt.Sprintf(`inline; filename="%s"`, fileName))
 	w.Header().Set("Content-Length", fmt.Sprintf("%d", len(content)))
 	w.WriteHeader(http.StatusOK)
 	_, _ = w.Write(content)

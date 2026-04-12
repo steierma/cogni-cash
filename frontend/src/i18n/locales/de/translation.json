@@ -57,93 +57,93 @@
   },
   "bankStatements": {
     "actions": {
-      "delete": "[MISSING] Delete Statement",
-      "download": "[MISSING] Download Original File",
-      "downloadUnavailable": "[MISSING] Download not available (file was not stored)",
-      "preview": "[MISSING] Preview Document",
-      "previewUnavailable": "[MISSING] Preview not available (file was not stored)",
-      "view": "[MISSING] View Details",
-      "viewTransactions": "[MISSING] View Transactions"
+      "delete": "Auszug löschen",
+      "download": "Originaldatei herunterladen",
+      "downloadUnavailable": "Download nicht verfügbar (Datei wurde nicht gespeichert)",
+      "preview": "Dokumentenvorschau",
+      "previewUnavailable": "Vorschau nicht verfügbar (Datei wurde nicht gespeichert)",
+      "view": "Details anzeigen",
+      "viewTransactions": "Transaktionen anzeigen"
     },
     "banner": {
-      "desc": "[MISSING] Target statements (like Credit Cards or Extra Accounts) can be marked as <strong>Finished</strong> once all their settlement payments are linked on the Reconcile page. Marking a statement as finished hides it from the pending queue. You can click the status badge below to toggle a statement's state at any time.",
-      "title": "[MISSING] Target Statement Status"
+      "desc": "Ziel-Auszüge (wie Kreditkarten oder Extra-Konten) können als <strong>Abgeschlossen</strong> markiert werden, sobald alle ihre Verrechnungszahlungen auf der Abgleich-Seite verknüpft sind. Das Markieren eines Auszugs als abgeschlossen blendet ihn aus der Liste der ausstehenden Auszüge aus. Sie können auf das Status-Badge unten klicken, um den Status eines Auszugs jederzeit zu ändern.",
+      "title": "Status des Ziel-Auszugs"
     },
     "columns": {
-      "actions": "[MISSING] Actions",
-      "newBalance": "[MISSING] New Balance",
-      "period": "[MISSING] Period",
-      "statementInfo": "[MISSING] Statement Info",
-      "status": "[MISSING] Status",
-      "transactions": "[MISSING] Transactions",
-      "type": "[MISSING] Type"
+      "actions": "Aktionen",
+      "newBalance": "Neuer Kontostand",
+      "period": "Zeitraum",
+      "statementInfo": "Auszug-Infos",
+      "status": "Status",
+      "transactions": "Transaktionen",
+      "type": "Typ"
     },
-    "deleteConfirm": "[MISSING] Are you sure you want to delete this statement? All associated transactions will be permanently deleted.",
+    "deleteConfirm": "Sind Sie sicher, dass Sie diesen Auszug löschen möchten? Alle zugehörigen Transaktionen werden dauerhaft gelöscht.",
     "errors": {
-      "previewFailed": "[MISSING] Could not load the document preview."
+      "previewFailed": "Dokumentenvorschau konnte nicht geladen werden."
     },
     "filters": {
-      "allAccounts": "[MISSING] All Accounts",
-      "allTypes": "[MISSING] All Types",
-      "allYears": "[MISSING] All Years",
-      "apply": "[MISSING] Apply Filters",
-      "columns": "[MISSING] Columns",
-      "title": "[MISSING] Filters:",
-      "typeCc": "[MISSING] Credit Card",
-      "typeExtra": "[MISSING] Extra Account",
-      "typeGiro": "[MISSING] Giro"
+      "allAccounts": "Alle Konten",
+      "allTypes": "Alle Typen",
+      "allYears": "Alle Jahre",
+      "apply": "Filter anwenden",
+      "columns": "Spalten",
+      "title": "Filter:",
+      "typeCc": "Kreditkarte",
+      "typeExtra": "Extra-Konto",
+      "typeGiro": "Girokonto"
     },
-    "finishConfirm": "[MISSING] Mark this statement as fully reconciled? This will remove it from the pending reconciliation queue.",
+    "finishConfirm": "Diesen Auszug als vollständig abgeglichen markieren? Dies entfernt ihn aus der Warteschlange für den ausstehenden Abgleich.",
     "import": {
-      "acceptedFiles": "[MISSING] PDF, CSV, XLS, XLSX",
-      "clickToUpload": "[MISSING] Click to upload",
-      "forceAi": "[MISSING] Force AI Parsing",
-      "orDrag": "[MISSING] or drag and drop",
-      "typeAuto": "[MISSING] Auto-detect Type",
-      "typeCc": "[MISSING] Credit Card",
-      "typeExtra": "[MISSING] Extra-Konto",
-      "typeGiro": "[MISSING] Girokonto",
-      "uploading": "[MISSING] Uploading & Parsing..."
+      "acceptedFiles": "PDF, Bilder, CSV, XLS, XLSX",
+      "clickToUpload": "Zum Hochladen klicken",
+      "forceAi": "KI-Parsing erzwingen",
+      "orDrag": "oder per Drag & Drop",
+      "typeAuto": "Typ automatisch erkennen",
+      "typeCc": "Kreditkarte",
+      "typeExtra": "Extra-Konto",
+      "typeGiro": "Girokonto",
+      "uploading": "Hochladen & Verarbeiten..."
     },
     "modal": {
-      "account": "[MISSING] Account (IBAN)",
-      "close": "[MISSING] Close",
-      "endDate": "[MISSING] End Date",
-      "endingBalance": "[MISSING] Ending Balance",
-      "previewNotSupportedDesc": "[MISSING] This file format cannot be previewed in the browser. Please download the file to view it.",
-      "previewNotSupportedTitle": "[MISSING] Preview Not Supported",
-      "previewTitle": "[MISSING] Document Preview",
-      "startDate": "[MISSING] Start Date",
-      "statementNo": "[MISSING] Statement No.",
-      "status": "[MISSING] Status",
-      "title": "[MISSING] Statement Details",
-      "totalTxns": "[MISSING] Total Transactions",
-      "type": "[MISSING] Type",
-      "viewTxns": "[MISSING] View Transactions"
+      "account": "Konto (IBAN)",
+      "close": "Schließen",
+      "endDate": "Enddatum",
+      "endingBalance": "Endsaldo",
+      "previewNotSupportedDesc": "Dieses Dateiformat kann nicht im Browser in der Vorschau angezeigt werden. Bitte laden Sie die Datei herunter, um sie anzusehen.",
+      "previewNotSupportedTitle": "Vorschau nicht unterstützt",
+      "previewTitle": "Dokumentenvorschau",
+      "startDate": "Startdatum",
+      "statementNo": "Auszugsnummer",
+      "status": "Status",
+      "title": "Auszugsdetails",
+      "totalTxns": "Transaktionen gesamt",
+      "type": "Typ",
+      "viewTxns": "Transaktionen anzeigen"
     },
-    "reactivateConfirm": "[MISSING] Reactivate this statement? It will reappear in your pending reconciliation queue.",
+    "reactivateConfirm": "Diesen Auszug reaktivieren? Er wird wieder in Ihrer Warteschlange für den ausstehenden Abgleich erscheinen.",
     "results": {
-      "goToReconcile": "[MISSING] Go to Reconcile",
-      "importedOf": "[MISSING] {{imported}} of {{total}} imported",
-      "reconcilableDesc": "[MISSING] Head over to the Reconcile page to securely link these transactions to your main Girokonto.",
-      "reconcilableTitle": "[MISSING] Reconcilable Statement Detected",
-      "statusFailed": "[MISSING] Failed",
-      "statusImported": "[MISSING] Imported",
-      "statusSkipped": "[MISSING] Skipped",
-      "title": "[MISSING] Import Results"
+      "goToReconcile": "Zum Abgleich",
+      "importedOf": "{{imported}} von {{total}} importiert",
+      "reconcilableDesc": "Gehen Sie zur Abgleich-Seite, um diese Transaktionen sicher mit Ihrem Haupt-Girokonto zu verknüpfen.",
+      "reconcilableTitle": "Abgleichbarer Auszug erkannt",
+      "statusFailed": "Fehlgeschlagen",
+      "statusImported": "Importiert",
+      "statusSkipped": "Übersprungen",
+      "title": "Importergebnisse"
     },
     "table": {
-      "finished": "[MISSING] Finished",
-      "loading": "[MISSING] Loading statements...",
-      "na": "[MISSING] -",
-      "noData": "[MISSING] No bank statements match your criteria.",
-      "pending": "[MISSING] Pending",
-      "statementNo": "[MISSING] Statement #{{no}}",
-      "tooltipFinished": "[MISSING] Finished: Click to reactivate and return to pending queue",
-      "tooltipPending": "[MISSING] Pending: Click here to mark as finished once all settlement payments are linked.",
-      "tooltipStatus": "[MISSING] Indicates if a target statement has had all its settlement payments linked."
+      "finished": "Abgeschlossen",
+      "loading": "Lade Kontoauszüge...",
+      "na": "-",
+      "noData": "Keine Kontoauszüge entsprechen Ihren Kriterien.",
+      "pending": "Ausstehend",
+      "statementNo": "Auszug #{{no}}",
+      "tooltipFinished": "Abgeschlossen: Klicken zum Reaktivieren",
+      "tooltipPending": "Ausstehend: Hier klicken, um als abgeschlossen zu markieren, sobald alle Verrechnungszahlungen verknüpft sind.",
+      "tooltipStatus": "Gibt an, ob für einen Ziel-Auszug bereits alle Verrechnungszahlungen verknüpft wurden."
     },
-    "title": "[MISSING] Bank Statements"
+    "title": "Kontoauszüge"
   },
   "categories": {
     "badgePreview": "Vorschau",
@@ -152,10 +152,18 @@
     "count_other": "{{count}} Kategorien",
     "createCategory": "Kategorie erstellen",
     "deleteConfirm": "\"{{name}}\" löschen?",
+    "deleted": "Gelöscht",
+    "isVariableSpending": "Variable Ausgaben",
     "namePlaceholder": "z.B. Lebensmittel",
     "newCategory": "Neue Kategorie",
+    "restore": "Wiederherstellen",
+    "restoreConfirm": "\"{{name}}\" wiederherstellen?",
+    "showDeleted": "Gelöschte anzeigen",
     "subtitle": "Verwalten Sie Tags für Transaktionen und Rechnungen.",
-    "title": "Kategorien"
+    "title": "Kategorien",
+    "variableSpendingDesc": "Wenn aktiviert, verwendet die Prognose eine 'monatliche Burn-Rate' basierend auf historischen Durchschnitten, anstatt nach einzelnen wiederkehrenden Ereignissen zu suchen.",
+    "variableSpendingHelp": "Verwenden Sie dies für Kategorien wie Lebensmittel, Tanken oder Freizeit, bei denen Sie über den Monat verteilt unterschiedliche Beträge ausgeben.",
+    "variableSpendingLabel": "Als Monatsbudget prognostizieren"
   },
   "common": {
     "actions": "Aktionen",
@@ -164,7 +172,9 @@
     "cancel": "Abbrechen",
     "close": "Schließen",
     "color": "Farbe",
+    "confirmDelete": "Sind Sie sicher, dass Sie dies löschen möchten?",
     "create": "Erstellen",
+    "date": "Datum",
     "delete": "Löschen",
     "edit": "Bearbeiten",
     "errorUpdateDb": "Beim Aktualisieren der Datenbank ist ein Fehler aufgetreten.",
@@ -176,18 +186,24 @@
     "noData": "Noch keine Daten geladen",
     "noTimeline": "Keine Zeitplandaten verfügbar.",
     "none": "Keine",
-    "pdfPreview": "PDF Vorschau",
+    "pdfPreview": "Dokumentenvorschau",
+    "preview": "Vorschau",
+    "restore": "Wiederherstellen",
     "save": "Speichern",
     "saveAndClose": "Speichern & Schließen",
     "saveChanges": "Änderungen speichern",
-    "to": "Bis"
+    "saving": "Wird gespeichert...",
+    "search": "Suchen...",
+    "status": "Status",
+    "to": "Bis",
+    "viewTransactions": "Transaktionen anzeigen"
   },
   "dashboard": {
     "bankStatements": {
-      "importFirst": "[MISSING] Import your first statement →",
-      "noStatements": "[MISSING] No statements imported yet.",
+      "importFirst": "Importieren Sie Ihren ersten Auszug →",
+      "noStatements": "Noch keine Kontoauszüge importiert.",
       "title": "Kontoauszüge",
-      "viewAll": "[MISSING] View All"
+      "viewAll": "Alle anzeigen"
     },
     "cashFlow": {
       "expense": "Ausgaben",
@@ -196,6 +212,10 @@
       "title": "Cashflow-Übersicht"
     },
     "errorLoad": "Dashboard-Daten konnten nicht geladen werden. Bitte überprüfen Sie die Verbindung zum Backend.",
+    "forecasting": {
+      "title": "Anstehend (Nächste 30 Tage)",
+      "viewAll": "Alle Prognosen anzeigen"
+    },
     "greeting": {
       "afternoon": "Guten Tag",
       "evening": "Guten Abend",
@@ -214,16 +234,16 @@
       "totalIncomeSub": "Über alle Zeiträume"
     },
     "recentTxns": {
-      "amount": "[MISSING] Amount",
-      "category": "[MISSING] Category",
-      "date": "[MISSING] Date",
-      "description": "[MISSING] Description",
-      "title": "[MISSING] Recent Transactions",
-      "viewAll": "[MISSING] View all"
+      "amount": "Betrag",
+      "category": "Kategorie",
+      "date": "Datum",
+      "description": "Beschreibung",
+      "title": "Jüngste Transaktionen",
+      "viewAll": "Alle anzeigen"
     },
     "statementCard": {
       "closingBalance": "Schlusssaldo",
-      "txns": "Trans."
+      "txns": "Transaktionen"
     },
     "subtitle": "Hier ist eine Übersicht über Ihre finanzielle Gesundheit und jüngste Aktivitäten.",
     "topCategories": {
@@ -237,6 +257,51 @@
       "spent": "Ausgegeben",
       "title": "Wahrer Vermögensaufbau (Aktueller Monat)"
     }
+  },
+  "forecasting": {
+    "addPlanned": "Geplante Transaktion hinzufügen",
+    "average": "Durchschnitt",
+    "balanceTrend": "Kontostand-Trend",
+    "blockedPatterns": "Blockierte Muster",
+    "blockedPatternsInfo": "Stummgeschaltete Muster werden von der Prognose-Engine vollständig ignoriert.",
+    "confidence": "Konfidenz",
+    "currentBalance": "Aktueller Kontostand",
+    "editPlanned": "Geplante Transaktion bearbeiten",
+    "excludeConfirm": "Möchten Sie diese spezifische Projektion wirklich von Ihrem zukünftigen Kontostand ausschließen? Sie können dies später rückgängig machen.",
+    "excludeProjection": "Von Prognose ausschließen",
+    "expenseForecast": "Erwartete Ausgaben",
+    "forecastChart": "Prognostizierter Kontostand",
+    "forecastDate": "Prognose für {{date}}",
+    "includeConfirm": "Diese Projektion wieder einschließen?",
+    "includeProjection": "In Prognose einschließen",
+    "incomeForecast": "Erwartete Einnahmen",
+    "isPrediction": "Vorhersage",
+    "month1": "1 Monat",
+    "months12": "12 Monate",
+    "months2": "2 Monate",
+    "months3": "3 Monate",
+    "months6": "6 Monate",
+    "noBlockedPatterns": "Keine blockierten Muster",
+    "noBlockedPatternsDesc": "Sie haben keine wiederkehrenden Muster stummgeschaltet. Sie können Muster direkt auf der Transaktionsseite stummschalten.",
+    "noForecasts": "Keine anstehenden Prognosen erkannt.",
+    "noForecastsDesc": "Prognosen werden automatisch erstellt, wenn Sie mehr historische Transaktionsdaten importieren.",
+    "noPlannedTransactions": "Keine geplanten Transaktionen.",
+    "optimistic": "Optimistisch",
+    "patternMatchTerm": "Suchbegriff",
+    "pessimistic": "Pessimistisch",
+    "plannedTransactions": "Geplante Transaktionen",
+    "probability": "Wahrscheinlichkeit",
+    "projectedBalance": "Prognostizierter Stand",
+    "range": "Prognosezeitraum",
+    "restorePatternConfirm": "Sind Sie sicher, dass Sie dieses Muster in Ihrer Prognose wiederherstellen möchten?",
+    "status_expired": "Abgelaufen",
+    "status_matched": "Abgeglichen",
+    "status_pending": "Ausstehend",
+    "subtitle": "Sagen Sie kommende Transaktionen voraus und visualisieren Sie Ihren zukünftigen Kontostand.",
+    "title": "Cashflow-Prognose",
+    "upcomingTransactions": "Anstehende Transaktionen (Nächste {{days}} Tage)",
+    "variableBudget": "Burn-Rate",
+    "viewForecasting": "Prognose anzeigen"
   },
   "invoices": {
     "actions": "Aktionen",
@@ -280,6 +345,7 @@
     "collapseBtn": "Einklappen",
     "dashboard": "Dashboard",
     "expand": "Seitenleiste ausklappen",
+    "forecasting": "Prognose",
     "incomeDocs": "Einkommen & Dokumente",
     "invoices": "Rechnungen",
     "logoAlt": "Logo",
@@ -394,8 +460,8 @@
       "optionalOverridesDesc": "Wenn der automatische Parser bei bestimmten Feldern Probleme hat, können Sie deren Werte hier manuell erzwingen.",
       "payout": "Auszahlung",
       "payoutInput": "Auszahlungsbetrag",
-      "pdfFile": "PDF-Datei *",
-      "pdfRequired": "PDF-Datei erforderlich",
+      "pdfFile": "Datei *",
+      "pdfRequired": "Datei erforderlich",
       "period": "Zeitraum",
       "previewTitle": "Dokumentenvorschau",
       "remove": "Entfernen",
@@ -410,7 +476,7 @@
       "year": "Jahr"
     },
     "momGrowth": "Wachstum gegenüber dem Vormonat",
-    "pdfFormat": "Akzeptiert Standard-PDF-Formate",
+    "pdfFormat": "Akzeptiert PDF- und Bildformate",
     "periodSummary": {
       "title": "Zeitraum-Zusammenfassung (Gefiltert)"
     },
@@ -419,7 +485,7 @@
       "actions": "Aktionen",
       "adjNet": "Bereinigtes Netto",
       "deleteConfirm": "Möchten Sie diese Gehaltsabrechnung wirklich löschen?",
-      "downloadPdf": "PDF Herunterladen",
+      "downloadPdf": "Dokument herunterladen",
       "excludeFromChart": "Aus Diagramm ausschließen",
       "gross": "Brutto (Gesamt)",
       "includeInChart": "Ins Diagramm aufnehmen",
@@ -430,12 +496,12 @@
       "noPayslips": "Keine Gehaltsabrechnungen gefunden",
       "payout": "Auszahlung",
       "period": "Zeitraum",
-      "previewPdf": "PDF Vorschau"
+      "previewPdf": "Dokumentenvorschau"
     },
     "taxClass": "Steuerklasse {{taxClass}}",
     "taxClassCount": "Klasse {{count}}",
     "title": "Gehaltsabrechnungen",
-    "uploadFailed": "Hochladen der Gehaltsabrechnung fehlgeschlagen. Stellen Sie sicher, dass es ein gültiges PDF ist und noch nicht hochgeladen wurde.",
+    "uploadFailed": "Fehler beim Hochladen der Entgeltabrechnung. Stellen Sie sicher, dass es eine gültige Datei ist und noch nicht hochgeladen wurde.",
     "uploadingParsing": "Hochladen & Verarbeiten..."
   },
   "reconcile": {
@@ -506,6 +572,7 @@
     "updating": "Wird aktualisiert..."
   },
   "settings": {
+    "activeTokens": "Aktive Bridge-Token",
     "apiToken": "API-Token (Optional)",
     "apiTokenPlaceholder": "Bearer-Token falls erforderlich",
     "apiUrl": "API-URL",
@@ -520,10 +587,13 @@
     "batchSizePlaceholder": "10",
     "bgImport": "Automatischer Hintergrundimport",
     "bgImportIntervalPlaceholder": "5m, 1h",
+    "bridgeInfo": "Verwalten Sie langlebige Token für mobile Geräte oder externe Integrationen. Diese Token ermöglichen eine sichere Synchronisierung ohne Ihr Passwort.",
     "confirmPwd": "Neues Passwort bestätigen",
     "connState": "Verbindungsstatus",
     "currentPwd": "Aktuelles Passwort",
     "dbHost": "Datenbank-Host",
+    "deviceNamePlaceholder": "z.B. Mein iPhone 15",
+    "devicesBridge": "Geräte & Bridge",
     "editPromptTemplate": "Bearbeiten Sie die System-Prompt-Vorlage unten.",
     "emailConfig": "E-Mail-Konfiguration (SMTP)",
     "enableAutoCat": "Auto-Kategorisierung aktivieren",
@@ -532,6 +602,8 @@
     "examplesPerCategory": "Lernbeispiele pro Kategorie",
     "examplesPerCategoryDesc": "Anzahl der eindeutigen vergangenen Kategorisierungen pro Kategorie, die dem LLM für Few-Shot Learning bereitgestellt werden.",
     "examplesPerCategoryPlaceholder": "20",
+    "generate": "Generieren",
+    "generateNewToken": "Neuen Token generieren",
     "importDir": "Import-Verzeichnispfad",
     "importDirPlaceholder": "/pfad/zu/beobachten",
     "insertDefault": "Standard einfügen",
@@ -542,6 +614,7 @@
       "es": "Spanisch",
       "fr": "Französisch"
     },
+    "lastUsed": "Zuletzt verwendet",
     "layoutCompact": "Kompakt",
     "layoutMode": "Layout-Dichte",
     "layoutStandard": "Standard",
@@ -549,12 +622,15 @@
     "modelName": "Modellname",
     "modelNamePlaceholder": "llama3",
     "newPwd": "Neues Passwort",
+    "noTokens": "Keine aktiven Bridge-Token gefunden.",
     "payslipPrompt": "Prompt für Gehaltsabrechnungen",
     "pollInterval": "Abfrageintervall",
     "pollIntervalPlaceholder": "1h, 30m, 12h",
     "promptEngineering": "Prompt-Engineering",
     "pwdMismatch": "Die neuen Passwörter stimmen nicht überein.",
     "pwdSuccess": "Passwort erfolgreich aktualisiert.",
+    "revokeConfirm": "Sind Sie sicher, dass Sie diesen Token widerrufen möchten? Das Gerät wird nicht mehr synchronisieren können.",
+    "revokeToken": "Token widerrufen",
     "saveConfig": "Konfiguration speichern",
     "saving": "Speichern...",
     "security": "Passwort ändern",
@@ -575,7 +651,6 @@
     "storageMode": "Speichermodus",
     "successSaved": "Einstellungen erfolgreich gespeichert.",
     "systemStatus": "Systemstatus",
-    "version": "Version",
     "testEmailPlaceholder": "empfaenger@beispiel.de",
     "testEmailSuccess": "Test-E-Mail gesendet! Überprüfen Sie Ihren Posteingang.",
     "testSmtp": "SMTP-Verbindung testen",
@@ -584,9 +659,11 @@
     "themeLight": "Heller Modus",
     "themeSystem": "System (Auto)",
     "title": "Systemeinstellungen",
+    "tokenSecretWarning": "Kopieren Sie diesen Token jetzt! Er wird nicht wieder angezeigt.",
     "uiPrefs": "Benutzeroberfläche",
     "updatePwd": "Passwort aktualisieren",
-    "updating": "Aktualisieren..."
+    "updating": "Aktualisieren...",
+    "version": "Version"
   },
   "transactions": {
     "actions": "Aktionen",
@@ -605,6 +682,8 @@
     },
     "columns": "Spalten",
     "countOf": "{{filtered}} von {{total}} Transaktionen",
+    "excludePatternConfirm": "Sind Sie sicher, dass Sie dieses gesamte wiederkehrende Muster aus Ihren zukünftigen Prognosen ausschließen möchten?",
+    "excludePatternFromForecasting": "Muster aus Prognose ausschließen",
     "expenses": "Ausgaben",
     "filteredCashFlow": "Gefilterter Cashflow",
     "filteredRows": "Gefilterte Zeilen",
@@ -628,8 +707,17 @@
       "unknown": "Unbekannt",
       "unreviewedOnly": "Nur unbestätigte"
     },
+    "form": {
+      "amount": "Betrag",
+      "category": "Kategorie",
+      "date": "Datum",
+      "description": "Beschreibung",
+      "descriptionPlaceholder": "z.B. Miete, Lebensmittel",
+      "noCategory": "Keine Kategorie"
+    },
     "hideCharts": "Diagramme ausblenden",
     "hideReconciled": "Abgeglichene ausblenden",
+    "includePatternInForecasting": "Muster in Prognose einschließen",
     "income": "Einnahmen",
     "largestIncomes": "Größte Einnahmen",
     "largestSpends": "Größte Ausgaben",

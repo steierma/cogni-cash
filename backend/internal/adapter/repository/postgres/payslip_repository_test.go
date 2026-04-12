@@ -26,7 +26,7 @@ func TestPayslipRepository(t *testing.T) {
 		payslip := entity.Payslip{
 			UserID:              userID,
 			OriginalFileName:    "99999999_Monatsabrechnung_202602.pdf",
-			OriginalFileContent: []byte("dummy pdf binary content"),
+			OriginalFileContent: []byte("%PDF-dummy pdf binary content"),
 			ContentHash:         "dummy_sha256_hash_12345",
 			PeriodMonthNum:      2,
 			PeriodYear:          2026,
@@ -127,7 +127,7 @@ func TestPayslipRepository(t *testing.T) {
 		if err != nil {
 			t.Fatalf("expected no error fetching file, got: %v", err)
 		}
-		if string(content) != "dummy pdf binary content" || mime != "application/pdf" || filename != "99999999_Monatsabrechnung_202602.pdf" {
+		if string(content) != "%PDF-dummy pdf binary content" || mime != "application/pdf" || filename != "99999999_Monatsabrechnung_202602.pdf" {
 			t.Errorf("file metadata mismatch during retrieval")
 		}
 

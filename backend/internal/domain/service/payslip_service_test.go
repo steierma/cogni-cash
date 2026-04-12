@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -44,7 +45,9 @@ func (m *mockPayslipRepoForPayslipSvc) ExistsByOriginalFileName(_ context.Contex
 func (m *mockPayslipRepoForPayslipSvc) Update(_ context.Context, p *entity.Payslip) error {
 	return m.err
 }
-func (m *mockPayslipRepoForPayslipSvc) Delete(_ context.Context, _ string, _ uuid.UUID) error { return m.err }
+func (m *mockPayslipRepoForPayslipSvc) Delete(_ context.Context, _ string, _ uuid.UUID) error {
+	return m.err
+}
 func (m *mockPayslipRepoForPayslipSvc) FindAll(_ context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error) {
 	if filter.Employer == "Fail" {
 		return nil, errors.New("find all fail")
@@ -68,7 +71,7 @@ func (m *mockPayslipRepoForPayslipSvc) GetSummary(_ context.Context, _ uuid.UUID
 
 func TestPayslipService_GetAll(t *testing.T) {
 	repo := &mockPayslipRepoForPayslipSvc{}
-	svc := service.NewPayslipService(repo, nil, nil, nil)
+	svc := service.NewPayslipService(repo, nil, nil, slog.Default())
 
 	t.Run("Success", func(t *testing.T) {
 		res, err := svc.GetAll(context.Background(), entity.PayslipFilter{UserID: payslipDummyUserID})
@@ -93,7 +96,7 @@ func TestPayslipService_GetAll(t *testing.T) {
 
 func TestPayslipService_GetByID(t *testing.T) {
 	repo := &mockPayslipRepoForPayslipSvc{}
-	svc := service.NewPayslipService(repo, nil, nil, nil)
+	svc := service.NewPayslipService(repo, nil, nil, slog.Default())
 
 	_, err := svc.GetByID(context.Background(), "some-id", payslipDummyUserID)
 	if err != nil {
@@ -103,7 +106,7 @@ func TestPayslipService_GetByID(t *testing.T) {
 
 func TestPayslipService_GetOriginalFile(t *testing.T) {
 	repo := &mockPayslipRepoForPayslipSvc{}
-	svc := service.NewPayslipService(repo, nil, nil, nil)
+	svc := service.NewPayslipService(repo, nil, nil, slog.Default())
 
 	_, _, _, err := svc.GetOriginalFile(context.Background(), "some-id", payslipDummyUserID)
 	if err != nil {
@@ -113,7 +116,7 @@ func TestPayslipService_GetOriginalFile(t *testing.T) {
 
 func TestPayslipService_GetSummary(t *testing.T) {
 	repo := &mockPayslipRepoForPayslipSvc{}
-	svc := service.NewPayslipService(repo, nil, nil, nil)
+	svc := service.NewPayslipService(repo, nil, nil, slog.Default())
 
 	summary, err := svc.GetSummary(context.Background(), payslipDummyUserID)
 	if err != nil {
@@ -130,7 +133,14 @@ type mockPayslipParserForPayslipSvc struct {
 	called  bool
 }
 
+// Satisfies port.PayslipParser
 func (m *mockPayslipParserForPayslipSvc) Parse(_ context.Context, _ uuid.UUID, _ []byte) (entity.Payslip, error) {
+	m.called = true
+	return m.payslip, m.err
+}
+
+// Satisfies port.PayslipAIParser
+func (m *mockPayslipParserForPayslipSvc) ParsePayslip(_ context.Context, _ uuid.UUID, _ string, _ string, _ []byte) (entity.Payslip, error) {
 	m.called = true
 	return m.payslip, m.err
 }

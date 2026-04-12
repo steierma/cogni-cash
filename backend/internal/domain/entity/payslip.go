@@ -41,6 +41,8 @@ type Bonus struct {
 type PayslipFilter struct {
 	UserID   uuid.UUID
 	Employer string // Optional: Filter by employer name
+	Limit    int    // Pagination limit
+	Offset   int    // Pagination offset
 }
 
 // PayslipSummary provides pre-calculated statistics for the dashboard/mobile view.

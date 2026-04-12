@@ -1,6 +1,7 @@
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import { useSearchParams } from 'react-router-dom';
 import { fetchTransactions, fetchCategories, fetchPayslips } from '../api/client';
 import { BarChart3, Filter, X, ArrowRightLeft, TrendingUp, TrendingDown, Wallet, Search, BarChart as BarChartIcon, Briefcase, Activity } from 'lucide-react';
 import {
@@ -28,6 +29,7 @@ const toIsoDate = (dateStr: string): string => {
 
 export default function AnalyticsPage() {
     const { t, i18n } = useTranslation();
+    const [searchParams, setSearchParams] = useSearchParams();
 
     // --- Data Fetching ---
     const { data: allTransactions = [], isLoading: isLoadingTxns } = useQuery<Transaction[]>({
@@ -46,29 +48,55 @@ export default function AnalyticsPage() {
     });
 
     // --- State: Filters ---
-    const initialFilters: FilterState = {
-        from: '',
-        to: '',
-        excludeIds: new Set(),
-        hideReconciled: true
-    };
-
-    const [draft, setDraft] = useState<FilterState>(initialFilters);
-    const [applied, setApplied] = useState<FilterState>(initialFilters);
-
     const [minDate, maxDate] = useMemo((): [string, string] => {
         const days = allTransactions.map(t => toIsoDate(t.booking_date)).filter(Boolean).sort();
         if (days.length === 0) return ['', ''];
         return [days[0], days[days.length - 1]];
     }, [allTransactions]);
 
+    const initialFilters: FilterState = useMemo(() => {
+        const from = searchParams.get('from') || '';
+        const to = searchParams.get('to') || '';
+        const excludeStr = searchParams.get('exclude') || '';
+        const hideReconciled = searchParams.get('hide_reconciled') !== 'false';
+        
+        return {
+            from,
+            to,
+            excludeIds: new Set(excludeStr ? excludeStr.split(',') : []),
+            hideReconciled
+        };
+    }, [searchParams]);
+
+    const [draft, setDraft] = useState<FilterState>(initialFilters);
+    const [applied, setApplied] = useState<FilterState>(initialFilters);
+
+    // Default to full range if none specified in URL and transactions are loaded
+    const hasSetDefaults = useRef(false);
     useEffect(() => {
-        if (minDate && maxDate && !draft.from && !draft.to && !applied.from && !applied.to) {
+        if (!hasSetDefaults.current && minDate && maxDate && !initialFilters.from && !initialFilters.to) {
             const defaultFilter = { ...initialFilters, from: minDate, to: maxDate };
             setDraft(defaultFilter);
             setApplied(defaultFilter);
+            hasSetDefaults.current = true;
         }
-    }, [minDate, maxDate]);
+    }, [minDate, maxDate, initialFilters]);
+
+    // Update URL when applied filters change
+    useEffect(() => {
+        const next = new URLSearchParams();
+        if (applied.from) next.set('from', applied.from);
+        if (applied.to) next.set('to', applied.to);
+        if (applied.excludeIds.size > 0) next.set('exclude', Array.from(applied.excludeIds).join(','));
+        if (applied.hideReconciled === false) next.set('hide_reconciled', 'false');
+        
+        // Only update if it actually changed to avoid infinite loops
+        const currentStr = searchParams.toString();
+        const nextStr = next.toString();
+        if (currentStr !== nextStr) {
+            setSearchParams(next, { replace: true });
+        }
+    }, [applied, setSearchParams, searchParams]);
 
     const isDirty = JSON.stringify({ ...draft, excludeIds: Array.from(draft.excludeIds).sort() }) !==
         JSON.stringify({ ...applied, excludeIds: Array.from(applied.excludeIds).sort() });
@@ -86,7 +114,12 @@ export default function AnalyticsPage() {
     };
 
     const handleClear = () => {
-        const reset = { ...initialFilters, from: minDate, to: maxDate };
+        const reset = {
+            from: minDate,
+            to: maxDate,
+            excludeIds: new Set<string>(),
+            hideReconciled: true
+        };
         setDraft(reset);
         setApplied(reset);
     };
@@ -483,7 +516,7 @@ export default function AnalyticsPage() {
                                     className="bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-sm rounded-lg px-3 py-2 text-gray-700 dark:text-gray-300 focus:ring-2 focus:ring-indigo-300 outline-none max-w-xs"
                                 >
                                     <option value="" disabled>{t('analytics.selectCategory')}</option>
-                                    {categories.map(c => (
+                                    {categories.filter(c => !c.deleted_at || c.id === selectedCategoryTrendId).map(c => (
                                         <option key={c.id} value={c.id}>{c.name}</option>
                                     ))}
                                     <option value="uncategorized">{t('analytics.uncategorized')}</option>

@@ -3,6 +3,8 @@ package ai
 import (
 	"context"
 	"log/slog"
+	"net/http"
+	"strings"
 
 	"cogni-cash/internal/domain/entity"
 
@@ -28,9 +30,16 @@ func NewPayslipParser(llm LLMPayslipParser, logger *slog.Logger) *PayslipParser 
 	}
 }
 
+// Parse detects the file MIME type from magic bytes and calls ParsePayslipDocument
+// with the correct MIME so the LLM adapter can choose the right path
+// (multimodal for images, text-based for PDFs).
 func (p *PayslipParser) Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) (entity.Payslip, error) {
-	// 1. Determine the MIME type (assume PDF for now, but in a real app this would be passed or detected)
-	mimeType := "application/pdf"
+	mimeType := http.DetectContentType(fileBytes)
+
+	// Trim charset info if any
+	if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
+		mimeType = mimeType[:idx]
+	}
 
 	p.logger.Info("Sending document to LLM for payslip parsing",
 		"size_bytes", len(fileBytes),
@@ -38,11 +47,5 @@ func (p *PayslipParser) Parse(ctx context.Context, userID uuid.UUID, fileBytes [
 		"user_id", userID,
 	)
 
-	// 2. Pass the blob data to the LLM adapter
-	payslip, err := p.llm.ParsePayslipDocument(ctx, userID, mimeType, fileBytes)
-	if err != nil {
-		return entity.Payslip{}, err
-	}
-
-	return payslip, nil
+	return p.llm.ParsePayslipDocument(ctx, userID, mimeType, fileBytes)
 }

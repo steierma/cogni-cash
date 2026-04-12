@@ -1,6 +1,6 @@
 import { useTranslation } from 'react-i18next';
-import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User } from 'lucide-react';
-import type { Category, Transaction } from '../../api/types';
+import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, BarChart3, Slash } from 'lucide-react';
+import type { Category, Transaction, PatternExclusion } from '../../api/types';
 import { fmtCurrency, fmtDate } from '../../utils/formatters';
 
 export type TxColKey = 'date' | 'description' | 'counterparty' | 'location' | 'reference' | 'category' | 'amount';
@@ -10,6 +10,7 @@ export type SortDir = 'asc' | 'desc';
 interface TransactionTableProps {
     transactions: Transaction[];
     categories: Category[];
+    patternExclusions?: PatternExclusion[];
     selectedHashes: Set<string>;
     onToggleSelect: (hash: string) => void;
     onToggleSelectAll: () => void;
@@ -18,12 +19,14 @@ interface TransactionTableProps {
     onSort: (key: SortKey) => void;
     onCategoryChange: (hash: string, categoryId: string) => void;
     onMarkReviewed?: (hash: string) => void;
+    onTogglePatternExclusion?: (matchTerm: string, excluded: boolean) => void;
     visibleCols: Record<TxColKey, boolean>;
 }
 
 export default function TransactionTable({
                                              transactions,
                                              categories,
+                                             patternExclusions = [],
                                              selectedHashes,
                                              onToggleSelect,
                                              onToggleSelectAll,
@@ -32,9 +35,16 @@ export default function TransactionTable({
                                              onSort,
                                              onCategoryChange,
                                              onMarkReviewed,
+                                             onTogglePatternExclusion,
                                              visibleCols
                                          }: TransactionTableProps) {
     const { t } = useTranslation();
+
+    const normalize = (desc: string) => desc.trim().toLowerCase().slice(0, 25);
+
+    const isTermExcluded = (term: string) => {
+        return patternExclusions.some(pe => pe.match_term === term);
+    };
 
     const renderSortIcon = (k: SortKey) => {
         if (sortKey !== k) return null;
@@ -100,16 +110,18 @@ export default function TransactionTable({
                                 <span className="inline-flex items-center gap-1 justify-end">{t('transactions.table.amount', 'Amount')} {renderSortIcon('amount')}</span>
                             </th>
                         )}
-                        <th className="px-4 py-3 text-right w-20">{t('common.actions', 'Actions')}</th>
+                        <th className="px-4 py-3 text-right w-24">{t('common.actions', 'Actions')}</th>
                     </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
                     {transactions.map((tx) => {
                         const isSelected = selectedHashes.has(tx.content_hash);
                         const currentCat = categories.find((c) => c.id === tx.category_id);
+                        const term = normalize(tx.description);
+                        const isSkipped = isTermExcluded(term);
 
                         return (
-                            <tr key={tx.content_hash} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''} ${tx.is_reconciled ? 'opacity-60' : ''}`}>
+                            <tr key={tx.content_hash} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''} ${tx.is_reconciled ? 'opacity-60' : ''} ${isSkipped ? 'opacity-70 bg-amber-50/5 dark:bg-amber-900/5' : ''} ${tx.is_prediction ? 'bg-indigo-50/10 dark:bg-indigo-900/5 border-l-2 border-l-indigo-500 dark:border-l-indigo-400' : ''}`}>
                                 <td className="px-4 py-3 align-top pt-4">
                                     <button
                                         type="button"
@@ -122,7 +134,7 @@ export default function TransactionTable({
 
                                 {visibleCols.date && (
                                     <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap align-top pt-4">
-                                        {fmtDate(tx.booking_date)}
+                                        <span>{fmtDate(tx.booking_date)}</span>
                                     </td>
                                 )}
 
@@ -130,8 +142,18 @@ export default function TransactionTable({
                                     <td className="px-4 py-3 align-top pt-3.5 max-w-xs">
                                         <div className="flex flex-col gap-1">
                                             {visibleCols.description && (
-                                                <span className="flex items-center gap-1.5 text-gray-800 dark:text-gray-200 truncate" title={tx.description}>
-                                                    {!tx.reviewed && (
+                                                <span className={`flex items-center gap-1.5 text-gray-800 dark:text-gray-200 truncate`} title={tx.description}>
+                                                    {tx.is_prediction && (
+                                                        <span title={t('forecasting.isPrediction')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0 uppercase tracking-tighter">
+                                                            <Zap size={9} /> {t('forecasting.isPrediction')}
+                                                        </span>
+                                                    )}
+                                                    {tx.is_prediction && tx.description.startsWith('Variable Budget:') && (
+                                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 shrink-0 uppercase tracking-tighter">
+                                                            {t('forecasting.variableBudget', 'Burn Rate')}
+                                                        </span>
+                                                    )}
+                                                    {!tx.reviewed && !tx.is_prediction && (
                                                         <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 animate-pulse" title={t('transactions.table.unreviewed', 'New / Unreviewed')} />
                                                     )}
                                                     {tx.is_reconciled && (
@@ -196,7 +218,7 @@ export default function TransactionTable({
                                             style={currentCat ? { color: currentCat.color, borderColor: currentCat.color + '55' } : undefined}
                                         >
                                             <option value="">{t('transactions.table.unset')}</option>
-                                            {categories.map((c) => (
+                                            {categories.filter(c => !c.deleted_at || c.id === currentCat?.id).map((c) => (
                                                 <option key={c.id} value={c.id}>{c.name}</option>
                                             ))}
                                         </select>
@@ -204,23 +226,38 @@ export default function TransactionTable({
                                 )}
 
                                 {visibleCols.amount && (
-                                    <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                                    <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${isSkipped ? 'opacity-40' : tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
                                             <span className="inline-flex items-center gap-1 justify-end w-full">
-                                                {tx.amount >= 0 ? <TrendingUp size={11} className="text-green-500 dark:text-green-400" /> : <TrendingDown size={11} className="text-red-400 dark:text-red-500" />}
+                                                {tx.amount >= 0 ? <TrendingUp size={11} className={isSkipped ? '' : "text-green-500 dark:text-green-400"} /> : <TrendingDown size={11} className={isSkipped ? '' : "text-red-400 dark:text-red-500"} />}
                                                 {fmtCurrency(tx.amount, tx.currency)}
                                             </span>
                                     </td>
                                 )}
-                                <td className="px-4 py-3 text-right align-top pt-3.5">
-                                    {!tx.reviewed && (
+                                <td className="px-4 py-3 text-right align-top pt-3.5 whitespace-nowrap">
+                                    <div className="flex items-center justify-end gap-1">
                                         <button
-                                            onClick={() => onMarkReviewed?.(tx.content_hash)}
-                                            className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                            title={t('transactions.markAsReviewed', 'Mark as Reviewed')}
+                                            onClick={() => onTogglePatternExclusion?.(term, !isSkipped)}
+                                            className={`p-1.5 rounded-lg transition-colors relative ${isSkipped
+                                                ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30'
+                                                : 'text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}
+                                            title={isSkipped ? t('transactions.includePatternInForecasting') : t('transactions.excludePatternFromForecasting')}
                                         >
-                                            <CheckSquare size={16} />
+                                            <div className="relative">
+                                                <BarChart3 size={16} />
+                                                {isSkipped && <Slash size={10} className="absolute inset-0 m-auto text-amber-600 dark:text-amber-400" />}
+                                            </div>
                                         </button>
-                                    )}
+
+                                        {!tx.reviewed && !tx.is_prediction && (
+                                            <button
+                                                onClick={() => onMarkReviewed?.(tx.content_hash)}
+                                                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                title={t('transactions.markAsReviewed', 'Mark as Reviewed')}
+                                            >
+                                                <CheckSquare size={16} />
+                                            </button>
+                                        )}
+                                    </div>
                                 </td>
                             </tr>
                         );

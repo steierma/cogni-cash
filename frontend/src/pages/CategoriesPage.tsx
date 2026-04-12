@@ -1,8 +1,9 @@
 import { useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Check, Pencil, Plus, Trash2, X, Tags } from 'lucide-react';
-import { createCategory, deleteCategory, fetchCategories, updateCategory } from '../api/client';
+import { Link } from 'react-router-dom';
+import { Check, Pencil, Plus, Trash2, X, Tags, RotateCcw, Eye, EyeOff, ArrowRight } from 'lucide-react';
+import { createCategory, deleteCategory, fetchCategories, updateCategory, restoreCategory } from '../api/client';
 import type { Category } from '../api/types';
 
 const PALETTE = [
@@ -40,30 +41,48 @@ function CategoryRow({
                          cat,
                          onSaved,
                          onDelete,
+                         onRestore,
                      }: {
     cat: Category;
-    onSaved: (id: string, name: string, color: string) => void;
+    onSaved: (id: string, name: string, color: string, isVariable: boolean) => void;
     onDelete: (id: string) => void;
+    onRestore: (id: string) => void;
 }) {
     const { t } = useTranslation();
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(cat.name);
     const [editColor, setEditColor] = useState(cat.color);
+    const [editIsVariable, setEditIsVariable] = useState(cat.is_variable_spending);
+    const isDeleted = !!cat.deleted_at;
 
     if (isEditing) {
         return (
             <tr className="bg-gray-50 dark:bg-gray-800/50">
                 <td colSpan={3} className="px-4 py-4">
                     <div className="space-y-4">
-                        <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
-                            <input
-                                autoFocus
-                                type="text"
-                                value={editName}
-                                onChange={(e) => setEditName(e.target.value)}
-                                className="w-full md:w-1/2 px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
-                            />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    value={editName}
+                                    onChange={(e) => setEditName(e.target.value)}
+                                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('categories.isVariableSpending')}</label>
+                                <div className="flex items-center gap-3 py-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={editIsVariable}
+                                        onChange={(e) => setEditIsVariable(e.target.checked)}
+                                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                    />
+                                    <span className="text-sm text-gray-600 dark:text-gray-400">{t('categories.variableSpendingLabel')}</span>
+                                </div>
+                            </div>
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{t('common.color')}</label>
@@ -72,7 +91,7 @@ function CategoryRow({
                         <div className="flex items-center gap-2 pt-2">
                             <button
                                 onClick={() => {
-                                    onSaved(cat.id, editName, editColor);
+                                    onSaved(cat.id, editName, editColor, editIsVariable);
                                     setIsEditing(false);
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
@@ -83,6 +102,7 @@ function CategoryRow({
                                 onClick={() => {
                                     setEditName(cat.name);
                                     setEditColor(cat.color);
+                                    setEditIsVariable(cat.is_variable_spending);
                                     setIsEditing(false);
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors"
@@ -97,36 +117,69 @@ function CategoryRow({
     }
 
     return (
-        <tr className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group">
+        <tr className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors group ${isDeleted ? 'opacity-50' : ''}`}>
             <td className="px-4 py-4 whitespace-nowrap">
                 <div className="flex items-center gap-3">
                     <div className="w-3 h-3 rounded-full" style={{ backgroundColor: cat.color }} />
-                    <span className="font-medium text-gray-900 dark:text-gray-100">{cat.name}</span>
+                    <div className="flex flex-col">
+                        <span className={`font-medium ${isDeleted ? 'text-gray-400 dark:text-gray-600 line-through' : 'text-gray-900 dark:text-gray-100'}`}>
+                            {cat.name}
+                        </span>
+                        {cat.is_variable_spending && (
+                            <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-tighter">
+                                {t('categories.isVariableSpending')}
+                            </span>
+                        )}
+                        {isDeleted && (
+                            <span className="text-[10px] text-red-500 font-bold uppercase tracking-tighter">
+                                {t('categories.deleted')}
+                            </span>
+                        )}
+                    </div>
                 </div>
             </td>
             <td className="px-4 py-4 whitespace-nowrap">
                 <span
-                    className="px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide"
+                    className={`px-2.5 py-1 rounded-md text-xs font-semibold tracking-wide ${isDeleted ? 'grayscale' : ''}`}
                     style={{ backgroundColor: `${cat.color}20`, color: cat.color }}
                 >
                     {cat.name}
                 </span>
             </td>
             <td className="px-4 py-4 text-right whitespace-nowrap">
-                <button
-                    onClick={() => setIsEditing(true)}
-                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors mr-2"
-                    title={t('common.edit')}
-                >
-                    <Pencil size={16} />
-                </button>
-                <button
-                    onClick={() => onDelete(cat.id)}
-                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
-                    title={t('common.delete')}
-                >
-                    <Trash2 size={16} />
-                </button>
+                {!isDeleted ? (
+                    <>
+                        <Link
+                            to={`/transactions?category=${cat.id}`}
+                            className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors mr-2 inline-flex items-center"
+                            title={t('common.viewTransactions')}
+                        >
+                            <ArrowRight size={16} />
+                        </Link>
+                        <button
+                            onClick={() => setIsEditing(true)}
+                            className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors mr-2"
+                            title={t('common.edit')}
+                        >
+                            <Pencil size={16} />
+                        </button>
+                        <button
+                            onClick={() => onDelete(cat.id)}
+                            className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-lg transition-colors"
+                            title={t('common.delete')}
+                        >
+                            <Trash2 size={16} />
+                        </button>
+                    </>
+                ) : (
+                    <button
+                        onClick={() => onRestore(cat.id)}
+                        className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors"
+                        title={t('categories.restore')}
+                    >
+                        <RotateCcw size={16} />
+                    </button>
+                )}
             </td>
         </tr>
     );
@@ -138,6 +191,8 @@ export default function CategoriesPage() {
     const [isCreating, setIsCreating] = useState(false);
     const [newName, setNewName] = useState('');
     const [newColor, setNewColor] = useState(PALETTE[0]);
+    const [newIsVariable, setNewIsVariable] = useState(false);
+    const [showDeleted, setShowDeleted] = useState(false);
 
     const { data: categories = [], isLoading } = useQuery({
         queryKey: ['categories'],
@@ -145,12 +200,12 @@ export default function CategoriesPage() {
     });
 
     const createMut = useMutation({
-        mutationFn: (c: { name: string; color: string }) => createCategory(c.name, c.color),
+        mutationFn: (c: { name: string; color: string; isVariable: boolean }) => createCategory(c.name, c.color, c.isVariable),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
     });
 
     const updateMut = useMutation({
-        mutationFn: (c: { id: string; name: string; color: string }) => updateCategory(c.id, c.name, c.color),
+        mutationFn: (c: { id: string; name: string; color: string; isVariable: boolean }) => updateCategory(c.id, c.name, c.color, c.isVariable),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
     });
 
@@ -159,15 +214,29 @@ export default function CategoriesPage() {
         onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
     });
 
+    const restoreMut = useMutation({
+        mutationFn: restoreCategory,
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
+    });
+
     const handleCreate = () => {
         if (!newName.trim()) return;
-        createMut.mutate({ name: newName.trim(), color: newColor });
+        createMut.mutate({ name: newName.trim(), color: newColor, isVariable: newIsVariable });
         setIsCreating(false);
         setNewName('');
         setNewColor(PALETTE[0]);
+        setNewIsVariable(false);
     };
 
-    const sorted = [...categories].sort((a, b) => a.name.localeCompare(b.name));
+    const sorted = categories
+        .filter(c => showDeleted || !c.deleted_at)
+        .sort((a, b) => {
+            // Deleted items at the bottom if showing both
+            if (!!a.deleted_at !== !!b.deleted_at) {
+                return a.deleted_at ? 1 : -1;
+            }
+            return a.name.localeCompare(b.name);
+        });
 
     return (
         <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
@@ -178,30 +247,61 @@ export default function CategoriesPage() {
                     </h1>
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">{t('categories.subtitle')}</p>
                 </div>
-                {!isCreating && (
+                <div className="flex items-center gap-2">
                     <button
-                        onClick={() => setIsCreating(true)}
-                        className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
+                        onClick={() => setShowDeleted(!showDeleted)}
+                        className={`flex items-center justify-center gap-2 px-3 py-2 text-sm font-medium rounded-xl transition-all border ${
+                            showDeleted
+                                ? 'bg-indigo-50 border-indigo-200 text-indigo-700 dark:bg-indigo-900/30 dark:border-indigo-800 dark:text-indigo-300'
+                                : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50 dark:bg-gray-900 dark:border-gray-800 dark:text-gray-400 dark:hover:bg-gray-800'
+                        }`}
                     >
-                        <Plus size={16} /> {t('categories.newCategory')}
+                        {showDeleted ? <Eye size={16} /> : <EyeOff size={16} />}
+                        <span className="hidden sm:inline">{t('categories.showDeleted')}</span>
                     </button>
-                )}
+
+                    {!isCreating && (
+                        <button
+                            onClick={() => setIsCreating(true)}
+                            className="flex items-center justify-center gap-2 px-4 py-2 bg-indigo-600 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 transition-colors shadow-sm"
+                        >
+                            <Plus size={16} /> {t('categories.newCategory')}
+                        </button>
+                    )}
+                </div>
             </div>
 
             {isCreating && (
                 <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
                     <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">{t('categories.createCategory')}</h3>
                     <div className="space-y-4 max-w-lg">
-                        <div>
-                            <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
-                            <input
-                                autoFocus
-                                type="text"
-                                value={newName}
-                                onChange={(e) => setNewName(e.target.value)}
-                                placeholder={t('categories.namePlaceholder')}
-                                className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
-                            />
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
+                                <input
+                                    autoFocus
+                                    type="text"
+                                    value={newName}
+                                    onChange={(e) => setNewName(e.target.value)}
+                                    placeholder={t('categories.namePlaceholder')}
+                                    className="w-full px-3 py-2 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                />
+                            </div>
+                            <div>
+                                <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('categories.isVariableSpending')}</label>
+                                <div className="flex items-center gap-3 py-2">
+                                    <input
+                                        type="checkbox"
+                                        checked={newIsVariable}
+                                        onChange={(e) => setNewIsVariable(e.target.checked)}
+                                        className="w-4 h-4 text-indigo-600 border-gray-300 rounded focus:ring-indigo-500"
+                                    />
+                                    <span className="text-sm text-gray-600 dark:text-gray-400">{t('categories.variableSpendingLabel')}</span>
+                                </div>
+                                <p className="text-[10px] text-gray-400 leading-tight">
+                                    {t('categories.variableSpendingHelp')}
+                                </p>
+                            </div>
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{t('common.color')}</label>
@@ -243,11 +343,17 @@ export default function CategoriesPage() {
                             <CategoryRow
                                 key={cat.id}
                                 cat={cat}
-                                onSaved={(id, name, color) => updateMut.mutate({ id, name, color })}
+                                onSaved={(id, name, color, isVariable) => updateMut.mutate({ id, name, color, isVariable })}
                                 onDelete={(id) => {
                                     const targetCat = categories.find(c => c.id === id);
                                     if (targetCat && confirm(t('categories.deleteConfirm', { name: targetCat.name }))) {
                                         deleteMut.mutate(id);
+                                    }
+                                }}
+                                onRestore={(id) => {
+                                    const targetCat = categories.find(c => c.id === id);
+                                    if (targetCat && confirm(t('categories.restoreConfirm', { name: targetCat.name }))) {
+                                        restoreMut.mutate(id);
                                     }
                                 }}
                             />

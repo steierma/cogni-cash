@@ -28,7 +28,7 @@ func NewServer(addr string, handler *Handler) *Server {
 	r.Use(middleware.RealIP)
 	r.Use(middleware.Logger)
 	r.Use(middleware.Recoverer)
-	r.Use(middleware.Timeout(60 * time.Second))
+	r.Use(middleware.Timeout(120 * time.Second))
 
 	// CORS Configuration
 	allowedOrigins := []string{}
@@ -69,7 +69,7 @@ func NewServer(addr string, handler *Handler) *Server {
 		AllowedOrigins:   allowedOrigins,
 		AllowOriginFunc:  allowOriginFunc,
 		AllowedMethods:   []string{"GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"},
-		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-Id"},
+		AllowedHeaders:   []string{"Accept", "Authorization", "Content-Type", "X-Request-Id", "X-Bridge-Token"},
 		ExposedHeaders:   []string{"Link"},
 		AllowCredentials: allowCredentials,
 		MaxAge:           300,
@@ -92,7 +92,7 @@ func NewServer(addr string, handler *Handler) *Server {
 			Addr:         addr,
 			Handler:      r,
 			ReadTimeout:  10 * time.Second,
-			WriteTimeout: 30 * time.Second,
+			WriteTimeout: 120 * time.Second,
 			IdleTimeout:  120 * time.Second,
 		},
 		Logger: handler.Logger,

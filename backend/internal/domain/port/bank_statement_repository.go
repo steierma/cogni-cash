@@ -22,6 +22,7 @@ type BankStatementRepository interface {
 	UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReviewed(ctx context.Context, contentHash string, userID uuid.UUID) error
+	UpdateTransactionSkipForecasting(ctx context.Context, contentHash string, skip bool, userID uuid.UUID) error
 
 	LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error
 

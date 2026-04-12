@@ -4,9 +4,13 @@ import { useTranslation } from 'react-i18next';
 import {
     KeyRound, CheckCircle2, AlertCircle, Settings, Server, Database,
     Save, Palette, Globe, ChevronDown, ChevronRight, MessageSquareCode,
-    Landmark, Info, Mail, Bot, Zap, Monitor, Layers
+    Landmark, Info, Mail, Bot, Zap, Monitor, Layers, Smartphone, Plus, Trash2, Copy, Clock
 } from 'lucide-react';
-import { changePassword, fetchSystemInfo, fetchSettings, updateSettings, sendTestEmail } from '../api/client';
+import {
+    changePassword, fetchSystemInfo, fetchSettings, updateSettings, sendTestEmail,
+    fetchBridgeTokens, createBridgeToken, revokeBridgeToken
+} from '../api/client';
+import type { BridgeAccessToken } from '../api/types';
 
 const DEFAULT_SINGLE_PROMPT = `Categorize the following invoice text. 
 Use EXACTLY ONE category from: [{{CATEGORIES}}].
@@ -217,6 +221,39 @@ export default function SettingsPage() {
             return;
         }
         passwordMut.mutate();
+    };
+
+    // --- Bridge Token Management ---
+    const [newTokenName, setNewTokenName] = useState('');
+    const [revealedToken, setRevealedToken] = useState<string | null>(null);
+    const [copySuccess, setCopySuccess] = useState(false);
+
+    const { data: bridgeTokens, isLoading: loadingTokens } = useQuery({
+        queryKey: ['bridgeTokens'],
+        queryFn: fetchBridgeTokens,
+    });
+
+    const createTokenMut = useMutation({
+        mutationFn: () => createBridgeToken(newTokenName),
+        onSuccess: (data) => {
+            setRevealedToken(data.token);
+            setNewTokenName('');
+            queryClient.invalidateQueries({ queryKey: ['bridgeTokens'] });
+        },
+    });
+
+    const revokeTokenMut = useMutation({
+        mutationFn: (id: string) => revokeBridgeToken(id),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['bridgeTokens'] });
+        },
+    });
+
+    const copyToClipboard = (text: string) => {
+        navigator.clipboard.writeText(text).then(() => {
+            setCopySuccess(true);
+            setTimeout(() => setCopySuccess(false), 2000);
+        });
     };
 
     return (
@@ -667,6 +704,114 @@ export default function SettingsPage() {
                     </button>
                 </div>
             </form>
+
+            <hr className="border-gray-200 dark:border-gray-800 my-8" />
+
+            {/* DEVICES & BRIDGE CARD */}
+            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
+                <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+                    <Smartphone size={20} className="text-gray-500 dark:text-gray-400" />
+                    {t('settings.devicesBridge') || "Devices & Bridge"}
+                </h2>
+                <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 max-w-2xl">
+                    {t('settings.bridgeInfo') || "Manage long-lived tokens for the Cogni-Hermit mobile app. These tokens allow secure synchronization without your password."}
+                </p>
+
+                {/* Token Creation */}
+                <div className="mb-8 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                        <Plus size={16} /> {t('settings.generateNewToken') || "Generate New Token"}
+                    </h3>
+                    <div className="flex gap-2">
+                        <input
+                            type="text"
+                            value={newTokenName}
+                            onChange={(e) => setNewTokenName(e.target.value)}
+                            placeholder={t('settings.deviceNamePlaceholder') || "e.g., My iPhone 15"}
+                            className="flex-1 px-4 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                        />
+                        <button
+                            onClick={() => createTokenMut.mutate()}
+                            disabled={createTokenMut.isPending || !newTokenName}
+                            className="px-4 py-2 bg-indigo-600 dark:bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 dark:hover:bg-indigo-600 disabled:opacity-50 transition-all flex items-center gap-2"
+                        >
+                            {createTokenMut.isPending ? t('common.loading') || "Loading..." : t('settings.generate') || "Generate"}
+                        </button>
+                    </div>
+
+                    {revealedToken && (
+                        <div className="mt-4 p-4 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800 rounded-xl animate-in zoom-in-95 duration-200">
+                            <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-2 flex items-center gap-1">
+                                <AlertCircle size={14} /> {t('settings.tokenSecretWarning') || "Copy this token now! It will not be shown again."}
+                            </p>
+                            <div className="flex items-center gap-2 bg-white dark:bg-gray-900 p-2.5 rounded-lg border border-indigo-200 dark:border-indigo-800 font-mono text-xs break-all">
+                                <span className="flex-1">{revealedToken}</span>
+                                <button
+                                    onClick={() => copyToClipboard(revealedToken)}
+                                    className="p-1.5 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-md transition-colors text-indigo-600"
+                                    title="Copy to clipboard"
+                                >
+                                    {copySuccess ? <CheckCircle2 size={16} className="text-green-500" /> : <Copy size={16} />}
+                                </button>
+                            </div>
+                            <button
+                                onClick={() => setRevealedToken(null)}
+                                className="mt-3 text-[11px] font-medium text-indigo-600 dark:text-indigo-400 hover:underline"
+                            >
+                                {t('common.close') || "Done, I've saved it"}
+                            </button>
+                        </div>
+                    )}
+                </div>
+
+                {/* Token List */}
+                <div className="space-y-3">
+                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                        <Monitor size={16} /> {t('settings.activeTokens') || "Active Bridge Tokens"}
+                    </h3>
+                    
+                    {loadingTokens ? (
+                        <div className="text-center py-8 text-gray-500 text-sm">{t('common.loading')}</div>
+                    ) : bridgeTokens?.length === 0 ? (
+                        <div className="text-center py-8 bg-gray-50 dark:bg-gray-800/30 rounded-xl border border-dashed border-gray-200 dark:border-gray-800 text-gray-500 text-sm italic">
+                            {t('settings.noTokens') || "No active bridge tokens found."}
+                        </div>
+                    ) : (
+                        <div className="divide-y divide-gray-100 dark:divide-gray-800 border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden">
+                            {bridgeTokens?.map((token: BridgeAccessToken) => (
+                                <div key={token.id} className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                    <div className="flex items-center gap-3">
+                                        <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
+                                            <Smartphone size={20} />
+                                        </div>
+                                        <div>
+                                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{token.name}</p>
+                                            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-gray-500 dark:text-gray-400">
+                                                <span className="flex items-center gap-1"><Plus size={10} /> {new Date(token.created_at).toLocaleDateString()}</span>
+                                                {token.last_used_at && (
+                                                    <span className="flex items-center gap-1"><Clock size={10} /> {t('settings.lastUsed') || "Last used"}: {new Date(token.last_used_at).toLocaleString()}</span>
+                                                )}
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <button
+                                        onClick={() => {
+                                            if (confirm(t('settings.revokeConfirm') || "Are you sure you want to revoke this token? The device will no longer be able to sync.")) {
+                                                revokeTokenMut.mutate(token.id);
+                                            }
+                                        }}
+                                        disabled={revokeTokenMut.isPending}
+                                        className="p-2 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-all"
+                                        title={t('settings.revokeToken') || "Revoke Token"}
+                                    >
+                                        <Trash2 size={18} />
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                    )}
+                </div>
+            </div>
 
             <hr className="border-gray-200 dark:border-gray-800 my-8" />
 

@@ -62,3 +62,28 @@ func TestPayslipRepository_GetSummary(t *testing.T) {
 		t.Errorf("expected trend ~5.7, got %f", summary.NetPayTrend)
 	}
 }
+
+func TestPayslipRepository_FindAll_Pagination(t *testing.T) {
+	ctx := context.Background()
+	repo := NewPayslipRepository()
+	userID := uuid.New()
+
+	for i := 1; i <= 5; i++ {
+		_ = repo.Save(ctx, &entity.Payslip{
+			ID:             uuid.New().String(),
+			UserID:         userID,
+			PeriodMonthNum: i,
+			PeriodYear:     2026,
+		})
+	}
+
+	all, _ := repo.FindAll(ctx, entity.PayslipFilter{UserID: userID, Limit: 2, Offset: 1})
+	if len(all) != 2 {
+		t.Errorf("expected 2 payslips, got %d", len(all))
+	}
+	// Order is DESC: 5, 4, 3, 2, 1. Offset 1 starts at 4, 3.
+	if all[0].PeriodMonthNum != 4 || all[1].PeriodMonthNum != 3 {
+		t.Errorf("unexpected months: %d, %d", all[0].PeriodMonthNum, all[1].PeriodMonthNum)
+	}
+}
+

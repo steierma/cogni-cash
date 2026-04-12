@@ -1,9 +1,13 @@
+// Package ai provides an LLM-backed BankStatementParser that handles both
+// text-based documents (PDF, CSV) and image files (JPEG, PNG, GIF, WEBP).
 package ai
 
 import (
 	"bytes"
 	"context"
 	"log/slog"
+	"net/http"
+	"strings"
 
 	"cogni-cash/internal/domain/entity"
 
@@ -11,9 +15,21 @@ import (
 	"github.com/ledongthuc/pdf"
 )
 
-// LLMStatementParser defines the method we expect the LLM adapter to fulfill.
+// LLMStatementParser defines the single method the LLM adapter must fulfil.
+// ParseBankStatementDocument mirrors ParsePayslipDocument in design: the caller
+// passes the detected MIME type and raw bytes; the adapter decides the LLM path
+// (multimodal for images, text-prompt for PDFs/CSV).
 type LLMStatementParser interface {
-	ParseBankStatementText(ctx context.Context, userID uuid.UUID, text string) (entity.BankStatement, error)
+	ParseBankStatementDocument(ctx context.Context, userID uuid.UUID, mimeType string, data []byte) (entity.BankStatement, error)
+}
+
+// imageMIMETypes is the set of MIME types that bypass text extraction.
+var imageMIMETypes = map[string]bool{
+	"image/jpeg": true,
+	"image/jpg":  true,
+	"image/png":  true,
+	"image/gif":  true,
+	"image/webp": true,
 }
 
 // Parser implements port.BankStatementParser using an LLM.
@@ -23,27 +39,37 @@ type Parser struct {
 }
 
 func NewParser(llm LLMStatementParser, logger *slog.Logger) *Parser {
-	return &Parser{
-		llm:    llm,
-		logger: logger,
-	}
+	return &Parser{llm: llm, logger: logger}
 }
 
+// Parse detects the file type from magic bytes and routes accordingly:
+//   - Image → passes raw bytes + detected MIME to ParseBankStatementDocument (multimodal)
+//   - PDF/text → extracts text first, then passes as text/plain to ParseBankStatementDocument
 func (p *Parser) Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
-	// 1. Try to extract PDF text first, fallback to raw text
-	rawText, err := extractPDFText(fileBytes)
-	if err != nil {
-		// Fallback: Treat as plain text
-		rawText = string(fileBytes)
+	detected := http.DetectContentType(fileBytes)
+
+	// Trim charset info if any
+	if idx := strings.IndexByte(detected, ';'); idx >= 0 {
+		detected = detected[:idx]
 	}
 
-	// Truncate to save context window tokens if the file is absurdly huge
+	if imageMIMETypes[detected] {
+		p.logger.Info("Image file detected in AI bank statement parser, using multimodal path",
+			"mime_type", detected, "size_bytes", len(fileBytes), "user_id", userID)
+		return p.llm.ParseBankStatementDocument(ctx, userID, detected, fileBytes)
+	}
+
+	// Text/PDF path: extract readable text, then forward as plain-text bytes
+	rawText, err := extractPDFText(fileBytes)
+	if err != nil {
+		rawText = string(fileBytes)
+	}
 	if len(rawText) > 60000 {
 		rawText = rawText[:60000]
 	}
 
 	p.logger.Info("Sending extracted text to LLM for bank statement parsing", "text_length", len(rawText))
-	return p.llm.ParseBankStatementText(ctx, userID, rawText)
+	return p.llm.ParseBankStatementDocument(ctx, userID, "text/plain", []byte(rawText))
 }
 
 func extractPDFText(fileBytes []byte) (string, error) {
@@ -52,7 +78,6 @@ func extractPDFText(fileBytes []byte) (string, error) {
 	if err != nil {
 		return "", err
 	}
-
 	var buf bytes.Buffer
 	b, err := r.GetPlainText()
 	if err != nil {

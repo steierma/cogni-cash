@@ -160,7 +160,7 @@ func main() {
 	writeLine("Bitte beachten Sie die nachstehenden Hinweise.")
 
 	_, srcFile, _, _ := runtime.Caller(0)
-	out := filepath.Join(filepath.Dir(srcFile), "..", "..", "balance", "Girokonto_5437817550_Kontoauszug_20260301.pdf")
+	out := filepath.Join(filepath.Dir(srcFile), "..", "..", "balance", "Girokonto_1234567890_Kontoauszug_20260301.pdf")
 	if err := pdf.OutputFileAndClose(out); err != nil {
 		log.Fatalf("pdf write error: %v", err)
 	}

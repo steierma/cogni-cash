@@ -25,7 +25,7 @@ func NewCategoryRepository(pool *pgxpool.Pool, logger *slog.Logger) *CategoryRep
 func (r *CategoryRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Category, error) {
 	r.Logger.Info("Finding all categories", "user_id", userID)
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, name, color, created_at
+		SELECT id, user_id, name, color, is_variable_spending, created_at, deleted_at
 		FROM categories
 		WHERE user_id = $1
 		ORDER BY name ASC`, userID)
@@ -37,7 +37,7 @@ func (r *CategoryRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]e
 	var cats []entity.Category
 	for rows.Next() {
 		var c entity.Category
-		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.Color, &c.CreatedAt); err != nil {
+		if err := rows.Scan(&c.ID, &c.UserID, &c.Name, &c.Color, &c.IsVariableSpending, &c.CreatedAt, &c.DeletedAt); err != nil {
 			return nil, fmt.Errorf("category repo: scan: %w", err)
 		}
 		cats = append(cats, c)
@@ -49,8 +49,8 @@ func (r *CategoryRepository) FindByID(ctx context.Context, id uuid.UUID, userID 
 	r.Logger.Info("Finding category by ID", "id", id, "user_id", userID)
 	var c entity.Category
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, name, color, created_at FROM categories WHERE id = $1 AND user_id = $2`, id, userID).
-		Scan(&c.ID, &c.UserID, &c.Name, &c.Color, &c.CreatedAt)
+		SELECT id, user_id, name, color, is_variable_spending, created_at, deleted_at FROM categories WHERE id = $1 AND user_id = $2`, id, userID).
+		Scan(&c.ID, &c.UserID, &c.Name, &c.Color, &c.IsVariableSpending, &c.CreatedAt, &c.DeletedAt)
 	if err != nil {
 		return entity.Category{}, fmt.Errorf("category repo: find by id: %w", err)
 	}
@@ -67,12 +67,12 @@ func (r *CategoryRepository) Save(ctx context.Context, cat entity.Category) (ent
 	}
 
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO categories (id, user_id, name, color)
-		VALUES ($1, $2, $3, $4)
+		INSERT INTO categories (id, user_id, name, color, is_variable_spending)
+		VALUES ($1, $2, $3, $4, $5)
 		ON CONFLICT (name, user_id) DO UPDATE SET name = EXCLUDED.name
-		RETURNING id, user_id, name, color, created_at`,
-		cat.ID, cat.UserID, cat.Name, cat.Color).
-		Scan(&cat.ID, &cat.UserID, &cat.Name, &cat.Color, &cat.CreatedAt)
+		RETURNING id, user_id, name, color, is_variable_spending, created_at, deleted_at`,
+		cat.ID, cat.UserID, cat.Name, cat.Color, cat.IsVariableSpending).
+		Scan(&cat.ID, &cat.UserID, &cat.Name, &cat.Color, &cat.IsVariableSpending, &cat.CreatedAt, &cat.DeletedAt)
 	if err != nil {
 		return entity.Category{}, fmt.Errorf("category repo: save: %w", err)
 	}
@@ -82,11 +82,11 @@ func (r *CategoryRepository) Save(ctx context.Context, cat entity.Category) (ent
 func (r *CategoryRepository) Update(ctx context.Context, cat entity.Category) (entity.Category, error) {
 	r.Logger.Info("Updating category", "id", cat.ID, "name", cat.Name, "user_id", cat.UserID)
 	err := r.pool.QueryRow(ctx, `
-		UPDATE categories SET name = $1, color = $2
-		WHERE id = $3 AND user_id = $4
-		RETURNING id, user_id, name, color, created_at`,
-		cat.Name, cat.Color, cat.ID, cat.UserID).
-		Scan(&cat.ID, &cat.UserID, &cat.Name, &cat.Color, &cat.CreatedAt)
+		UPDATE categories SET name = $1, color = $2, is_variable_spending = $3, deleted_at = $4
+		WHERE id = $5 AND user_id = $6
+		RETURNING id, user_id, name, color, is_variable_spending, created_at, deleted_at`,
+		cat.Name, cat.Color, cat.IsVariableSpending, cat.DeletedAt, cat.ID, cat.UserID).
+		Scan(&cat.ID, &cat.UserID, &cat.Name, &cat.Color, &cat.IsVariableSpending, &cat.CreatedAt, &cat.DeletedAt)
 	if err != nil {
 		return entity.Category{}, fmt.Errorf("category repo: update: %w", err)
 	}
@@ -94,10 +94,10 @@ func (r *CategoryRepository) Update(ctx context.Context, cat entity.Category) (e
 }
 
 func (r *CategoryRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
-	r.Logger.Info("Deleting category", "id", id, "user_id", userID)
-	tag, err := r.pool.Exec(ctx, `DELETE FROM categories WHERE id = $1 AND user_id = $2`, id, userID)
+	r.Logger.Info("Soft-deleting category", "id", id, "user_id", userID)
+	tag, err := r.pool.Exec(ctx, `UPDATE categories SET deleted_at = NOW() WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
-		return fmt.Errorf("category repo: delete: %w", err)
+		return fmt.Errorf("category repo: delete (soft): %w", err)
 	}
 	if tag.RowsAffected() == 0 {
 		r.Logger.Warn("Category not found for delete", "id", id, "user_id", userID)

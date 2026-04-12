@@ -15,11 +15,18 @@ export interface User {
     role: string;
 }
 
+export interface AuthResponse {
+    token: string;
+    refresh_token: string;
+}
+
 export interface Category {
     id: string;
     name: string;
     color: string;
+    is_variable_spending: boolean;
     created_at: string;
+    deleted_at?: string;
 }
 
 export interface Vendor {
@@ -38,6 +45,8 @@ export interface Invoice {
 }
 
 export interface Transaction {
+    id: string;
+    user_id: string;
     booking_date: string;
     valuta_date: string;
     description: string;
@@ -57,6 +66,33 @@ export interface Transaction {
     statement_type: 'giro' | 'credit_card' | 'extra_account';
     bank_statement_id?: string | null;
     location?: string;
+    is_prediction?: boolean;
+    skip_forecasting?: boolean;
+}
+
+export interface ForecastPoint {
+    date: string;
+    expected_balance: number;
+    income: number;
+    expense: number;
+    category_amounts: Record<string, number>;
+}
+
+export interface PredictedTransaction extends Transaction {
+    probability: number;
+}
+
+export interface PatternExclusion {
+    id: string;
+    user_id: string;
+    match_term: string;
+    created_at: string;
+}
+
+export interface CashFlowForecast {
+    current_balance: number;
+    time_series: ForecastPoint[];
+    predictions: PredictedTransaction[];
 }
 
 export interface BankStatement {
@@ -250,4 +286,46 @@ export interface BankAccount {
     balance: number;
     last_synced_at: string;
     account_type: 'giro' | 'credit_card' | 'extra_account';
+}
+
+// ── Planned Transactions ─────────────────────────────────────────────────────
+
+export interface PlannedTransaction {
+    id: string;
+    user_id: string;
+    amount: number;
+    date: string;
+    description: string;
+    category_id: string;
+    status: 'pending' | 'matched' | 'expired';
+    matched_transaction_id?: string;
+}
+
+export interface CreatePlannedTransactionRequest {
+    amount: number;
+    date: string;
+    description: string;
+    category_id: string;
+}
+
+export interface UpdatePlannedTransactionRequest {
+    amount?: number;
+    date?: string;
+    description?: string;
+    category_id?: string;
+}
+
+// ── Bridge Token Types ──────────────────────────────────────────────────────
+
+export interface BridgeAccessToken {
+    id: string;
+    user_id: string;
+    name: string;
+    last_used_at?: string;
+    created_at: string;
+}
+
+export interface CreateBridgeTokenResponse {
+    token: string;
+    info: BridgeAccessToken;
 }

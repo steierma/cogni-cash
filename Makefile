@@ -30,14 +30,16 @@ RSYNC_SSH     := ssh
 .DEFAULT_GOAL := help
 
 .PHONY: help \
-	up down restart logs ps \
+	up down restart logs ps build-up \
 	build build-backend build-frontend \
 	deploy deploy-sync deploy-up setup-server \
 	db-truncate db-reset db-nuke db-migrate db-shell db-reset-password \
 	dev backend-run backend-build backend-test \
 	gen-testdata \
 	frontend-dev frontend-dev-prod frontend-build \
-	clean clean-all nuke
+	clean clean-all nuke \
+	db-dump-local db-dump-remote db-restore-remote db-seed db-restore-local \
+	backup-offsite
 
 # ── Help ──────────────────────────────────────────────────────────────────────
 help:
@@ -46,6 +48,7 @@ help:
 	@echo ""
 	@echo "  Infrastructure"
 	@echo "    make up               Start all containers"
+	@echo "    make build-up         Build + Up in one command (logs errors to tmp/build_error.txt)"
 	@echo "    make down             Stop all containers"
 	@echo "    make restart          Restart all containers"
 	@echo "    make logs             Tail logs of all containers"
@@ -65,9 +68,13 @@ help:
 	@echo "    make db-reset         Drop + recreate DB, re-migrate"
 	@echo "    make db-nuke          Drop all tables + re-migrate"
 	@echo "    make db-migrate       Run pending SQL migrations"
+	@echo "    make db-squash-upgrade  Upgrade existing DB migration history to the squashed schema"
 	@echo "    make db-shell         Open psql shell (uses backend/.env)"
 	@echo "    make db-dump-local    Create a compressed backup of your local database"
 	@echo "    make db-reset-password USERNAME=<username> PASSWORD=<newpass>  Reset a user password"
+	@echo ""
+	@echo "  Backups"
+	@echo "    make backup-offsite   Encrypted rclone sync of DB dumps and payslips to Google Drive"
 	@echo ""
 	@echo "  Backend"
 	@echo "    make dev-memory       Start backend (In-Memory) + Frontend and open browser"
@@ -90,6 +97,8 @@ help:
 
 # ── Infrastructure ────────────────────────────────────────────────────────────
 
+ERR_LOG := tmp/build_error.txt
+
 backend/.env:
 	@echo ""
 	@echo "  ⚠️  backend/.env not found — creating from backend/.env.example"
@@ -99,7 +108,14 @@ backend/.env:
 	@exit 1
 
 up: backend/.env
-	docker compose up -d
+	@mkdir -p tmp
+	docker compose up -d 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
+
+build-up:
+	@mkdir -p tmp
+	@echo ">>> Running build and up with error logging to $(ERR_LOG)..."
+	@($(MAKE) build && $(MAKE) up) 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
+	@echo ">>> Build and Up successful."
 
 down:
 	docker compose down
@@ -146,12 +162,14 @@ build: build-backend build-frontend
 
 build-backend:
 	@echo ">>> Building backend image: $(BACKEND_IMAGE)"
-	docker build -t $(BACKEND_IMAGE) $(BACKEND_DIR)
+	@mkdir -p tmp
+	docker build -t $(BACKEND_IMAGE) $(BACKEND_DIR) 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
 	@echo ">>> Done: $(BACKEND_IMAGE)"
 
 build-frontend:
 	@echo ">>> Building frontend image: $(FRONTEND_IMAGE)"
-	docker build --build-arg VITE_ENABLE_SANDBOX=true -t $(FRONTEND_IMAGE) $(FRONTEND_DIR)
+	@mkdir -p tmp
+	docker build --build-arg VITE_ENABLE_SANDBOX=true -t $(FRONTEND_IMAGE) $(FRONTEND_DIR) 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
 	@echo ">>> Done: $(FRONTEND_IMAGE)"
 
 # ── Manual Deploy ─────────────────────────────────────────────────────────────
@@ -216,7 +234,8 @@ db-nuke:
 
 db-migrate:
 	@echo ">>> Running migrations against $(DB_HOST)…"
-	cd $(BACKEND_DIR) && export $$(grep -v '^#' .env 2>/dev/null | xargs) ; DATABASE_HOST=127.0.0.1 go run ./cmd/migrate
+	cd $(BACKEND_DIR) && export $$(grep -v '^#' .env 2>/dev/null | xargs) ; \
+	DATABASE_HOST=127.0.0.1 go run ./cmd/migrate
 	@echo ">>> Migrations complete."
 
 db-shell:
@@ -241,6 +260,70 @@ db-reset-password:
 			$(BACKEND_IMAGE) \
 			-user "$(USERNAME)" -password "$(PASSWORD)"; \
 	fi
+
+db-dump-local:
+	@echo ">>> Dumping local database $(DB_NAME)…"
+	@mkdir -p backups
+	docker compose exec -T postgres pg_dump -U $(DB_USER) -d $(DB_NAME) -c -F p | gzip > backups/local_db_$$(date +%Y%m%d_%H%M%S).sql.gz
+	@echo ">>> Done. Compressed dump saved to backups/ directory."
+
+db-dump-remote:
+	@echo ">>> Dumping database from $(DEPLOY_HOST)…"
+	@mkdir -p backups
+	$(DEPLOY_SSH) \
+		"cd $(DEPLOY_PATH) && export \$$(grep -v '^#' backend/.env | xargs) && docker compose exec -T postgres pg_dump -U \$$POSTGRES_USER -d \$$POSTGRES_DB -c -F p" | gzip > backups/prod_db_$$(date +%Y%m%d_%H%M%S).sql.gz
+	@echo ">>> Done. Compressed dump saved to backups/ directory."
+
+db-restore-remote:
+	@[ -n "$(FILE)" ] || (echo "ERROR: FILE is required. Usage: make db-restore-remote FILE=backups/dump.sql.gz"; exit 1)
+	@echo ">>> ⚠️ WARNING: This will overwrite the database on $(DEPLOY_HOST)."
+	@printf ">>> Are you sure? [y/N] " && read ans && [ "$${ans}" = "y" ] || (echo "Aborted." && exit 1)
+	@echo ">>> Restoring $(FILE) to $(DEPLOY_HOST)…"
+	@gunzip -c $(FILE) | $(DEPLOY_SSH) \
+		"cd $(DEPLOY_PATH) && export \$$(grep -v '^#' backend/.env | xargs) && docker compose exec -T postgres psql -U \$$POSTGRES_USER -d \$$POSTGRES_DB"
+	@echo ">>> Restore complete."
+
+db-seed:
+	@echo ">>> Seeding database with dummy data..."
+	$(PSQL) -f $(BACKEND_DIR)/balance/dummy-data.sql
+	@echo ">>> Dummy data inserted successfully."
+
+db-restore-local:
+	@[ -n "$(FILE)" ] || (echo "ERROR: FILE is required. Usage: make db-restore-local FILE=backups/dump.sql.gz"; exit 1)
+	@echo ">>> ⚠️ WARNING: This will overwrite your local database."
+	@printf ">>> Are you sure? [y/N] " && read ans && [ "$${ans}" = "y" ] || (echo "Aborted." && exit 1)
+	@echo ">>> Wiping local schema to prevent foreign key conflicts…"
+	@docker compose exec -T postgres psql -U $(DB_USER) -d $(DB_NAME) -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+	@echo ">>> Restoring $(FILE) to local database…"
+	@gunzip -c $(FILE) | docker compose exec -T postgres psql -U $(DB_USER) -d $(DB_NAME)
+	@echo ">>> Restore complete."
+
+# ── Off-Site Backups ──────────────────────────────────────────────────────────
+
+backup-offsite:
+	@echo ">>> Starting off-site encrypted backup via rclone..."
+	@echo ">>> 1. Creating local database dump..."
+	$(MAKE) db-dump-local
+	@echo ">>> 2. Syncing database backups to Google Drive (rclone)..."
+	rclone sync backups/ gdrive_crypt:cogni-cash/backups/ -v
+	@echo ">>> 3. Syncing payslip storage to Google Drive (rclone)..."
+	rclone sync $(BACKEND_DIR)/payslips/ gdrive_crypt:cogni-cash/payslips/ -v
+	@echo ">>> Off-site backup complete."
+	@echo ">>> NOTE: Ensure you take a manual Proxmox snapshot prior to any major upgrades or system changes."
+
+db-squash-upgrade:
+	@echo ">>> Upgrading migration history for the squashed schema..."
+	@echo ">>> ⚠️ WARNING: Run this ONLY on an existing installation BEFORE running make db-migrate."
+	@echo ">>> It rewrites schema_migrations so the runner knows 001–017 are already applied,"
+	@echo ">>> then 'make db-migrate' will apply only 002_squash_catchup (missing columns/tables)."
+	@printf ">>> Are you sure? [y/N] " && read ans && [ "$${ans}" = "y" ] || (echo "Aborted." && exit 1)
+	@echo ">>> Removing all old numbered migration entries..."
+	@$(PSQL) -c "DELETE FROM schema_migrations WHERE version NOT IN ('001_initial_schema', '002_squash_catchup');"
+	@echo ">>> Ensuring 001_initial_schema is marked as applied (no hash — forces idempotent re-run)..."
+	@$(PSQL) -c "INSERT INTO schema_migrations (version, applied_at, content_hash) VALUES ('001_initial_schema', NOW(), '') ON CONFLICT (version) DO NOTHING;"
+	@echo ">>> Running migrations to apply catchup and stamp real hashes..."
+	$(MAKE) db-migrate
+	@echo ">>> ✅ Migration history successfully updated!"
 
 # ── Backend ───────────────────────────────────────────────────────────────────
 dev-memory:
@@ -272,7 +355,8 @@ backend-build:
 	@echo ">>> Binary: $(BACKEND_DIR)/bin/server"
 
 backend-test:
-	cd $(BACKEND_DIR) && export $$(grep -v '^#' .env 2>/dev/null | xargs) ; go test ./... -v
+	cd $(BACKEND_DIR) && export $$(grep -v '^#' .env 2>/dev/null | xargs) ; \
+	go test ./... -v
 
 gen-testdata:
 	@echo ">>> Generating ING PDF fixture..."
@@ -326,40 +410,3 @@ nuke: clean-all
 	@echo ""
 	@echo "✅ Everything cleaned. Run 'make up' to start fresh."
 	@echo ""
-
-db-dump-local:
-	@echo ">>> Dumping local database $(DB_NAME)…"
-	@mkdir -p backups
-	docker compose exec -T postgres pg_dump -U $(DB_USER) -d $(DB_NAME) -c -F p | gzip > backups/local_db_$$(date +%Y%m%d_%H%M%S).sql.gz
-	@echo ">>> Done. Compressed dump saved to backups/ directory."
-
-db-dump-remote:
-	@echo ">>> Dumping database from $(DEPLOY_HOST)…"
-	@mkdir -p backups
-	$(DEPLOY_SSH) \
-		"cd $(DEPLOY_PATH) && export \$$(grep -v '^#' backend/.env | xargs) && docker compose exec -T postgres pg_dump -U \$$POSTGRES_USER -d \$$POSTGRES_DB -c -F p" | gzip > backups/prod_db_$$(date +%Y%m%d_%H%M%S).sql.gz
-	@echo ">>> Done. Compressed dump saved to backups/ directory."
-
-db-restore-remote:
-	@[ -n "$(FILE)" ] || (echo "ERROR: FILE is required. Usage: make db-restore-remote FILE=backups/dump.sql.gz"; exit 1)
-	@echo ">>> ⚠️ WARNING: This will overwrite the database on $(DEPLOY_HOST)."
-	@printf ">>> Are you sure? [y/N] " && read ans && [ "$${ans}" = "y" ] || (echo "Aborted." && exit 1)
-	@echo ">>> Restoring $(FILE) to $(DEPLOY_HOST)…"
-	@gunzip -c $(FILE) | $(DEPLOY_SSH) \
-		"cd $(DEPLOY_PATH) && export \$$(grep -v '^#' backend/.env | xargs) && docker compose exec -T postgres psql -U \$$POSTGRES_USER -d \$$POSTGRES_DB"
-	@echo ">>> Restore complete."
-
-db-seed:
-	@echo ">>> Seeding database with dummy data..."
-	$(PSQL) -f $(BACKEND_DIR)/balance/dummy-data.sql
-	@echo ">>> Dummy data inserted successfully."
-
-db-restore-local:
-	@[ -n "$(FILE)" ] || (echo "ERROR: FILE is required. Usage: make db-restore-local FILE=backups/dump.sql.gz"; exit 1)
-	@echo ">>> ⚠️ WARNING: This will overwrite your local database."
-	@printf ">>> Are you sure? [y/N] " && read ans && [ "$${ans}" = "y" ] || (echo "Aborted." && exit 1)
-	@echo ">>> Wiping local schema to prevent foreign key conflicts…"
-	@docker compose exec -T postgres psql -U $(DB_USER) -d $(DB_NAME) -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
-	@echo ">>> Restoring $(FILE) to local database…"
-	@gunzip -c $(FILE) | docker compose exec -T postgres psql -U $(DB_USER) -d $(DB_NAME)
-	@echo ">>> Restore complete."

@@ -32,6 +32,15 @@ func (r *CategoryRepository) Save(ctx context.Context, category entity.Category)
 		category.ID = uuid.New()
 	}
 
+	// For memory repository, we should enforce name uniqueness per user for parity
+	for id, c := range r.categories {
+		if c.UserID == category.UserID && c.Name == category.Name && id != category.ID {
+			// Update the existing one (ON CONFLICT DO UPDATE parity)
+			r.categories[id] = category
+			return category, nil
+		}
+	}
+
 	if _, exists := r.categories[category.ID]; !exists {
 		if len(r.order) >= maxCategories {
 			// Evict oldest

@@ -52,6 +52,10 @@ func (s *TransactionService) MarkAsReviewed(ctx context.Context, hash string, us
 	return s.repo.MarkTransactionReviewed(ctx, hash, userID)
 }
 
+func (s *TransactionService) ToggleSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
+	return s.repo.UpdateTransactionSkipForecasting(ctx, hash, skip, userID)
+}
+
 func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter entity.TransactionFilter) (entity.TransactionAnalytics, error) {
 	if s.repo == nil {
 		return entity.TransactionAnalytics{}, errors.New("repository not configured")
@@ -325,7 +329,7 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 
 		// 2. Only call LLM for transactions that weren't matched in DB
 		if len(toCategorizeViaLLM) > 0 {
-			results, err := s.llm.CategorizeBatch(ctx, userID, toCategorizeViaLLM, catNames, examples)
+			results, err := s.llm.CategorizeTransactionsBatch(ctx, userID, toCategorizeViaLLM, catNames, examples)
 			if err != nil {
 				if ctx.Err() != nil {
 					s.JobTracker.Finish("cancelled")

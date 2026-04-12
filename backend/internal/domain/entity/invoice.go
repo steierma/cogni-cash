@@ -23,3 +23,10 @@ type Invoice struct {
 	OriginalFileName    string `json:"original_file_name,omitempty"`
 	OriginalFileContent []byte `json:"-"` // excluded from JSON responses
 }
+
+// InvoiceFilter defines query parameters for listing invoices.
+type InvoiceFilter struct {
+	UserID uuid.UUID
+	Limit  int
+	Offset int
+}

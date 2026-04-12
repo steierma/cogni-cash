@@ -9,6 +9,7 @@ backend/resetpw
 backend/healthcheck
 
 # ── Node / Vite ───────────────────────────────────────────────────────────────
+node_modules/
 frontend/node_modules/
 frontend/dist/
 
@@ -48,3 +49,8 @@ backend/.env
 /mobile/run_wireless.sh
 /mobile/tmp/*
 /tmp/*
+/backend/coverage.out
+/backend/coverage_forecasting.out
+mobile_hermit/android/build/
+mobile_hermit/ios_bak/
+mobile_hermit/bin/inspect_temp.dart

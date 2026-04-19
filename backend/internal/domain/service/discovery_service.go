@@ -168,12 +168,17 @@ func (s *DiscoveryService) GetSuggestedSubscriptions(ctx context.Context, userID
 
 	var suggestions []entity.SuggestedSubscription
 	for _, rt := range recurring {
-		normName := normalizeDescription(rt.template.Description)
+		normDesc := normalizeDescription(rt.template.Description)
+		normCounterparty := ""
+		if rt.template.CounterpartyName != "" {
+			normCounterparty = normalizeDescription(rt.template.CounterpartyName)
+		}
 
 		// Filter out if already a subscription
 		isExisting := false
 		for _, sub := range existingSubs {
-			if normalizeDescription(sub.MerchantName) == normName {
+			normSub := normalizeDescription(sub.MerchantName)
+			if normSub == normDesc || (normCounterparty != "" && normSub == normCounterparty) {
 				isExisting = true
 				break
 			}
@@ -183,9 +188,16 @@ func (s *DiscoveryService) GetSuggestedSubscriptions(ctx context.Context, userID
 		}
 
 		// Filter based on feedback
-		if fb, ok := feedbackMap[normName]; ok {
+		if fb, ok := feedbackMap[normDesc]; ok {
 			if fb.Status == entity.DiscoveryStatusDeclined || fb.Status == entity.DiscoveryStatusAIRejected {
 				continue
+			}
+		}
+		if normCounterparty != "" {
+			if fb, ok := feedbackMap[normCounterparty]; ok {
+				if fb.Status == entity.DiscoveryStatusDeclined || fb.Status == entity.DiscoveryStatusAIRejected {
+					continue
+				}
 			}
 		}
 

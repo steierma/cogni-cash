@@ -13,4 +13,3 @@ type InvoiceParser interface {
 	// The mimeType hint may be used to choose the extraction strategy.
 	Extract(ctx context.Context, userID uuid.UUID, fileBytes []byte, mimeType string) (string, error)
 }
-

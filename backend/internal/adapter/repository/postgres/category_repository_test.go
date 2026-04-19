@@ -110,7 +110,7 @@ func TestCategoryRepository(t *testing.T) {
 
 	t.Run("Update_Isolation", func(t *testing.T) {
 		cat, _ := repo.Save(ctx, entity.Category{UserID: userID, Name: "Update Me"})
-		
+
 		cat.Name = "Updated"
 		_, err := repo.Update(ctx, entity.Category{ID: cat.ID, UserID: otherUserID, Name: "Hijack"})
 		if err == nil {
@@ -129,6 +129,63 @@ func TestCategoryRepository(t *testing.T) {
 		err = repo.Delete(ctx, cat.ID, userID)
 		if err != nil {
 			t.Fatalf("Delete: unexpected error: %v", err)
+		}
+	})
+
+	t.Run("ForecastStrategy_Handling", func(t *testing.T) {
+		// 1. Default value
+		cat, err := repo.Save(ctx, entity.Category{UserID: userID, Name: "Default Strategy"})
+		if err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		if cat.ForecastStrategy != "3y" {
+			t.Errorf("expected default strategy '3y', got '%s'", cat.ForecastStrategy)
+		}
+
+		// 2. Explicit value
+		cat2, err := repo.Save(ctx, entity.Category{UserID: userID, Name: "Explicit Strategy", ForecastStrategy: "3m"})
+		if err != nil {
+			t.Fatalf("Save: %v", err)
+		}
+		if cat2.ForecastStrategy != "3m" {
+			t.Errorf("expected strategy '3m', got '%s'", cat2.ForecastStrategy)
+		}
+
+		// 3. Update
+		cat2.ForecastStrategy = "all"
+		updated, err := repo.Update(ctx, cat2)
+		if err != nil {
+			t.Fatalf("Update: %v", err)
+		}
+		if updated.ForecastStrategy != "all" {
+			t.Errorf("expected updated strategy 'all', got '%s'", updated.ForecastStrategy)
+		}
+
+		// 4. FindByID
+		found, err := repo.FindByID(ctx, cat2.ID, userID)
+		if err != nil {
+			t.Fatalf("FindByID: %v", err)
+		}
+		if found.ForecastStrategy != "all" {
+			t.Errorf("FindByID: expected strategy 'all', got '%s'", found.ForecastStrategy)
+		}
+
+		// 5. FindAll
+		all, err := repo.FindAll(ctx, userID)
+		if err != nil {
+			t.Fatalf("FindAll: %v", err)
+		}
+		foundInAll := false
+		for _, c := range all {
+			if c.ID == cat2.ID {
+				foundInAll = true
+				if c.ForecastStrategy != "all" {
+					t.Errorf("FindAll: expected strategy 'all', got '%s'", c.ForecastStrategy)
+				}
+			}
+		}
+		if !foundInAll {
+			t.Error("FindAll: category not found")
 		}
 	})
 }

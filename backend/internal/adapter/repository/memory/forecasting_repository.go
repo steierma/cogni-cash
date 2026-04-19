@@ -47,7 +47,7 @@ func (r *ForecastingRepository) SaveExclusion(ctx context.Context, exclusion ent
 func (r *ForecastingRepository) FindExclusions(ctx context.Context, userID uuid.UUID) ([]entity.ExcludedForecast, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
-	
+
 	// Return a copy to avoid race conditions if the caller modifies the slice
 	src := r.exclusions[userID]
 	dst := make([]entity.ExcludedForecast, len(src))

@@ -22,12 +22,12 @@ func (t *PasswordResetToken) IsExpired() bool {
 
 // RefreshToken represents a long-lived token used to issue new JWTs.
 type RefreshToken struct {
-	ID         uuid.UUID `json:"id"`
-	UserID     uuid.UUID `json:"user_id"`
-	TokenHash  string    `json:"-"`
-	ExpiresAt  time.Time `json:"expires_at"`
-	CreatedAt  time.Time `json:"created_at"`
-	Revoked    bool      `json:"revoked"`
+	ID        uuid.UUID `json:"id"`
+	UserID    uuid.UUID `json:"user_id"`
+	TokenHash string    `json:"-"`
+	ExpiresAt time.Time `json:"expires_at"`
+	CreatedAt time.Time `json:"created_at"`
+	Revoked   bool      `json:"revoked"`
 }
 
 // AuthResponse is the payload returned upon successful login or refresh.

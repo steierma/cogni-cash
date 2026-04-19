@@ -3,6 +3,8 @@
 # =============================================================================
 
 # ── Config ────────────────────────────────────────────────────────────────────
+SHELL         := /bin/bash
+.SHELLFLAGS   := -o pipefail -c
 ENV_FILE      := backend/.env
 
 -include $(ENV_FILE)
@@ -48,7 +50,7 @@ help:
 	@echo ""
 	@echo "  Infrastructure"
 	@echo "    make up               Start all containers"
-	@echo "    make build-up         Build + Up in one command (logs errors to tmp/build_error.txt)"
+	@echo "    make build-up         Build + Up in one command (logs progress to tmp/build_error.txt)"
 	@echo "    make down             Stop all containers"
 	@echo "    make restart          Restart all containers"
 	@echo "    make logs             Tail logs of all containers"
@@ -109,13 +111,15 @@ backend/.env:
 
 up: backend/.env
 	@mkdir -p tmp
-	docker compose up -d 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
+	@echo ">>> Starting containers..."
+	docker compose up -d 2>&1 | tee $(ERR_LOG)
+	@echo ">>> Up finished."
 
 build-up:
 	@mkdir -p tmp
-	@echo ">>> Running build and up with error logging to $(ERR_LOG)..."
-	@($(MAKE) build && $(MAKE) up) 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
-	@echo ">>> Build and Up successful."
+	@echo ">>> Running build and up with live progress logging to $(ERR_LOG)..."
+	($(MAKE) build && $(MAKE) up) 2>&1 | tee $(ERR_LOG)
+	@echo ">>> Build and Up finished."
 
 down:
 	docker compose down
@@ -163,13 +167,13 @@ build: build-backend build-frontend
 build-backend:
 	@echo ">>> Building backend image: $(BACKEND_IMAGE)"
 	@mkdir -p tmp
-	docker build -t $(BACKEND_IMAGE) $(BACKEND_DIR) 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
+	docker build -t $(BACKEND_IMAGE) $(BACKEND_DIR) 2>&1 | tee $(ERR_LOG)
 	@echo ">>> Done: $(BACKEND_IMAGE)"
 
 build-frontend:
 	@echo ">>> Building frontend image: $(FRONTEND_IMAGE)"
 	@mkdir -p tmp
-	docker build --build-arg VITE_ENABLE_SANDBOX=true -t $(FRONTEND_IMAGE) $(FRONTEND_DIR) 2> $(ERR_LOG) || (cat $(ERR_LOG) && exit 1)
+	docker build --build-arg VITE_ENABLE_SANDBOX=true -t $(FRONTEND_IMAGE) $(FRONTEND_DIR) 2>&1 | tee $(ERR_LOG)
 	@echo ">>> Done: $(FRONTEND_IMAGE)"
 
 # ── Manual Deploy ─────────────────────────────────────────────────────────────
@@ -212,8 +216,8 @@ setup-server:
 # ── Database ──────────────────────────────────────────────────────────────────
 
 db-truncate:
-	@echo ">>> Truncating all tables except users (do this manually if needed) $(DB_HOST)…"
-	$(PSQL) -c "TRUNCATE TABLE payslip_bonuses, payslips, settings, reconciliations, transactions, bank_statements, bank_accounts, bank_connections, invoices, categories RESTART IDENTITY CASCADE;"
+	@echo ">>> Truncating all user data tables except 'users' and 'schema_migrations' on $(DB_HOST)…"
+	$(PSQL) -c "DO \$$$$ DECLARE r RECORD; BEGIN FOR r IN (SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename NOT IN ('users', 'schema_migrations')) LOOP EXECUTE 'TRUNCATE TABLE ' || quote_ident(r.tablename) || ' RESTART IDENTITY CASCADE'; END LOOP; END \$$$$;"
 	@echo ">>> Done."
 
 db-reset:

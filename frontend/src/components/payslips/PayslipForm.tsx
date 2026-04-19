@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Save, Plus, X, Loader2 } from 'lucide-react';
-import type { Payslip } from '../../api/types';
+import type { Payslip } from "../../api/types/payslip";
 
 interface PayslipFormProps {
     initialData: Partial<Payslip>;

@@ -75,6 +75,7 @@ func main() {
 	var bankStmtRepo port.BankStatementRepository
 	var bankRepo port.BankRepository
 	var categoryRepo port.CategoryRepository
+	var sharingRepo port.SharingRepository
 	var userRepo port.UserRepository
 	var reconciliationRepo port.ReconciliationRepository
 	var settingsRepo port.SettingsRepository
@@ -84,11 +85,14 @@ func main() {
 	var plannedTransactionRepo port.PlannedTransactionRepository
 	var forecastingRepo port.ForecastingRepository
 	var bridgeTokenRepo port.BridgeAccessTokenRepository
+	var documentRepo port.DocumentRepository
+	var subscriptionRepo port.SubscriptionRepository
 
 	if storageMode == "memory" {
 		logger.Info("Using in-memory storage mode")
 		invoiceRepo = memrepo.NewInvoiceRepository()
 		categoryRepo = memrepo.NewCategoryRepository()
+		sharingRepo = memrepo.NewSharingRepository()
 		bankStmtRepo = memrepo.NewBankStatementRepository()
 		if mem, ok := bankStmtRepo.(*memrepo.BankStatementRepository); ok {
 			mem.WithCategoryRepository(categoryRepo)
@@ -103,6 +107,8 @@ func main() {
 		plannedTransactionRepo = memrepo.NewPlannedTransactionRepository()
 		forecastingRepo = memrepo.NewForecastingRepository()
 		bridgeTokenRepo = memrepo.NewBridgeAccessTokenRepository()
+		documentRepo = memrepo.NewDocumentRepository()
+		subscriptionRepo = memrepo.NewSubscriptionRepository()
 
 		dbPinger = func(ctx context.Context) error { return nil }
 		dbHost = "memory"
@@ -130,20 +136,26 @@ func main() {
 
 		dbPinger = func(ctx context.Context) error { return pool.Ping(ctx) }
 
+		vaultKey := envOrDefault("DOCUMENT_VAULT_KEY", "fallback-insecure-vault-key-change-me")
+		settingsVaultKey := envOrDefault("SETTINGS_VAULT_KEY", vaultKey)
+
 		// --- Instantiate Repositories ---
 		invoiceRepo = pgrepo.NewInvoiceRepository(pool, logger)
 		bankStmtRepo = pgrepo.NewBankStatementRepository(pool, logger)
 		bankRepo = pgrepo.NewBankRepository(pool, logger)
 		categoryRepo = pgrepo.NewCategoryRepository(pool, logger)
+		sharingRepo = pgrepo.NewSharingRepository(pool, logger)
 		userRepo = pgrepo.NewUserRepository(pool, logger)
 		reconciliationRepo = pgrepo.NewReconciliationRepository(pool, bankStmtRepo, logger)
-		settingsRepo = pgrepo.NewSettingsRepository(pool, userRepo, logger)
+		settingsRepo = pgrepo.NewSettingsRepository(pool, userRepo, settingsVaultKey, logger)
 		payslipRepo = pgrepo.NewPayslipRepository(pool)
 		authRepo = pgrepo.NewAuthRepository(pool, logger)
 		passwordResetRepo = pgrepo.NewPasswordResetRepository(pool, logger)
 		plannedTransactionRepo = pgrepo.NewPlannedTransactionRepository(pool, logger)
 		forecastingRepo = pgrepo.NewForecastingRepository(pool)
 		bridgeTokenRepo = pgrepo.NewBridgeAccessTokenRepository(pool, logger)
+		documentRepo = pgrepo.NewDocumentRepository(pool, vaultKey)
+		subscriptionRepo = pgrepo.NewSubscriptionRepository(pool, logger)
 	}
 
 	admin, _ := userRepo.FindByUsername(appCtx, "admin")
@@ -168,6 +180,7 @@ func main() {
 
 	userSvc := service.NewUserService(userRepo, logger)
 	settingsSvc := service.NewSettingsService(settingsRepo, logger)
+	categorySvc := service.NewCategoryService(categoryRepo, sharingRepo, logger)
 
 	emailProvider := smtpadapter.NewAdapter(settingsRepo, logger)
 	notificationSvc := service.NewNotificationService(emailProvider, userRepo, logger)
@@ -182,7 +195,9 @@ func main() {
 	// Inject the text extractor into the LLM adapter so it can handle the fallback internally
 	llmClient := llmadapter.NewAdapter(settingsRepo, invoiceFileParser, logger)
 
-	invoiceSvc := service.NewInvoiceService(invoiceRepo, categoryRepo, invoiceFileParser, llmClient, logger)
+	invoiceSvc := service.NewInvoiceService(invoiceRepo, categoryRepo, sharingRepo, notificationSvc, userRepo, invoiceFileParser, llmClient, logger)
+
+	discoverySvc := service.NewDiscoveryService(bankStmtRepo, subscriptionRepo, userRepo, settingsRepo, llmClient, llmClient, emailProvider, logger)
 
 	reconciliationSvc := service.NewReconciliationService(bankStmtRepo, reconciliationRepo, logger)
 	plannedTransactionSvc := service.NewPlannedTransactionService(plannedTransactionRepo)
@@ -190,9 +205,11 @@ func main() {
 	// Inject the LLMClient (which satisfies port.BankStatementAIParser)
 	bankStatementSvc := service.NewBankStatementService(bankStmtRepo, logger).
 		WithPlannedTransactionService(plannedTransactionSvc).
+		WithDiscoveryService(discoverySvc).
 		WithAIParser(llmClient)
 
 	transactionSvc := service.NewTransactionService(bankStmtRepo, categoryRepo, settingsRepo, llmClient, logger)
+	sharingSvc := service.NewSharingService(categoryRepo, invoiceRepo, sharingRepo, bankStmtRepo, userRepo, logger)
 
 	var bankProvider port.BankProvider
 	if storageMode == "memory" {
@@ -201,7 +218,8 @@ func main() {
 		bankProvider = dynamicbank.NewAdapter(settingsRepo, ebPrivateKey, logger)
 	}
 
-	bankSvc := service.NewBankService(bankRepo, bankStmtRepo, settingsRepo, plannedTransactionSvc, bankProvider, logger)
+	bankSvc := service.NewBankService(bankRepo, bankStmtRepo, settingsRepo, plannedTransactionSvc, bankProvider, logger).
+		WithDiscoveryService(discoverySvc)
 	forecastingSvc := service.NewForecastingService(bankStmtRepo, bankRepo, categoryRepo, payslipRepo, plannedTransactionRepo, forecastingRepo, logger)
 
 	// If using dynamic adapter (Postgres mode), decide if we allow mock interception
@@ -223,6 +241,8 @@ func main() {
 	cariadParser := cariadparser.NewParser(logger)
 	// Inject the LLMClient (which satisfies port.PayslipAIParser)
 	payslipSvc := service.NewPayslipService(payslipRepo, cariadParser, llmClient, logger)
+
+	documentSvc := service.NewDocumentService(documentRepo, llmClient, payslipRepo, invoiceRepo)
 
 	// --- Background Workers ---
 	go func() {
@@ -355,7 +375,7 @@ func main() {
 
 				nextSync = time.Date(nextDate.Year(), nextDate.Month(), nextDate.Day(), randomHour, randomMinute, 0, 0, now.Location())
 
-				_ = settingsRepo.Set(appCtx, "bank_sync_next_run", nextSync.Format(time.RFC3339), adminID)
+				_ = settingsRepo.Set(appCtx, "bank_sync_next_run", nextSync.Format(time.RFC3339), adminID, false)
 				logger.Info("Smart bank sync finished. Next sync scheduled.", "at", nextSync.Format(time.RFC3339))
 			}
 
@@ -374,14 +394,17 @@ func main() {
 
 	handler.WithUserService(userSvc)
 	handler.WithTransactionService(transactionSvc)
+	handler.WithCategoryService(categorySvc)
+	handler.WithSharingService(sharingSvc)
 	handler.WithNotificationService(notificationSvc)
 	handler.WithReconciliationService(reconciliationSvc)
 	handler.WithForecastingService(forecastingSvc)
 	handler.WithPlannedTransactionService(plannedTransactionSvc)
 	handler.WithBridgeTokenService(bridgeTokenSvc)
+	handler.WithDocumentService(documentSvc)
+	handler.WithDiscoveryService(discoverySvc)
 	handler.WithBankService(bankSvc)
 	handler.WithBankStatementRepository(bankStmtRepo)
-	handler.WithCategoryRepository(categoryRepo)
 	handler.WithReconciliationRepository(reconciliationRepo)
 	handler.WithPayslipService(payslipSvc)
 	handler.WithPayslipRepository(payslipRepo)
@@ -464,6 +487,10 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, us
 		"smtp_user":                                 envOrDefault("SMTP_USER", ""),
 		"smtp_password":                             envOrDefault("SMTP_PASSWORD", ""),
 		"smtp_from_email":                           envOrDefault("SMTP_FROM_EMAIL", "noreply@cognicash.local"),
+		"subscription_lookback_years":               "3",
+		"subscription_discovery_amount_tolerance":   "0.10",
+		"subscription_discovery_min_transactions_generic": "3",
+		"subscription_discovery_date_tolerance":     "3.0",
 	}
 
 	envOverrideKeys := map[string]string{
@@ -480,11 +507,12 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, us
 
 	for k, v := range defaults {
 		existing, _ := repo.Get(ctx, k, adminID)
+		isSensitive := strings.Contains(k, "password") || strings.Contains(k, "token") || strings.Contains(k, "secret") || strings.Contains(k, "key")
 
 		if envKey, ok := envOverrideKeys[k]; ok {
 			envVal, envSet := os.LookupEnv(envKey)
 			if envSet && envVal != existing {
-				if err := repo.Set(ctx, k, envVal, adminID); err != nil {
+				if err := repo.Set(ctx, k, envVal, adminID, isSensitive); err != nil {
 					logger.Warn("Failed to sync env setting to DB", "key", k, "error", err)
 				}
 			}
@@ -492,7 +520,7 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, us
 		}
 
 		if existing == "" {
-			if err := repo.Set(ctx, k, v, adminID); err != nil {
+			if err := repo.Set(ctx, k, v, adminID, isSensitive); err != nil {
 				logger.Warn("Failed to set default setting", "key", k, "error", err)
 			}
 		}
@@ -605,25 +633,29 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 
 	// 2. Seed default categories
 	categories := []struct {
-		name  string
-		color string
+		name               string
+		color              string
+		isVariableSpending bool
+		forecastStrategy   string
 	}{
-		{"Salary", "#4caf50"},
-		{"Rent", "#f44336"},
-		{"Groceries", "#ff9800"},
-		{"Insurance", "#2196f3"},
-		{"Leisure", "#9c27b0"},
-		{"Internal Transfer", "#607d8b"},
-		{"Tech & Software", "#3b82f6"},
+		{"Salary", "#4caf50", false, "3y"},
+		{"Rent", "#f44336", false, "3y"},
+		{"Groceries", "#ff9800", true, "3m"},
+		{"Insurance", "#2196f3", false, "3y"},
+		{"Leisure", "#9c27b0", true, "6m"},
+		{"Internal Transfer", "#607d8b", false, "3y"},
+		{"Tech & Software", "#3b82f6", true, "12m"},
 	}
 
 	catMap := make(map[string]uuid.UUID)
 	for _, c := range categories {
 		cat, _ := catRepo.Save(ctx, entity.Category{
-			ID:     uuid.New(),
-			UserID: adminID,
-			Name:   c.name,
-			Color:  c.color,
+			ID:                 uuid.New(),
+			UserID:             adminID,
+			Name:               c.name,
+			Color:              c.color,
+			IsVariableSpending: c.isVariableSpending,
+			ForecastStrategy:   c.forecastStrategy,
 		})
 		catMap[c.name] = cat.ID
 	}

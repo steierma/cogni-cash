@@ -2,12 +2,16 @@ import { useState, useMemo, useEffect, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import { fetchTransactions, fetchCategories, fetchPayslips } from '../api/client';
+import { transactionService } from '../api/services/transactionService';
+import { categoryService } from '../api/services/categoryService';
+import { payslipService } from '../api/services/payslipService';
 import { BarChart3, Filter, X, ArrowRightLeft, TrendingUp, TrendingDown, Wallet, Search, BarChart as BarChartIcon, Briefcase, Activity } from 'lucide-react';
 import {
     AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell
 } from 'recharts';
-import type { Transaction, Category, Payslip } from '../api/types';
+import type { Transaction } from "../api/types/transaction";
+import type { Category } from "../api/types/category";
+import type { Payslip } from "../api/types/payslip";
 import { fmtCurrency } from '../utils/formatters';
 
 interface FilterState {
@@ -34,17 +38,17 @@ export default function AnalyticsPage() {
     // --- Data Fetching ---
     const { data: allTransactions = [], isLoading: isLoadingTxns } = useQuery<Transaction[]>({
         queryKey: ['transactions', undefined, false],
-        queryFn: () => fetchTransactions(undefined, false),
+        queryFn: () => transactionService.fetchTransactions(undefined, false),
     });
 
     const { data: categories = [] } = useQuery<Category[]>({
         queryKey: ['categories'],
-        queryFn: fetchCategories,
+        queryFn: categoryService.fetchCategories,
     });
 
     const { data: payslips = [] } = useQuery<Payslip[], Error>({
         queryKey: ['payslips'],
-        queryFn: () => fetchPayslips(),
+        queryFn: () => payslipService.fetchPayslips(),
     });
 
     // --- State: Filters ---
@@ -142,7 +146,7 @@ export default function AnalyticsPage() {
 
     // --- KPIs & Bar Chart Data ---
     const { expenseBarData, totalInc, totalExp } = useMemo(() => {
-        const expenseByCat: Record<string, { amount: number, color: string }> = {};
+        const categoryNet: Record<string, { amount: number, color: string }> = {};
         let tInc = 0;
         let tExp = 0;
 
@@ -150,18 +154,20 @@ export default function AnalyticsPage() {
             if (t.amount > 0) {
                 tInc += t.amount;
             } else {
-                const cat = categories.find(c => c.id === t.category_id);
-                const catName = cat?.name || ('analytics.uncategorized');
-                const catColor = cat?.color || '#94a3b8';
-
-                if (!expenseByCat[catName]) expenseByCat[catName] = { amount: 0, color: catColor };
-                expenseByCat[catName].amount += Math.abs(t.amount);
                 tExp += Math.abs(t.amount);
             }
+
+            const cat = categories.find(c => c.id === t.category_id);
+            const catName = cat?.name || ('analytics.uncategorized');
+            const catColor = cat?.color || '#94a3b8';
+
+            if (!categoryNet[catName]) categoryNet[catName] = { amount: 0, color: catColor };
+            categoryNet[catName].amount += t.amount;
         });
 
-        const barData = Object.entries(expenseByCat)
-            .map(([name, data]) => ({ name, value: data.amount, color: data.color }))
+        const barData = Object.entries(categoryNet)
+            .filter(([_, data]) => data.amount < 0) // Only show categories that are net expenses
+            .map(([name, data]) => ({ name, value: Math.abs(data.amount), color: data.color }))
             .sort((a, b) => b.value - a.value);
 
         return {
@@ -216,9 +222,9 @@ export default function AnalyticsPage() {
             if (isMatch) {
                 const month = toIsoDate(t.booking_date).slice(0, 7);
                 if (monthly[month]) {
-                    monthly[month].amount += Math.abs(t.amount);
+                    monthly[month].amount += t.amount;
                 } else {
-                    monthly[month] = { month, amount: Math.abs(t.amount) };
+                    monthly[month] = { month, amount: t.amount };
                 }
             }
         });

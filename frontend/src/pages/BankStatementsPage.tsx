@@ -3,16 +3,15 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { FilePreview } from '../components/FilePreview';
-import {
-    deleteBankStatement, downloadBankStatement, fetchBankStatements, fetchBankStatementBlob, importBankStatement,
-    fetchSettings, updateSettings
-} from '../api/client';
+import { bankService } from '../api/services/bankService';
+import { settingsService } from '../api/services/settingsService';
 import {
     AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Download, FileText,
     Trash2, FileUp, BrainCircuit, AlertCircle, XCircle, X, Filter, Eye, List, Columns, Check, Loader2, FileSpreadsheet,
     Landmark
 } from 'lucide-react';
-import type { BankStatementSummary, ImportBatchResponse, ImportResult } from '../api/types';
+import type { BankStatementSummary } from "../api/types/bank";
+import type { ImportBatchResponse, ImportResult } from "../api/types/common";
 import { fmtCurrency } from '../utils/formatters';
 
 // ── Types & Interfaces ──
@@ -69,12 +68,12 @@ export default function BankStatementsPage() {
     // ── Queries ──
     const { data: statements, isLoading } = useQuery<BankStatementSummary[]>({
         queryKey: ['bank-statements'],
-        queryFn: fetchBankStatements,
+        queryFn: bankService.fetchStatements,
     });
 
     const { data: settings } = useQuery({
         queryKey: ['settings'],
-        queryFn: fetchSettings,
+        queryFn: settingsService.fetchSettings,
     });
 
     // Apply saved column settings on load
@@ -100,7 +99,7 @@ export default function BankStatementsPage() {
     // ── Mutations ──
     const importMut = useMutation({
         mutationFn: (data: { files: File[], useAI: boolean, statementType: string }) =>
-            importBankStatement(data.files, data.useAI, data.statementType),
+            bankService.importStatement(data.files, data.useAI, data.statementType),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['categories'] });
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -109,7 +108,7 @@ export default function BankStatementsPage() {
     });
 
     const deleteMut = useMutation({
-        mutationFn: deleteBankStatement,
+        mutationFn: bankService.deleteStatement,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['bank-statements'] });
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -121,7 +120,7 @@ export default function BankStatementsPage() {
     });
 
     const updateSettingsMut = useMutation({
-        mutationFn: updateSettings,
+        mutationFn: settingsService.updateSettings,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['settings'] });
         }
@@ -173,7 +172,7 @@ export default function BankStatementsPage() {
         }
 
         try {
-            const blob = await fetchBankStatementBlob(id);
+            const blob = await bankService.fetchStatementBlob(id);
             const type = blob.type.toLowerCase();
 
             if (type.includes('pdf') || type.startsWith('image/')) {
@@ -532,7 +531,7 @@ export default function BankStatementsPage() {
                                                 <Eye size={18} />
                                             </button>
                                             <button
-                                                onClick={() => downloadBankStatement(stmt.id)}
+                                                onClick={() => bankService.downloadStatement(stmt.id)}
                                                 disabled={!stmt.has_original_file}
                                                 className="p-2 text-gray-400 hover:text-indigo-600 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors disabled:opacity-30 disabled:cursor-not-allowed"
                                                 title={stmt.has_original_file ? t('bankStatements.actions.download') : t('bankStatements.actions.downloadUnavailable')}
@@ -638,7 +637,7 @@ export default function BankStatementsPage() {
                         if (previewData.url) URL.revokeObjectURL(previewData.url);
                         setPreviewData(null);
                     }}
-                    onDownload={(id) => downloadBankStatement(id)}
+                    onDownload={(id) => bankService.downloadStatement(id)}
                 />
             )}
         </div>

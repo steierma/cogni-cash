@@ -155,10 +155,57 @@ var defaultCategories = []entity.Category{
 
 var dummyUserID = uuid.New()
 
+type mockSharingRepo struct{}
+
+func (m *mockSharingRepo) ShareCategory(_ context.Context, _, _, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockSharingRepo) RevokeShare(_ context.Context, _, _, _ uuid.UUID) error { return nil }
+func (m *mockSharingRepo) ListShares(_ context.Context, _, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (m *mockSharingRepo) ShareInvoice(_ context.Context, _, _, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockSharingRepo) RevokeInvoiceShare(_ context.Context, _, _, _ uuid.UUID) error { return nil }
+func (m *mockSharingRepo) ListInvoiceShares(_ context.Context, _, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
+type mockNotification struct{}
+
+func (m *mockNotification) SendWelcomeEmail(_ context.Context, _ entity.User) error { return nil }
+func (m *mockNotification) SendPasswordResetEmail(_ context.Context, _ entity.User, _ string) error {
+	return nil
+}
+func (m *mockNotification) SendTestEmail(_ context.Context, _ string, _ uuid.UUID) error { return nil }
+func (m *mockNotification) SendInvoiceShareNotification(_ context.Context, _ entity.Invoice, _ uuid.UUID, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockNotification) SendCategoryShareNotification(_ context.Context, _ entity.Category, _ uuid.UUID, _ uuid.UUID, _ string) error {
+	return nil
+}
+
+type mockUserRepo struct{}
+
+func (m *mockUserRepo) FindByUsername(_ context.Context, _ string) (entity.User, error) {
+	return entity.User{}, nil
+}
+func (m *mockUserRepo) FindByID(_ context.Context, _ uuid.UUID) (entity.User, error) {
+	return entity.User{}, nil
+}
+func (m *mockUserRepo) GetAdminID(_ context.Context) (uuid.UUID, error)               { return uuid.Nil, nil }
+func (m *mockUserRepo) FindAll(_ context.Context, _ string) ([]entity.User, error)    { return nil, nil }
+func (m *mockUserRepo) Create(_ context.Context, _ entity.User) error                 { return nil }
+func (m *mockUserRepo) Update(_ context.Context, _ entity.User) error                 { return nil }
+func (m *mockUserRepo) Upsert(_ context.Context, _ entity.User) error                 { return nil }
+func (m *mockUserRepo) UpdatePassword(_ context.Context, _ uuid.UUID, _ string) error { return nil }
+func (m *mockUserRepo) Delete(_ context.Context, _ uuid.UUID) error                   { return nil }
+
 func newTestInvoiceSvc(aiCategorizer port.InvoiceAICategorizer, repo *mockInvoiceRepo) *service.InvoiceService {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	catRepo := &mockCatRepo{cats: defaultCategories}
-	return service.NewInvoiceService(repo, catRepo, &mockInvoiceParser{text: "extracted text"}, aiCategorizer, logger)
+	return service.NewInvoiceService(repo, catRepo, &mockSharingRepo{}, &mockNotification{}, &mockUserRepo{}, &mockInvoiceParser{text: "extracted text"}, aiCategorizer, logger)
 }
 
 // ── CategorizeDocument tests ─────────────────────────────────────────────────

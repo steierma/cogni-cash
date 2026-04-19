@@ -62,3 +62,46 @@ type CategorizedTransaction struct {
 type TransactionCategorizer interface {
 	CategorizeTransactionsBatch(ctx context.Context, userID uuid.UUID, txns []TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]CategorizedTransaction, error)
 }
+
+// DocumentAIParser handles generic document classification and metadata extraction for the Document Vault.
+type DocumentAIParser interface {
+	ClassifyAndExtract(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (docType entity.DocumentType, metadata map[string]interface{}, extractedText string, err error)
+}
+
+// SubscriptionEnrichmentResult holds the data extracted for a subscription.
+type SubscriptionEnrichmentResult struct {
+	MerchantName    string `json:"merchant_name"`
+	CustomerNumber  string `json:"customer_number"`
+	ContactEmail    string `json:"contact_email"`
+	ContactPhone    string `json:"contact_phone"`
+	ContactWebsite  string `json:"contact_website"`
+	SupportURL      string `json:"support_url"`
+	CancellationURL string `json:"cancellation_url"`
+	IsTrial         bool   `json:"is_trial"`
+	Notes           string `json:"notes"`
+}
+
+type SubscriptionEnricher interface {
+	EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string) (SubscriptionEnrichmentResult, error)
+	VerifySubscriptionSuggestion(ctx context.Context, userID uuid.UUID, merchantName string, amount float64, currency string, billingCycle string) (bool, error)
+}
+
+// CancellationLetterRequest holds the data needed for the AI to draft a letter.
+type CancellationLetterRequest struct {
+	UserFullName     string
+	UserEmail        string
+	MerchantName     string
+	CustomerNumber   string
+	ContractEndDate  string
+	NoticePeriodDays int
+	Language         string // "DE", "EN", etc.
+}
+
+type CancellationLetterResult struct {
+	Subject string `json:"subject"`
+	Body    string `json:"body"`
+}
+
+type CancellationLetterGenerator interface {
+	GenerateCancellationLetter(ctx context.Context, userID uuid.UUID, req CancellationLetterRequest) (CancellationLetterResult, error)
+}

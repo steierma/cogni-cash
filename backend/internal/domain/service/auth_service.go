@@ -180,7 +180,6 @@ func (s *AuthService) ValidateToken(tokenString string) (string, error) {
 	return sub, nil
 }
 
-
 func (s *AuthService) ChangePassword(ctx context.Context, userIDStr string, oldPassword, newPassword string) error {
 	userID, err := uuid.Parse(userIDStr)
 	if err != nil {

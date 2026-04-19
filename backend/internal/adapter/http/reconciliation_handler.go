@@ -31,6 +31,9 @@ func (h *Handler) getReconciliationSuggestions(w http.ResponseWriter, r *http.Re
 
 	matchWindowDays := 7
 	windowQuery := r.URL.Query().Get("window")
+	if windowQuery == "" {
+		windowQuery = r.URL.Query().Get("window_days") // Alias for frontend compatibility
+	}
 	if windowQuery != "" {
 		if parsed, err := strconv.Atoi(windowQuery); err == nil && parsed > 0 {
 			matchWindowDays = parsed

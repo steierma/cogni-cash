@@ -108,6 +108,16 @@ func (m *mockRepo) UpdateTransactionCategory(_ context.Context, hash string, cat
 	return errors.New("transaction not found")
 }
 
+func (m *mockRepo) UpdateTransactionSubscription(_ context.Context, contentHash string, subscriptionID *uuid.UUID, _ uuid.UUID) error {
+	for i, tx := range m.existingTxns {
+		if tx.ContentHash == contentHash {
+			m.existingTxns[i].SubscriptionID = subscriptionID
+			return nil
+		}
+	}
+	return errors.New("transaction not found")
+}
+
 func (m *mockRepo) MarkTransactionReconciled(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }

@@ -56,6 +56,53 @@ func (m *MockPlannedTransactionRepository) FindPendingByUserID(ctx context.Conte
 	return nil, args.Error(1)
 }
 
+func TestPlannedTransactionService_MatchTransactions_Recurring(t *testing.T) {
+	repo := new(MockPlannedTransactionRepository)
+	svc := service.NewPlannedTransactionService(repo)
+	ctx := context.Background()
+	userID := uuid.New()
+
+	t.Run("recurring_spawns_next", func(t *testing.T) {
+		startDate := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+		pt := entity.PlannedTransaction{
+			ID:             uuid.New(),
+			UserID:         userID,
+			Amount:         -500.0,
+			Date:           startDate,
+			Description:    "Rent",
+			Status:         entity.PlannedTransactionStatusPending,
+			IntervalMonths: 1,
+		}
+
+		tx := entity.Transaction{
+			ID:          uuid.New(),
+			Amount:      -500.0,
+			BookingDate: startDate.Add(24 * time.Hour), // 1 day late
+		}
+
+		repo.On("FindPendingByUserID", ctx, userID).Return([]entity.PlannedTransaction{pt}, nil).Once()
+
+		// 1. Mark current as matched
+		repo.On("Update", ctx, mock.MatchedBy(func(p *entity.PlannedTransaction) bool {
+			return p.ID == pt.ID && p.Status == entity.PlannedTransactionStatusMatched
+		})).Return(nil).Once()
+
+		// 2. Spawn next instance
+		repo.On("Create", ctx, mock.MatchedBy(func(p *entity.PlannedTransaction) bool {
+			expectedDate := startDate.AddDate(0, 1, 0)
+			return p.UserID == userID &&
+				p.Amount == -500.0 &&
+				p.Date.Equal(expectedDate) &&
+				p.IntervalMonths == 1 &&
+				p.Status == entity.PlannedTransactionStatusPending
+		})).Return(nil).Once()
+
+		err := svc.MatchTransactions(ctx, userID, []entity.Transaction{tx})
+		assert.NoError(t, err)
+		repo.AssertExpectations(t)
+	})
+}
+
 func TestPlannedTransactionService_Create(t *testing.T) {
 	repo := new(MockPlannedTransactionRepository)
 	svc := service.NewPlannedTransactionService(repo)
@@ -86,7 +133,7 @@ func TestPlannedTransactionService_Create(t *testing.T) {
 		err := svc.Create(ctx, pt)
 		assert.ErrorIs(t, err, entity.ErrInvalidPlannedTransaction)
 	})
-	
+
 	t.Run("validation_error_no_amount", func(t *testing.T) {
 		pt := &entity.PlannedTransaction{
 			UserID:      userID,
@@ -95,7 +142,7 @@ func TestPlannedTransactionService_Create(t *testing.T) {
 		err := svc.Create(ctx, pt)
 		assert.ErrorIs(t, err, entity.ErrInvalidPlannedTransaction)
 	})
-	
+
 	t.Run("validation_error_no_description", func(t *testing.T) {
 		pt := &entity.PlannedTransaction{
 			UserID: userID,
@@ -122,7 +169,7 @@ func TestPlannedTransactionService_Update(t *testing.T) {
 			Description: "Old",
 			CreatedAt:   createdAt,
 		}
-		
+
 		pt := &entity.PlannedTransaction{
 			ID:          ptID,
 			UserID:      userID,
@@ -130,7 +177,7 @@ func TestPlannedTransactionService_Update(t *testing.T) {
 			Description: "New",
 			CreatedAt:   time.Now(), // Should be overridden
 		}
-		
+
 		repo.On("GetByID", ctx, ptID, userID).Return(existingPT, nil).Once()
 		repo.On("Update", ctx, pt).Return(nil).Once()
 
@@ -139,13 +186,13 @@ func TestPlannedTransactionService_Update(t *testing.T) {
 		assert.Equal(t, createdAt, pt.CreatedAt)
 		repo.AssertExpectations(t)
 	})
-	
+
 	t.Run("not_found", func(t *testing.T) {
 		pt := &entity.PlannedTransaction{
 			ID:     ptID,
 			UserID: userID,
 		}
-		
+
 		repo.On("GetByID", ctx, ptID, userID).Return(nil, entity.ErrPlannedTransactionNotFound).Once()
 
 		err := svc.Update(ctx, pt)

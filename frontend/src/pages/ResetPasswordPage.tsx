@@ -2,7 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { KeyRound, CheckCircle2, AlertCircle, Eye, EyeOff } from 'lucide-react';
-import { validateResetToken, confirmPasswordReset } from '../api/client';
+import { authService } from '../api/services/authService';
 
 const ResetPasswordPage = () => {
     const { t } = useTranslation();
@@ -28,7 +28,7 @@ const ResetPasswordPage = () => {
                 return;
             }
             try {
-                const res = await validateResetToken(token);
+                const res = await authService.validateResetToken(token);
                 setIsTokenValid(res.valid);
             } catch (err) {
                 setIsTokenValid(false);
@@ -50,7 +50,7 @@ const ResetPasswordPage = () => {
         setError('');
         try {
             if (!token) throw new Error('Missing token');
-            await confirmPasswordReset(token, newPassword);
+            await authService.confirmPasswordReset(token, newPassword);
             setSuccess(true);
         } catch (err: any) {
             setError(err.response?.data?.error || 'Failed to reset password.');

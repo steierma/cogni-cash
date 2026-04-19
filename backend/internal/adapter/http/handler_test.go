@@ -104,17 +104,18 @@ func (m *mockAuthRepo) RevokeAllRefreshTokens(_ context.Context, userID uuid.UUI
 func (m *mockAuthRepo) CleanupExpiredRefreshTokens(_ context.Context) error { return nil }
 
 // setupTestAuth creates a real AuthService with a mock repo and returns a valid JWT token
-func setupTestAuth(t *testing.T) (*service.AuthService, string) {
-	// Use MinCost so tests run fast
+func setupTestAuth(t *testing.T) (*service.AuthService, string, uuid.UUID) {
 	hash, err := bcrypt.GenerateFromPassword([]byte("password"), bcrypt.MinCost)
 	if err != nil {
 		t.Fatalf("failed to hash password: %v", err)
 	}
 
+	userID := uuid.New()
 	user := entity.User{
-		ID:           uuid.New(),
+		ID:           userID,
 		Username:     "testadmin",
 		PasswordHash: string(hash),
+		Role:         "admin",
 	}
 
 	repo := &mockUserRepo{user: user}
@@ -125,7 +126,7 @@ func setupTestAuth(t *testing.T) (*service.AuthService, string) {
 		t.Fatalf("failed to login and get token: %v", err)
 	}
 
-	return authSvc, authResp.Token
+	return authSvc, authResp.Token, userID
 }
 
 // --- Mock Category Repository ---
@@ -167,7 +168,6 @@ func (m *mockBankStmtRepo) Save(_ context.Context, stmt entity.BankStatement) er
 	return nil
 }
 func (m *mockBankStmtRepo) FindByID(_ context.Context, id uuid.UUID, _ uuid.UUID) (entity.BankStatement, error) {
-	// Return a stub to avoid "not found" errors in the service layer when finishing reconciliations
 	return entity.BankStatement{ID: id}, nil
 }
 func (m *mockBankStmtRepo) FindAll(_ context.Context, _ uuid.UUID) ([]entity.BankStatement, error) {
@@ -186,6 +186,10 @@ func (m *mockBankStmtRepo) FindMatchingCategory(_ context.Context, _ uuid.UUID, 
 	return nil, nil
 }
 func (m *mockBankStmtRepo) UpdateTransactionCategory(_ context.Context, hash string, categoryID *uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockBankStmtRepo) UpdateTransactionSubscription(_ context.Context, contentHash string, subscriptionID *uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
 
@@ -236,11 +240,8 @@ func TestSettingsAccessControl(t *testing.T) {
 
 	dummyPinger := func(ctx context.Context) error { return nil }
 
-	// Helper to run request
 	runReq := func(authSvc *service.AuthService, token string) int {
-		// Use a local mock that implements GetAll to avoid nil dereference
 		handler := apphttp.NewHandler(authSvc, nil, nil, &realMockSettingsSvc{}, nil, setupLogger(), "memory", "localhost", dummyPinger)
-		// We need to inject the user service so adminMiddleware can fetch the user to check the role
 		userSvc := service.NewUserService(authSvc.GetRepo_ForTest().(port.UserRepository), setupLogger())
 		handler.WithUserService(userSvc)
 
@@ -254,13 +255,11 @@ func TestSettingsAccessControl(t *testing.T) {
 		return rr.Code
 	}
 
-	// 1. Admin should succeed (or get 200 via our no-op mock)
 	adminCode := runReq(adminAuth, adminToken)
 	if adminCode == http.StatusUnauthorized || adminCode == http.StatusForbidden {
 		t.Errorf("expected admin to bypass middleware, got %d", adminCode)
 	}
 
-	// 2. Manager should be forbidden
 	managerCode := runReq(managerAuth, managerToken)
 	if managerCode != http.StatusUnauthorized && managerCode != http.StatusForbidden {
 		t.Errorf("expected manager to be blocked, got %d", managerCode)
@@ -272,6 +271,11 @@ type realMockSettingsSvc struct {
 }
 
 func (m *realMockSettingsSvc) GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
+	return map[string]string{}, nil
+}
+
+// HIER IST DIE KORREKTUR: isAdmin Parameter hinzugefügt
+func (m *realMockSettingsSvc) GetAllMasked(ctx context.Context, userID uuid.UUID, isAdmin bool) (map[string]string, error) {
 	return map[string]string{}, nil
 }
 
@@ -297,14 +301,13 @@ func TestHealthCheck(t *testing.T) {
 }
 
 func TestChangePassword(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, _ := setupTestAuth(t)
 	dummyPinger := func(ctx context.Context) error { return nil }
 	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
 
-	// Test successful password change
 	payload := []byte(`{"old_password":"password", "new_password":"newpassword123"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password/", bytes.NewBuffer(payload))
 	req.Header.Set("Authorization", "Bearer "+token)
@@ -316,7 +319,6 @@ func TestChangePassword(t *testing.T) {
 		t.Errorf("expected 204 No Content for successful password change, got %v", status)
 	}
 
-	// Test failed password change (wrong old password)
 	badPayload := []byte(`{"old_password":"wrongpassword", "new_password":"newpassword123"}`)
 	badReq := httptest.NewRequest(http.MethodPost, "/api/v1/auth/change-password/", bytes.NewBuffer(badPayload))
 	badReq.Header.Set("Authorization", "Bearer "+token)
@@ -330,19 +332,18 @@ func TestChangePassword(t *testing.T) {
 }
 
 func TestGetTransactionAnalytics(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, userID := setupTestAuth(t)
 
 	cat1 := uuid.New()
 	cat2 := uuid.New()
 
 	repo := &mockBankStmtRepo{
 		txns: []entity.Transaction{
-			{BookingDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), Amount: -50, CategoryID: &cat1, Description: "Supermarket"},
-			{BookingDate: time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), Amount: 100, CategoryID: &cat2, Description: "Employer"},
+			{UserID: userID, BookingDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), Amount: -50, CategoryID: &cat1, Description: "Supermarket"},
+			{UserID: userID, BookingDate: time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), Amount: 100, CategoryID: &cat2, Description: "Employer"},
 		},
 	}
 
-	// Inject the new TransactionService for Analytics
 	txSvc := service.NewTransactionService(repo, nil, nil, nil, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
@@ -381,12 +382,31 @@ func TestGetTransactionAnalytics(t *testing.T) {
 	}
 }
 
+type mockSharingRepo struct{}
+
+func (m *mockSharingRepo) ShareCategory(_ context.Context, _, _, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockSharingRepo) RevokeShare(_ context.Context, _, _, _ uuid.UUID) error { return nil }
+func (m *mockSharingRepo) ListShares(_ context.Context, _, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+func (m *mockSharingRepo) ShareInvoice(_ context.Context, _, _, _ uuid.UUID, _ string) error {
+	return nil
+}
+func (m *mockSharingRepo) RevokeInvoiceShare(_ context.Context, _, _, _ uuid.UUID) error { return nil }
+func (m *mockSharingRepo) ListInvoiceShares(_ context.Context, _, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func TestListCategories_Empty(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, _ := setupTestAuth(t)
 	mockRepo := &mockCategoryRepo{}
+	mockSharing := &mockSharingRepo{}
+	catSvc := service.NewCategoryService(mockRepo, mockSharing, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryRepository(mockRepo)
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryService(catSvc)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
@@ -412,11 +432,13 @@ func TestListCategories_Empty(t *testing.T) {
 }
 
 func TestCreateCategory(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, _ := setupTestAuth(t)
 	mockRepo := &mockCategoryRepo{}
+	mockSharing := &mockSharingRepo{}
+	catSvc := service.NewCategoryService(mockRepo, mockSharing, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryRepository(mockRepo)
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryService(catSvc)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
@@ -441,7 +463,7 @@ func TestCreateCategory(t *testing.T) {
 }
 
 func TestDeleteBankStatement(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, _ := setupTestAuth(t)
 	repo := &mockBankStmtRepo{}
 
 	svc := service.NewBankStatementService(repo, setupLogger())
@@ -533,7 +555,7 @@ func (m *mockPayslipRepo) GetSummary(_ context.Context, _ uuid.UUID) (entity.Pay
 }
 
 func TestUpdatePayslip_WithBonuses(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, _ := setupTestAuth(t)
 
 	repo := newMockPayslipRepo()
 	existing := entity.Payslip{
@@ -614,7 +636,7 @@ func TestUpdatePayslip_WithBonuses(t *testing.T) {
 }
 
 func TestGetPayslip_IncludesBonuses(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, _ := setupTestAuth(t)
 
 	repo := newMockPayslipRepo()
 	p := entity.Payslip{
@@ -662,10 +684,9 @@ func TestGetPayslip_IncludesBonuses(t *testing.T) {
 }
 
 func TestImportPayslipsBatch(t *testing.T) {
-	authSvc, token := setupTestAuth(t)
+	authSvc, token, _ := setupTestAuth(t)
 	repo := newMockPayslipRepo()
 
-	// Add mock parsers
 	staticParser := &mockPayslipParser{}
 	aiParser := &mockPayslipParser{}
 	payslipSvc := service.NewPayslipService(repo, staticParser, aiParser, setupLogger())
@@ -681,7 +702,6 @@ func TestImportPayslipsBatch(t *testing.T) {
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
 
-	// Add two files
 	for i := 1; i <= 2; i++ {
 		part, err := writer.CreateFormFile("files", fmt.Sprintf("payslip%d.pdf", i))
 		if err != nil {
@@ -717,7 +737,6 @@ func TestImportPayslipsBatch(t *testing.T) {
 
 type mockPayslipParser struct{}
 
-// Satisfies port.PayslipParser
 func (m *mockPayslipParser) Parse(_ context.Context, _ uuid.UUID, _ []byte) (entity.Payslip, error) {
 	return entity.Payslip{
 		PeriodMonthNum: 3,
@@ -729,7 +748,349 @@ func (m *mockPayslipParser) Parse(_ context.Context, _ uuid.UUID, _ []byte) (ent
 	}, nil
 }
 
-// Satisfies port.PayslipAIParser
 func (m *mockPayslipParser) ParsePayslip(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.Payslip, error) {
 	return m.Parse(ctx, userID, fileBytes)
+}
+
+// --- Mock Sharing Service ---
+type mockSharingSvc struct {
+	dashboard entity.SharingDashboard
+	err       error
+}
+
+func (m *mockSharingSvc) GetDashboard(ctx context.Context, userID uuid.UUID) (entity.SharingDashboard, error) {
+	return m.dashboard, m.err
+}
+
+func TestGetSharingDashboard_Success(t *testing.T) {
+	authSvc, token, _ := setupTestAuth(t)
+
+	expectedDash := entity.SharingDashboard{
+		SharedCategories: []entity.SharedCategorySummary{
+			{Permissions: "view"},
+			{Permissions: "owner"},
+		},
+	}
+
+	mockSvc := &mockSharingSvc{dashboard: expectedDash}
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+		WithSharingService(mockSvc)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sharing/dashboard/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v", rr.Code)
+	}
+
+	var res entity.SharingDashboard
+	if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(res.SharedCategories) != 2 {
+		t.Errorf("expected 2 shared categories, got %d", len(res.SharedCategories))
+	}
+}
+
+func TestGetSharingDashboard_ServiceUnavailable(t *testing.T) {
+	authSvc, token, _ := setupTestAuth(t)
+
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sharing/dashboard/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503 Service Unavailable, got %v", rr.Code)
+	}
+}
+
+func TestGetSharingDashboard_InternalServerError(t *testing.T) {
+	authSvc, token, _ := setupTestAuth(t)
+
+	mockSvc := &mockSharingSvc{err: errors.New("database connection failed")}
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+		WithSharingService(mockSvc)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/sharing/dashboard/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusInternalServerError {
+		t.Fatalf("expected 500 Internal Server Error, got %v", rr.Code)
+	}
+}
+
+// --- NEW ENRICHED TESTS ---
+
+// --- Mock Reconciliation Service ---
+type mockReconciliationSvc struct {
+	suggestions []entity.ReconciliationPairSuggestion
+	rec         entity.Reconciliation
+	err         error
+}
+
+func (m *mockReconciliationSvc) SuggestReconciliations(ctx context.Context, userID uuid.UUID, matchWindowDays int) ([]entity.ReconciliationPairSuggestion, error) {
+	return m.suggestions, m.err
+}
+
+func (m *mockReconciliationSvc) ReconcileStatements(ctx context.Context, userID uuid.UUID, settlementHash, targetHash string) (entity.Reconciliation, error) {
+	return m.rec, m.err
+}
+
+func (m *mockReconciliationSvc) DeleteReconciliation(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	return m.err
+}
+
+func TestGetReconciliationSuggestions(t *testing.T) {
+	authSvc, token, _ := setupTestAuth(t)
+
+	mockSvc := &mockReconciliationSvc{
+		suggestions: []entity.ReconciliationPairSuggestion{
+			{TargetTransaction: entity.Transaction{CounterpartyName: "abc"}, SourceTransaction: entity.Transaction{CounterpartyName: "def"}, MatchScore: 0.95},
+		},
+	}
+
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+		WithReconciliationService(mockSvc)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/reconciliations/suggestions/?window=14", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v", rr.Code)
+	}
+
+	var res []entity.ReconciliationPairSuggestion
+	if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(res) != 1 {
+		t.Errorf("expected 1 suggestion, got %d", len(res))
+	}
+	if res[0].MatchScore != 0.95 {
+		t.Errorf("expected confidence 0.95, got %f", res[0].MatchScore)
+	}
+}
+
+func TestReconciliationRouteAlias(t *testing.T) {
+	authSvc, token, _ := setupTestAuth(t)
+
+	mockSvc := &mockReconciliationSvc{
+		suggestions: []entity.ReconciliationPairSuggestion{
+			{TargetTransaction: entity.Transaction{CounterpartyName: "abc"}, SourceTransaction: entity.Transaction{CounterpartyName: "def"}, MatchScore: 0.95},
+		},
+	}
+
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+		WithReconciliationService(mockSvc)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	// Test singular alias and window_days parameter
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/reconciliation/suggestions/?window_days=14", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if rr.Code != http.StatusOK {
+		t.Fatalf("expected 200 OK for singular route, got %v", rr.Code)
+	}
+
+	var res []entity.ReconciliationPairSuggestion
+	if err := json.NewDecoder(rr.Body).Decode(&res); err != nil {
+		t.Fatal(err)
+	}
+
+	if len(res) != 1 {
+		t.Errorf("expected 1 suggestion, got %d", len(res))
+	}
+}
+
+// --- Mock Planned Transaction Service ---
+type mockPlannedTxSvc struct {
+	txs []entity.PlannedTransaction
+	err error
+}
+
+func (m *mockPlannedTxSvc) MatchTransactions(ctx context.Context, userID uuid.UUID, txns []entity.Transaction) error {
+	return nil
+}
+
+func (m *mockPlannedTxSvc) FindByUserID(ctx context.Context, userID uuid.UUID) ([]entity.PlannedTransaction, error) {
+	return m.txs, m.err
+}
+
+func (m *mockPlannedTxSvc) Create(ctx context.Context, pt *entity.PlannedTransaction) error {
+	pt.ID = uuid.New()
+	m.txs = append(m.txs, *pt)
+	return m.err
+}
+
+func (m *mockPlannedTxSvc) Update(ctx context.Context, pt *entity.PlannedTransaction) error {
+	return m.err
+}
+
+func (m *mockPlannedTxSvc) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	return m.err
+}
+
+func TestCreatePlannedTransaction(t *testing.T) {
+	authSvc, token, userID := setupTestAuth(t)
+
+	mockSvc := &mockPlannedTxSvc{}
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+		WithPlannedTransactionService(mockSvc)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	payload := []byte(`{"amount": 1500.50, "description": "Rent", "date": "2026-05-01T00:00:00Z"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/planned-transactions/", bytes.NewBuffer(payload))
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusCreated {
+		t.Fatalf("expected 201 Created, got %v. Body: %s", status, rr.Body.String())
+	}
+
+	if len(mockSvc.txs) != 1 {
+		t.Fatalf("expected 1 planned transaction to be created, got %d", len(mockSvc.txs))
+	}
+	if mockSvc.txs[0].UserID != userID {
+		t.Errorf("expected UserID to match auth context")
+	}
+	if mockSvc.txs[0].Amount != 1500.50 {
+		t.Errorf("expected amount 1500.50, got %f", mockSvc.txs[0].Amount)
+	}
+}
+
+func TestGetSystemInfo(t *testing.T) {
+	authSvc, token, userID := setupTestAuth(t)
+
+	// Create a mock user service so adminMiddleware can verify the role
+	userRepo := &mockUserRepo{user: entity.User{ID: userID, Username: "testadmin", Role: "admin"}}
+	userSvc := service.NewUserService(userRepo, setupLogger())
+
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "postgres", "db.internal", dummyPinger).
+		WithUserService(userSvc)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/system/info/", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v", status)
+	}
+
+	var info map[string]string
+	if err := json.NewDecoder(rr.Body).Decode(&info); err != nil {
+		t.Fatal(err)
+	}
+
+	if info["db_state"] != "connected" {
+		t.Errorf("expected db_state 'connected', got '%s'", info["db_state"])
+	}
+	if info["storage_mode"] != "postgres" {
+		t.Errorf("expected storage_mode 'postgres', got '%s'", info["storage_mode"])
+	}
+	if info["db_host"] != "db.internal" {
+		t.Errorf("expected db_host 'db.internal', got '%s'", info["db_host"])
+	}
+}
+
+// --- Mock Forecasting Service ---
+type mockForecastingSvc struct {
+	err error
+}
+
+func (m *mockForecastingSvc) GetCashFlowForecast(ctx context.Context, userID uuid.UUID, fromDate time.Time, toDate time.Time) (entity.CashFlowForecast, error) {
+	return entity.CashFlowForecast{}, m.err
+}
+
+func (m *mockForecastingSvc) ExcludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error {
+	return m.err
+}
+
+func (m *mockForecastingSvc) IncludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error {
+	return m.err
+}
+
+func (m *mockForecastingSvc) ExcludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error {
+	return m.err
+}
+
+func (m *mockForecastingSvc) IncludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error {
+	return m.err
+}
+
+func (m *mockForecastingSvc) ListPatternExclusions(ctx context.Context, userID uuid.UUID) ([]entity.PatternExclusion, error) {
+	return nil, m.err
+}
+
+func (m *mockForecastingSvc) CalculateCategoryAverage(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID, strategy string) (float64, error) {
+	return 123.45, m.err
+}
+
+func TestGetForecast(t *testing.T) {
+	authSvc, token, _ := setupTestAuth(t)
+
+	mockSvc := &mockForecastingSvc{}
+	dummyPinger := func(ctx context.Context) error { return nil }
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+		WithForecastingService(mockSvc)
+
+	r := chi.NewRouter()
+	handler.RegisterRoutes(r)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/transactions/forecast/?from=2026-05-01&to=2026-05-31", nil)
+	req.Header.Set("Authorization", "Bearer "+token)
+	rr := httptest.NewRecorder()
+
+	r.ServeHTTP(rr, req)
+
+	if status := rr.Code; status != http.StatusOK {
+		t.Fatalf("expected 200 OK, got %v", status)
+	}
 }

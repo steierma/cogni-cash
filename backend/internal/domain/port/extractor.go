@@ -6,4 +6,3 @@ import "context"
 type FileExtractor interface {
 	Extract(ctx context.Context, filePath string) (string, error)
 }
-

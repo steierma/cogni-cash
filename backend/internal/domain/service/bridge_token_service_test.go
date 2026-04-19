@@ -47,7 +47,7 @@ func TestBridgeAccessTokenService(t *testing.T) {
 
 	t.Run("ValidateToken", func(t *testing.T) {
 		resp, _ := svc.CreateToken(ctx, userID, "Device 2")
-		
+
 		validUserID, err := svc.ValidateToken(ctx, resp.Token)
 		if err != nil {
 			t.Fatalf("ValidateToken: %v", err)
@@ -64,7 +64,7 @@ func TestBridgeAccessTokenService(t *testing.T) {
 
 	t.Run("RevokeToken", func(t *testing.T) {
 		resp, _ := svc.CreateToken(ctx, userID, "Device 3")
-		
+
 		err := svc.RevokeToken(ctx, resp.Info.ID, userID)
 		if err != nil {
 			t.Fatalf("RevokeToken: %v", err)

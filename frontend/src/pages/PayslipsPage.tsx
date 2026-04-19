@@ -4,12 +4,9 @@ import { useTranslation } from 'react-i18next';
 import {
     Briefcase, Pencil, TrendingUp, Wallet, Filter, Columns, Check, FileUp, ArrowUpRight, ArrowDownRight, BrainCircuit, BarChart3
 } from 'lucide-react';
-import {
-    deletePayslip, fetchPayslips, importPayslip, downloadPayslipFile, updatePayslip,
-    fetchSettings, updateSettings, getPayslipPreviewUrl, importPayslipsBatch,
-    fetchPayslipSummary
-} from '../api/client';
-import type {Payslip} from '../api/types';
+import { payslipService } from '../api/services/payslipService';
+import { settingsService } from '../api/services/settingsService';
+import type { Payslip } from "../api/types/payslip";
 import {fmtCurrency} from '../utils/formatters';
 
 import {type ColKey, type SortDirection, formatYearMonth, getAdjustedNetto} from '../components/payslips/utils';
@@ -71,19 +68,19 @@ export default function PayslipsPage() {
     // ── Queries & Mutations ──
     const {data: payslips = [], isLoading} = useQuery<Payslip[], Error>({
         queryKey: ['payslips', appliedEmployer],
-        queryFn: () => fetchPayslips(appliedEmployer === 'All' ? undefined : appliedEmployer)
+        queryFn: () => payslipService.fetchPayslips(appliedEmployer === 'All' ? undefined : appliedEmployer)
     });
 
     // We need all payslips to populate the filter dropdowns correctly
     const {data: allPayslips = []} = useQuery<Payslip[], Error>({
         queryKey: ['payslips', 'all'],
-        queryFn: () => fetchPayslips()
+        queryFn: () => payslipService.fetchPayslips()
     });
     const {data: summary} = useQuery({
         queryKey: ['payslips', 'summary'],
-        queryFn: fetchPayslipSummary
+        queryFn: () => payslipService.fetchSummary()
     });
-    const {data: settings} = useQuery({queryKey: ['settings'], queryFn: fetchSettings});
+    const {data: settings} = useQuery({queryKey: ['settings'], queryFn: () => settingsService.fetchSettings()});
 
     useEffect(() => {
         if (settings?.payslips_visible_cols) {
@@ -96,7 +93,7 @@ export default function PayslipsPage() {
     }, [settings?.payslips_visible_cols]);
 
     const uploadMutation = useMutation({
-        mutationFn: importPayslip,
+        mutationFn: (args: { file: File; overrides?: Partial<Payslip>; useAI?: boolean }) => payslipService.import(args),
         onSuccess: () => {
             queryClient.invalidateQueries({queryKey: ['payslips']});
             setIsUploadModalOpen(false);
@@ -104,7 +101,7 @@ export default function PayslipsPage() {
     });
 
     const batchUploadMutation = useMutation({
-        mutationFn: importPayslipsBatch,
+        mutationFn: (files: File[]) => payslipService.importBatch(files),
         onSuccess: (data) => {
             queryClient.invalidateQueries({queryKey: ['payslips']});
             setBatchResults(data);
@@ -112,7 +109,7 @@ export default function PayslipsPage() {
     });
 
     const deleteMutation = useMutation({
-        mutationFn: deletePayslip,
+        mutationFn: (id: string) => payslipService.delete(id),
         onSuccess: () => queryClient.invalidateQueries({queryKey: ['payslips']}),
     });
 
@@ -120,7 +117,7 @@ export default function PayslipsPage() {
         mutationFn: ({id, data}: {
             id: string;
             data: Partial<Payslip> | FormData
-        }) => updatePayslip(id, data as Partial<Payslip> | FormData),
+        }) => payslipService.update(id, data as Partial<Payslip> | FormData),
         onSuccess: () => {
             queryClient.invalidateQueries({queryKey: ['payslips']});
             setEditingPayslip(null);
@@ -129,7 +126,7 @@ export default function PayslipsPage() {
     });
 
     const updateSettingsMut = useMutation({
-        mutationFn: updateSettings,
+        mutationFn: (params: Record<string, any>) => settingsService.updateSettings(params),
         onSuccess: () => queryClient.invalidateQueries({queryKey: ['settings']})
     });
 
@@ -179,7 +176,7 @@ export default function PayslipsPage() {
             setIsPreviewLoading(id);
             const p = payslips.find(ps => ps.id === id);
             if (p) setPreviewingPayslip(p);
-            const info = await getPayslipPreviewUrl(id);
+            const info = await payslipService.getPreviewUrl(id);
             setPreviewInfo(info);
         } catch {
             alert("Could not load the document preview.");
@@ -544,7 +541,7 @@ export default function PayslipsPage() {
                 isPreviewLoading={isPreviewLoading}
                 onView={(p) => setViewingPayslip(p)}
                 onEdit={(p) => setEditingPayslip(p)}
-                onDownload={downloadPayslipFile}
+                onDownload={payslipService.downloadFile}
                 onDelete={(id) => deleteMutation.mutate(id)}
                 excludedBonuses={excludedBonuses}
                 excludeLeasing={excludeLeasing}

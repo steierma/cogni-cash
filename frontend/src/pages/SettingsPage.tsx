@@ -4,14 +4,11 @@ import { useTranslation } from 'react-i18next';
 import {
     KeyRound, CheckCircle2, AlertCircle, Settings, Server, Database,
     Save, Palette, Globe, ChevronDown, ChevronRight, MessageSquareCode,
-    Landmark, Info, Mail, Bot, Zap, Monitor, Layers, Smartphone, Plus, Trash2, Copy, Clock
+    Landmark, Info, Mail, Bot, Zap, Monitor, Layers, Smartphone, Plus, Trash2, Copy, Clock, CalendarClock
 } from 'lucide-react';
-import {
-    changePassword, fetchSystemInfo, fetchSettings, updateSettings, sendTestEmail,
-    fetchBridgeTokens, createBridgeToken, revokeBridgeToken
-} from '../api/client';
-import type { BridgeAccessToken } from '../api/types';
-
+import { authService } from '../api/services/authService';
+import { settingsService } from '../api/services/settingsService';
+import type { BridgeAccessToken } from "../api/types/system";
 const DEFAULT_SINGLE_PROMPT = `Categorize the following invoice text. 
 Use EXACTLY ONE category from: [{{CATEGORIES}}].
 Return ONLY a valid JSON object. Do not include explanations.
@@ -88,6 +85,47 @@ JSON Schema Definition:
 Source Text:
 {{TEXT}}`;
 
+const DEFAULT_SUBSCRIPTION_PROMPT = `Analyze the merchant and transaction descriptions to enrich subscription details.
+Return ONLY a valid JSON object. Do not include explanations or markdown formatting outside of the JSON block.
+
+Merchant: {{MERCHANT}}
+Transactions:
+{{TRANSACTIONS}}
+
+JSON Schema:
+{
+  "merchant_name": "string (cleaned/formal name)",
+  "customer_number": "string (if found in transactions)",
+  "contact_email": "string (support or billing email if known or found)",
+  "contact_phone": "string (support phone if known or found)",
+  "contact_website": "string (official website URL)",
+  "support_url": "string (direct link to help/support page)",
+  "cancellation_url": "string (direct link to cancellation or account management page)",
+  "is_trial": "boolean (true if these transactions look like a free trial phase)",
+  "notes": "string (short summary of the service)"
+}
+
+If a field is unknown, return an empty string or null for boolean.`;
+
+const DEFAULT_CANCELLATION_PROMPT = `Draft a formal cancellation letter for the following subscription.
+The letter should be professional and include all necessary details for the merchant to identify the contract.
+Return ONLY a valid JSON object. Do not include explanations or markdown formatting outside of the JSON block.
+
+User: {{USER_NAME}} <{{USER_EMAIL}}>
+Merchant: {{MERCHANT}}
+Customer Number: {{CUSTOMER_NUMBER}}
+End Date: {{END_DATE}}
+Notice Period: {{NOTICE_PERIOD}} days
+Language: {{LANGUAGE}}
+
+JSON Schema:
+{
+  "subject": "string",
+  "body": "string"
+}
+
+Draft the letter in the requested language ({{LANGUAGE}}).`;
+
 // Helper component for the expandable prompt accordions
 const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t }: any) => {
     const [isOpen, setIsOpen] = useState(false);
@@ -134,6 +172,13 @@ export default function SettingsPage() {
     const { t, i18n } = useTranslation();
     const queryClient = useQueryClient();
 
+    const { data: currentUser } = useQuery({
+        queryKey: ['me'],
+        queryFn: () => authService.fetchMe(),
+    });
+
+    const isAdmin = currentUser?.role === 'admin';
+
     const [settingsParams, setSettingsParams] = useState<Record<string, string>>({});
     const [settingsSuccess, setSettingsSuccess] = useState(false);
     const [settingsError, setSettingsError] = useState('');
@@ -149,12 +194,13 @@ export default function SettingsPage() {
 
     const { data: sysInfo } = useQuery({
         queryKey: ['systemInfo'],
-        queryFn: fetchSystemInfo,
+        queryFn: () => settingsService.fetchSystemInfo(),
+        enabled: isAdmin, // Only fetch system info for admins
     });
 
     const { data: currentSettings, isSuccess: settingsLoaded } = useQuery({
         queryKey: ['settings'],
-        queryFn: fetchSettings,
+        queryFn: () => settingsService.fetchSettings(),
     });
 
     useEffect(() => {
@@ -164,7 +210,7 @@ export default function SettingsPage() {
     }, [currentSettings, settingsLoaded]);
 
     const settingsMut = useMutation({
-        mutationFn: () => updateSettings(settingsParams),
+        mutationFn: () => settingsService.updateSettings(settingsParams),
         onSuccess: () => {
             setSettingsSuccess(true);
             setSettingsError('');
@@ -178,7 +224,7 @@ export default function SettingsPage() {
     });
 
     const testEmailMut = useMutation({
-        mutationFn: () => sendTestEmail(testEmail),
+        mutationFn: () => settingsService.sendTestEmail(testEmail),
         onSuccess: () => {
             setTestEmailSuccess(true);
             setTestEmailError('');
@@ -191,7 +237,7 @@ export default function SettingsPage() {
     });
 
     const passwordMut = useMutation({
-        mutationFn: () => changePassword(oldPassword, newPassword),
+        mutationFn: () => authService.changePassword(oldPassword, newPassword),
         onSuccess: () => {
             setOldPassword('');
             setNewPassword('');
@@ -230,11 +276,11 @@ export default function SettingsPage() {
 
     const { data: bridgeTokens, isLoading: loadingTokens } = useQuery({
         queryKey: ['bridgeTokens'],
-        queryFn: fetchBridgeTokens,
+        queryFn: () => settingsService.fetchBridgeTokens(),
     });
 
     const createTokenMut = useMutation({
-        mutationFn: () => createBridgeToken(newTokenName),
+        mutationFn: () => settingsService.createBridgeToken(newTokenName),
         onSuccess: (data) => {
             setRevealedToken(data.token);
             setNewTokenName('');
@@ -243,7 +289,7 @@ export default function SettingsPage() {
     });
 
     const revokeTokenMut = useMutation({
-        mutationFn: (id: string) => revokeBridgeToken(id),
+        mutationFn: (id: string) => settingsService.revokeBridgeToken(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['bridgeTokens'] });
         },
@@ -263,36 +309,38 @@ export default function SettingsPage() {
                 {t('settings.title')}
             </h1>
 
-            {/* SYSTEM STATUS CARD */}
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                    <Server size={20} className="text-gray-500 dark:text-gray-400" />
-                    {t('settings.systemStatus')}
-                </h2>
-                <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.storageMode')}</p>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.storage_mode || 'Loading...'}</p>
-                    </div>
-                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.dbHost')}</p>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">{sysInfo?.db_host || 'Loading...'}</p>
-                    </div>
-                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 flex items-center gap-1">
-                            <Database size={14} /> {t('settings.connState')}
-                        </p>
-                        <div className="flex items-center gap-2">
-                            <div className={`w-2 h-2 rounded-full ${sysInfo?.db_state === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></div>
-                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.db_state || 'Checking...'}</p>
+            {/* SYSTEM STATUS CARD (ADMIN ONLY) */}
+            {isAdmin && (
+                <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
+                    <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+                        <Server size={20} className="text-gray-500 dark:text-gray-400" />
+                        {t('settings.systemStatus')}
+                    </h2>
+                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.storageMode')}</p>
+                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.storage_mode || 'Loading...'}</p>
+                        </div>
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.dbHost')}</p>
+                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">{sysInfo?.db_host || 'Loading...'}</p>
+                        </div>
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 flex items-center gap-1">
+                                <Database size={14} /> {t('settings.connState')}
+                            </p>
+                            <div className="flex items-center gap-2">
+                                <div className={`w-2 h-2 rounded-full ${sysInfo?.db_state === 'connected' ? 'bg-green-500' : 'bg-red-500'}`}></div>
+                                <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.db_state || 'Checking...'}</p>
+                            </div>
+                        </div>
+                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                            <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.version')}</p>
+                            <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{sysInfo?.version || '...'}</p>
                         </div>
                     </div>
-                    <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
-                        <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.version')}</p>
-                        <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{sysInfo?.version || '...'}</p>
-                    </div>
                 </div>
-            </div>
+            )}
 
             {/* MASTER SETTINGS FORM */}
             <form onSubmit={handleSettingsSubmit} className="space-y-6">
@@ -311,329 +359,353 @@ export default function SettingsPage() {
                     </div>
                 )}
 
-                {/* 1. LLM & AI CONFIGURATION */}
-                <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                    <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
-                        <Bot size={20} className="text-gray-500 dark:text-gray-400" />
-                        {t('settings.llmConfig')}
-                    </h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.apiUrl')}</label>
-                                <input
-                                    type="text"
-                                    value={settingsParams['llm_api_url'] || ''}
-                                    onChange={(e) => handleSettingChange('llm_api_url', e.target.value)}
-                                    placeholder={t('settings.apiUrlPlaceholder')}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.apiToken')}</label>
-                                <input
-                                    type="password"
-                                    value={settingsParams['llm_api_token'] || ''}
-                                    onChange={(e) => handleSettingChange('llm_api_token', e.target.value)}
-                                    placeholder={t('settings.apiTokenPlaceholder')}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.modelName')}</label>
-                                <input
-                                    type="text"
-                                    value={settingsParams['llm_model'] || ''}
-                                    onChange={(e) => handleSettingChange('llm_model', e.target.value)}
-                                    placeholder={t('settings.modelNamePlaceholder')}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-3">
-                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('settings.promptEngineering') || "Prompt Engineering"}</label>
-
-                            <PromptAccordion
-                                title={t('settings.singlePrompt') || "Single Invoice Prompt"}
-                                settingKey="llm_single_prompt"
-                                defaultPrompt={DEFAULT_SINGLE_PROMPT}
-                                value={settingsParams['llm_single_prompt']}
-                                onChange={handleSettingChange}
-                                t={t}
-                            />
-                            <PromptAccordion
-                                title={t('settings.batchPrompt') || "Batch Transaction Prompt"}
-                                settingKey="llm_batch_prompt"
-                                defaultPrompt={DEFAULT_BATCH_PROMPT}
-                                value={settingsParams['llm_batch_prompt']}
-                                onChange={handleSettingChange}
-                                t={t}
-                            />
-                            <PromptAccordion
-                                title={t('settings.statementPrompt') || "Bank Statement Prompt"}
-                                settingKey="llm_statement_prompt"
-                                defaultPrompt={DEFAULT_STATEMENT_PROMPT}
-                                value={settingsParams['llm_statement_prompt']}
-                                onChange={handleSettingChange}
-                                t={t}
-                            />
-                            <PromptAccordion
-                                title={t('settings.payslipPrompt') || "Payslip Extraction Prompt"}
-                                settingKey="llm_payslip_prompt"
-                                defaultPrompt={DEFAULT_PAYSLIP_PROMPT}
-                                value={settingsParams['llm_payslip_prompt']}
-                                onChange={handleSettingChange}
-                                t={t}
-                            />
-                        </div>
-                    </div>
-                </div>
-
-                {/* 2. AUTOMATION & BACKGROUND JOBS */}
-                <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                    <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
-                        <Zap size={20} className="text-gray-500 dark:text-gray-400" />
-                        {t('settings.bgImport') || "Automation & Background Jobs"}
-                    </h2>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                        <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 border-b dark:border-gray-800 pb-2">File Auto-Import</h3>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.importDir')}</label>
-                                <input
-                                    type="text"
-                                    value={settingsParams['import_dir'] || ''}
-                                    onChange={(e) => handleSettingChange('import_dir', e.target.value)}
-                                    placeholder={t('settings.importDirPlaceholder')}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                />
-                            </div>
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.pollInterval')}</label>
-                                <input
-                                    type="text"
-                                    value={settingsParams['import_interval'] || ''}
-                                    onChange={(e) => handleSettingChange('import_interval', e.target.value)}
-                                    placeholder={t('settings.pollIntervalPlaceholder')}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-4">
-                            <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 border-b dark:border-gray-800 pb-2">{t('settings.autoCat')}</h3>
-                            <div className="flex items-center justify-between py-1">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('settings.enableAutoCat')}</label>
-                                    <p className="text-[11px] text-gray-500 dark:text-gray-400">{t('settings.enableAutoCatDesc')}</p>
-                                </div>
-                                <label className="relative inline-flex items-center cursor-pointer">
-                                    <input
-                                        type="checkbox"
-                                        className="sr-only peer"
-                                        checked={settingsParams['auto_categorization_enabled'] === 'true'}
-                                        onChange={(e) => handleSettingChange('auto_categorization_enabled', e.target.checked ? 'true' : 'false')}
-                                    />
-                                    <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
-                                </label>
-                            </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div>
-                                    <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.pollInterval')}</label>
-                                    <input
-                                        type="text"
-                                        value={settingsParams['auto_categorization_interval'] || ''}
-                                        onChange={(e) => handleSettingChange('auto_categorization_interval', e.target.value)}
-                                        placeholder={t('settings.bgImportIntervalPlaceholder')}
-                                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.batchSize')}</label>
-                                    <input
-                                        type="number"
-                                        min="1"
-                                        max="100"
-                                        value={settingsParams['auto_categorization_batch_size'] || ''}
-                                        onChange={(e) => handleSettingChange('auto_categorization_batch_size', e.target.value)}
-                                        placeholder={t('settings.batchSizePlaceholder')}
-                                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                    />
-                                </div>
-                            </div>
-                            <div>
-                                <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.examplesPerCategory')}</label>
-                                <input
-                                    type="number"
-                                    min="0"
-                                    max="100"
-                                    value={settingsParams['auto_categorization_examples_per_category'] || ''}
-                                    onChange={(e) => handleSettingChange('auto_categorization_examples_per_category', e.target.value)}
-                                    placeholder={t('settings.examplesPerCategoryPlaceholder')}
-                                    className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                />
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 3. EMAIL CONFIGURATION (HIGHLIGHTED) */}
-                <div className="bg-white dark:bg-gray-900 rounded-2xl border-2 border-indigo-100 dark:border-indigo-900/40 shadow-sm p-6 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-8 opacity-5 dark:opacity-[0.03] pointer-events-none">
-                        <Mail size={160} />
-                    </div>
-
-                    <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2 relative z-10">
-                        <Mail size={20} className="text-indigo-500" />
-                        {t('settings.emailConfig') || "Email Configuration (SMTP)"}
-                    </h2>
-
-                    <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 max-w-2xl relative z-10">
-                        {t('settings.smtpInfo') || "SMTP settings are used for sending password reset emails and monthly reports."}
-                    </p>
-
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-                        <div className="space-y-4">
-                            <div className="grid grid-cols-3 gap-4">
-                                <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpHost') || "SMTP Host"}</label>
-                                    <input
-                                        type="text"
-                                        value={settingsParams['smtp_host'] || ''}
-                                        onChange={(e) => handleSettingChange('smtp_host', e.target.value)}
-                                        placeholder={t('settings.smtpHostPlaceholder') || "smtp.gmail.com"}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpPort') || "Port"}</label>
-                                    <input
-                                        type="text"
-                                        value={settingsParams['smtp_port'] || ''}
-                                        onChange={(e) => handleSettingChange('smtp_port', e.target.value)}
-                                        placeholder={t('settings.smtpPortPlaceholder') || "587"}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                    />
-                                </div>
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpUser') || "SMTP User"}</label>
-                                <input
-                                    type="text"
-                                    value={settingsParams['smtp_user'] || ''}
-                                    onChange={(e) => handleSettingChange('smtp_user', e.target.value)}
-                                    placeholder={t('settings.smtpUserPlaceholder') || "user@example.com"}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                />
-                            </div>
-
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpPassword') || "SMTP Password"}</label>
-                                <input
-                                    type="password"
-                                    value={settingsParams['smtp_password'] || ''}
-                                    onChange={(e) => handleSettingChange('smtp_password', e.target.value)}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
-                                />
-                            </div>
-                        </div>
-
-                        <div className="space-y-6">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpFromEmail') || "Sender Email (From)"}</label>
-                                <input
-                                    type="email"
-                                    value={settingsParams['smtp_from_email'] || ''}
-                                    onChange={(e) => handleSettingChange('smtp_from_email', e.target.value)}
-                                    placeholder={t('settings.smtpFromPlaceholder') || "noreply@cognicash.local"}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                />
-                            </div>
-
-                            <div className="pt-2 border-t border-indigo-50 dark:border-indigo-900/30">
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('settings.testSmtp') || "Test SMTP Connection"}</label>
-                                <div className="flex gap-2">
-                                    <input
-                                        type="email"
-                                        value={testEmail}
-                                        onChange={(e) => setTestEmail(e.target.value)}
-                                        placeholder={t('settings.testEmailPlaceholder') || "recipient@example.com"}
-                                        className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => testEmailMut.mutate()}
-                                        disabled={testEmailMut.isPending || !testEmail}
-                                        className="px-5 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-sm font-semibold rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50 whitespace-nowrap"
-                                    >
-                                        {testEmailMut.isPending ? t('settings.sending') || "Sending..." : t('settings.sendTest') || "Send Test"}
-                                    </button>
-                                </div>
-                                {testEmailSuccess && (
-                                    <p className="mt-2 text-[11px] text-green-600 dark:text-green-400 flex items-center gap-1">
-                                        <CheckCircle2 size={12} /> {t('settings.testEmailSuccess') || "Test email sent! Check your inbox."}
-                                    </p>
-                                )}
-                                {testEmailError && (
-                                    <p className="mt-2 text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1">
-                                        <AlertCircle size={12} /> {testEmailError}
-                                    </p>
-                                )}
-                            </div>
-                        </div>
-                    </div>
-                </div>
-
-                {/* 4. BANK INTEGRATION & UI PREFERENCES ROW */}
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-                    {/* Bank Integration */}
+                {/* 1. LLM & AI CONFIGURATION (ADMIN ONLY) */}
+                {isAdmin && (
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
                         <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
-                            <Landmark size={20} className="text-gray-500 dark:text-gray-400" />
-                            {t('settings.bankIntegration') || "Bank Integration"}
+                            <Bot size={20} className="text-gray-500 dark:text-gray-400" />
+                            {t('settings.llmConfig')}
                         </h2>
 
-                        <div className="space-y-4">
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
-                                    {t('settings.bankProvider') || "Bank Provider"}
-                                </label>
-                                <select
-                                    value={settingsParams['bank_provider'] || 'enablebanking'}
-                                    onChange={(e) => handleSettingChange('bank_provider', e.target.value)}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
-                                >
-                                    <option value="enablebanking">Enable Banking</option>
-                                </select>
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.apiUrl')}</label>
+                                    <input
+                                        type="text"
+                                        value={settingsParams['llm_api_url'] || ''}
+                                        onChange={(e) => handleSettingChange('llm_api_url', e.target.value)}
+                                        placeholder={t('settings.apiUrlPlaceholder')}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.apiToken')}</label>
+                                    <input
+                                        type="password"
+                                        value={settingsParams['llm_api_token'] || ''}
+                                        onChange={(e) => handleSettingChange('llm_api_token', e.target.value)}
+                                        placeholder={t('settings.apiTokenPlaceholder')}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.modelName')}</label>
+                                    <input
+                                        type="text"
+                                        value={settingsParams['llm_model'] || ''}
+                                        onChange={(e) => handleSettingChange('llm_model', e.target.value)}
+                                        placeholder={t('settings.modelNamePlaceholder')}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                    />
+                                </div>
                             </div>
 
-                            {settingsParams['bank_provider'] === 'enablebanking' && (
-                                <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
-                                    <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50 rounded-xl flex items-start gap-2 text-xs text-indigo-700 dark:text-indigo-300">
-                                        <Info size={14} className="shrink-0 mt-0.5" />
-                                        <div className="space-y-1">
-                                            <p>{t('settings.enablebankingInfo') || "Register your application at EnableBanking.com to get your App ID."}</p>
-                                        </div>
-                                    </div>
+                            <div className="space-y-3">
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('settings.promptEngineering') || "Prompt Engineering"}</label>
+
+                                <PromptAccordion
+                                    title={t('settings.singlePrompt') || "Single Invoice Prompt"}
+                                    settingKey="llm_single_prompt"
+                                    defaultPrompt={DEFAULT_SINGLE_PROMPT}
+                                    value={settingsParams['llm_single_prompt']}
+                                    onChange={handleSettingChange}
+                                    t={t}
+                                />
+                                <PromptAccordion
+                                    title={t('settings.batchPrompt') || "Batch Transaction Prompt"}
+                                    settingKey="llm_batch_prompt"
+                                    defaultPrompt={DEFAULT_BATCH_PROMPT}
+                                    value={settingsParams['llm_batch_prompt']}
+                                    onChange={handleSettingChange}
+                                    t={t}
+                                />
+                                <PromptAccordion
+                                    title={t('settings.statementPrompt') || "Bank Statement Prompt"}
+                                    settingKey="llm_statement_prompt"
+                                    defaultPrompt={DEFAULT_STATEMENT_PROMPT}
+                                    value={settingsParams['llm_statement_prompt']}
+                                    onChange={handleSettingChange}
+                                    t={t}
+                                />
+                                <PromptAccordion
+                                    title={t('settings.payslipPrompt') || "Payslip Extraction Prompt"}
+                                    settingKey="llm_payslip_prompt"
+                                    defaultPrompt={DEFAULT_PAYSLIP_PROMPT}
+                                    value={settingsParams['llm_payslip_prompt']}
+                                    onChange={handleSettingChange}
+                                    t={t}
+                                />
+                                <PromptAccordion
+                                    title={t('settings.subscriptionPrompt') || "Subscription Enrichment Prompt"}
+                                    settingKey="llm_subscription_prompt"
+                                    defaultPrompt={DEFAULT_SUBSCRIPTION_PROMPT}
+                                    value={settingsParams['llm_subscription_prompt']}
+                                    onChange={handleSettingChange}
+                                    t={t}
+                                />
+                                <PromptAccordion
+                                    title={t('settings.cancellationPrompt') || "Cancellation Letter Prompt"}
+                                    settingKey="llm_cancellation_prompt"
+                                    defaultPrompt={DEFAULT_CANCELLATION_PROMPT}
+                                    value={settingsParams['llm_cancellation_prompt']}
+                                    onChange={handleSettingChange}
+                                    t={t}
+                                />
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 2. AUTOMATION & BACKGROUND JOBS (ADMIN ONLY) */}
+                {isAdmin && (
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
+                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                            <Zap size={20} className="text-gray-500 dark:text-gray-400" />
+                            {t('settings.bgImport') || "Automation & Background Jobs"}
+                        </h2>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 border-b dark:border-gray-800 pb-2">File Auto-Import</h3>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.importDir')}</label>
+                                    <input
+                                        type="text"
+                                        value={settingsParams['import_dir'] || ''}
+                                        onChange={(e) => handleSettingChange('import_dir', e.target.value)}
+                                        placeholder={t('settings.importDirPlaceholder')}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                    />
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.pollInterval')}</label>
+                                    <input
+                                        type="text"
+                                        value={settingsParams['import_interval'] || ''}
+                                        onChange={(e) => handleSettingChange('import_interval', e.target.value)}
+                                        placeholder={t('settings.pollIntervalPlaceholder')}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-4">
+                                <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 border-b dark:border-gray-800 pb-2">{t('settings.autoCat')}</h3>
+                                <div className="flex items-center justify-between py-1">
                                     <div>
-                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Application ID</label>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('settings.enableAutoCat')}</label>
+                                        <p className="text-[11px] text-gray-500 dark:text-gray-400">{t('settings.enableAutoCatDesc')}</p>
+                                    </div>
+                                    <label className="relative inline-flex items-center cursor-pointer">
+                                        <input
+                                            type="checkbox"
+                                            className="sr-only peer"
+                                            checked={settingsParams['auto_categorization_enabled'] === 'true'}
+                                            onChange={(e) => handleSettingChange('auto_categorization_enabled', e.target.checked ? 'true' : 'false')}
+                                        />
+                                        <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                                    </label>
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.pollInterval')}</label>
                                         <input
                                             type="text"
-                                            value={settingsParams['enablebanking_app_id'] || ''}
-                                            onChange={(e) => handleSettingChange('enablebanking_app_id', e.target.value)}
+                                            value={settingsParams['auto_categorization_interval'] || ''}
+                                            onChange={(e) => handleSettingChange('auto_categorization_interval', e.target.value)}
+                                            placeholder={t('settings.bgImportIntervalPlaceholder')}
+                                            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.batchSize')}</label>
+                                        <input
+                                            type="number"
+                                            min="1"
+                                            max="100"
+                                            value={settingsParams['auto_categorization_batch_size'] || ''}
+                                            onChange={(e) => handleSettingChange('auto_categorization_batch_size', e.target.value)}
+                                            placeholder={t('settings.batchSizePlaceholder')}
+                                            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        />
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-[11px] font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.examplesPerCategory')}</label>
+                                    <input
+                                        type="number"
+                                        min="0"
+                                        max="100"
+                                        value={settingsParams['auto_categorization_examples_per_category'] || ''}
+                                        onChange={(e) => handleSettingChange('auto_categorization_examples_per_category', e.target.value)}
+                                        placeholder={t('settings.examplesPerCategoryPlaceholder')}
+                                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                    />
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                )}
+
+                {/* 3. EMAIL CONFIGURATION (HIGHLIGHTED) (ADMIN ONLY) */}
+                {isAdmin && (
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl border-2 border-indigo-100 dark:border-indigo-900/40 shadow-sm p-6 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-8 opacity-5 dark:opacity-[0.03] pointer-events-none">
+                            <Mail size={160} />
+                        </div>
+
+                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2 relative z-10">
+                            <Mail size={20} className="text-indigo-500" />
+                            {t('settings.emailConfig') || "Email Configuration (SMTP)"}
+                        </h2>
+
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 max-w-2xl relative z-10">
+                            {t('settings.smtpInfo') || "SMTP settings are used for sending password reset emails and monthly reports."}
+                        </p>
+
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
+                            <div className="space-y-4">
+                                <div className="grid grid-cols-3 gap-4">
+                                    <div className="col-span-2">
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpHost') || "SMTP Host"}</label>
+                                        <input
+                                            type="text"
+                                            value={settingsParams['smtp_host'] || ''}
+                                            onChange={(e) => handleSettingChange('smtp_host', e.target.value)}
+                                            placeholder={t('settings.smtpHostPlaceholder') || "smtp.gmail.com"}
+                                            className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpPort') || "Port"}</label>
+                                        <input
+                                            type="text"
+                                            value={settingsParams['smtp_port'] || ''}
+                                            onChange={(e) => handleSettingChange('smtp_port', e.target.value)}
+                                            placeholder={t('settings.smtpPortPlaceholder') || "587"}
                                             className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
                                         />
                                     </div>
                                 </div>
-                            )}
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpUser') || "SMTP User"}</label>
+                                    <input
+                                        type="text"
+                                        value={settingsParams['smtp_user'] || ''}
+                                        onChange={(e) => handleSettingChange('smtp_user', e.target.value)}
+                                        placeholder={t('settings.smtpUserPlaceholder') || "user@example.com"}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                    />
+                                </div>
+
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpPassword') || "SMTP Password"}</label>
+                                    <input
+                                        type="password"
+                                        value={settingsParams['smtp_password'] || ''}
+                                        onChange={(e) => handleSettingChange('smtp_password', e.target.value)}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    />
+                                </div>
+                            </div>
+
+                            <div className="space-y-6">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpFromEmail') || "Sender Email (From)"}</label>
+                                    <input
+                                        type="email"
+                                        value={settingsParams['smtp_from_email'] || ''}
+                                        onChange={(e) => handleSettingChange('smtp_from_email', e.target.value)}
+                                        placeholder={t('settings.smtpFromPlaceholder') || "noreply@cognicash.local"}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                    />
+                                </div>
+
+                                <div className="pt-2 border-t border-indigo-50 dark:border-indigo-900/30">
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">{t('settings.testSmtp') || "Test SMTP Connection"}</label>
+                                    <div className="flex gap-2">
+                                        <input
+                                            type="email"
+                                            value={testEmail}
+                                            onChange={(e) => setTestEmail(e.target.value)}
+                                            placeholder={t('settings.testEmailPlaceholder') || "recipient@example.com"}
+                                            className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => testEmailMut.mutate()}
+                                            disabled={testEmailMut.isPending || !testEmail}
+                                            className="px-5 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-sm font-semibold rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+                                        >
+                                            {testEmailMut.isPending ? t('settings.sending') || "Sending..." : t('settings.sendTest') || "Send Test"}
+                                        </button>
+                                    </div>
+                                    {testEmailSuccess && (
+                                        <p className="mt-2 text-[11px] text-green-600 dark:text-green-400 flex items-center gap-1">
+                                            <CheckCircle2 size={12} /> {t('settings.testEmailSuccess') || "Test email sent! Check your inbox."}
+                                        </p>
+                                    )}
+                                    {testEmailError && (
+                                        <p className="mt-2 text-[11px] text-red-600 dark:text-red-400 flex items-center gap-1">
+                                            <AlertCircle size={12} /> {testEmailError}
+                                        </p>
+                                    )}
+                                </div>
+                            </div>
                         </div>
                     </div>
+                )}
 
-                    {/* UI Preferences */}
+                {/* 4. BANK INTEGRATION & UI PREFERENCES ROW */}
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    {/* Bank Integration (ADMIN ONLY) */}
+                    {isAdmin && (
+                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
+                            <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                                <Landmark size={20} className="text-gray-500 dark:text-gray-400" />
+                                {t('settings.bankIntegration') || "Bank Integration"}
+                            </h2>
+
+                            <div className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
+                                        {t('settings.bankProvider') || "Bank Provider"}
+                                    </label>
+                                    <select
+                                        value={settingsParams['bank_provider'] || 'enablebanking'}
+                                        onChange={(e) => handleSettingChange('bank_provider', e.target.value)}
+                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    >
+                                        <option value="enablebanking">Enable Banking</option>
+                                    </select>
+                                </div>
+
+                                {settingsParams['bank_provider'] === 'enablebanking' && (
+                                    <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
+                                        <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50 rounded-xl flex items-start gap-2 text-xs text-indigo-700 dark:text-indigo-300">
+                                            <Info size={14} className="shrink-0 mt-0.5" />
+                                            <div className="space-y-1">
+                                                <p>{t('settings.enablebankingInfo') || "Register your application at EnableBanking.com to get your App ID."}</p>
+                                            </div>
+                                        </div>
+                                        <div>
+                                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">Application ID</label>
+                                            <input
+                                                type="text"
+                                                value={settingsParams['enablebanking_app_id'] || ''}
+                                                onChange={(e) => handleSettingChange('enablebanking_app_id', e.target.value)}
+                                                className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                            />
+                                        </div>
+                                    </div>
+                                )}
+                            </div>
+                        </div>
+                    )}
+
+                    {/* UI Preferences (USER RELATED) */}
                     <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
                         <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
                             <Monitor size={20} className="text-gray-500 dark:text-gray-400" />
@@ -686,6 +758,36 @@ export default function SettingsPage() {
                                 >
                                     <option value="standard">{t('settings.layoutStandard')}</option>
                                     <option value="compact">{t('settings.layoutCompact')}</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Subscription Management (USER RELATED) */}
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6 mt-6 md:col-span-2">
+                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                            <CalendarClock size={20} className="text-gray-500 dark:text-gray-400" />
+                            {t('settings.subscriptionManagement') || "Subscription Management"}
+                        </h2>
+
+                        <div className="space-y-6">
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
+                                    {t('settings.subLookback') || "Discovery Lookback Period (Years)"}
+                                </label>
+                                <p className="text-[11px] text-gray-500 dark:text-gray-400 mb-2">
+                                    {t('settings.subLookbackDesc') || "How many years of history to analyze when discovering new recurring patterns. 3 years is recommended to detect annual subscriptions."}
+                                </p>
+                                <select
+                                    value={settingsParams['subscription_lookback_years'] || '3'}
+                                    onChange={(e) => handleSettingChange('subscription_lookback_years', e.target.value)}
+                                    className="w-full md:w-64 px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                >
+                                    <option value="1">1 Year</option>
+                                    <option value="2">2 Years</option>
+                                    <option value="3">3 Years</option>
+                                    <option value="4">4 Years</option>
+                                    <option value="5">5 Years</option>
                                 </select>
                             </div>
                         </div>

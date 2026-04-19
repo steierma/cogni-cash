@@ -47,7 +47,117 @@ type updateInvoiceRequest struct {
 	Description *string    `json:"description"` // pointer so empty-string clears the field
 }
 
+type shareInvoiceRequest struct {
+	UserID     string `json:"user_id"`
+	Permission string `json:"permission"` // "view" or "edit"
+}
+
 // ── handlers ──────────────────────────────────────────────────────────────────
+
+// POST /api/v1/invoices/{id}/share/
+func (h *Handler) shareInvoice(w http.ResponseWriter, r *http.Request) {
+	if h.invoiceSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "invoice service not available")
+		return
+	}
+
+	invoiceID, err := parseUUID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid invoice id")
+		return
+	}
+
+	var req shareInvoiceRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	sharedWithID, err := uuid.Parse(req.UserID)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user_id")
+		return
+	}
+
+	ownerID := h.getUserID(r.Context())
+	if ownerID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	perm := req.Permission
+	if perm == "" {
+		perm = "view"
+	}
+
+	if err := h.invoiceSvc.ShareInvoice(r.Context(), invoiceID, ownerID, sharedWithID, perm); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// DELETE /api/v1/invoices/{id}/share/{user_id}/
+func (h *Handler) revokeInvoiceShare(w http.ResponseWriter, r *http.Request) {
+	if h.invoiceSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "invoice service not available")
+		return
+	}
+
+	invoiceID, err := parseUUID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid invoice id")
+		return
+	}
+
+	sharedWithID, err := uuid.Parse(chi.URLParam(r, "user_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user_id")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.invoiceSvc.RevokeInvoiceShare(r.Context(), invoiceID, userID, sharedWithID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// GET /api/v1/invoices/{id}/shares/
+func (h *Handler) listInvoiceShares(w http.ResponseWriter, r *http.Request) {
+	if h.invoiceSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "invoice service not available")
+		return
+	}
+
+	invoiceID, err := parseUUID(r, "id")
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid invoice id")
+		return
+	}
+
+	ownerID := h.getUserID(r.Context())
+	if ownerID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	shares, err := h.invoiceSvc.ListInvoiceShares(r.Context(), invoiceID, ownerID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, shares)
+}
 
 // GET /api/v1/invoices/
 func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
@@ -61,6 +171,12 @@ func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
 		UserID: userID,
 	}
 	q := r.URL.Query()
+	if q.Get("include_shared") == "true" {
+		filter.IncludeShared = true
+	}
+	if src := q.Get("source"); src != "" {
+		filter.Source = src
+	}
 	if limit, err := strconv.Atoi(q.Get("limit")); err == nil {
 		filter.Limit = limit
 	}

@@ -2,8 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Save } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
-import { fetchCategories } from '../../api/client';
-import type { Category, PlannedTransaction, CreatePlannedTransactionRequest, UpdatePlannedTransactionRequest } from '../../api/types';
+import { categoryService } from '../../api/services/categoryService';
+import type { Category } from "../../api/types/category";
+import type { PlannedTransaction, CreatePlannedTransactionRequest, UpdatePlannedTransactionRequest } from "../../api/types/transaction";
 
 interface Props {
     isOpen: boolean;
@@ -18,11 +19,13 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
     const [date, setDate] = useState<string>('');
     const [description, setDescription] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('');
+    const [intervalMonths, setIntervalMonths] = useState<number>(0);
+    const [endDate, setEndDate] = useState<string>('');
     const [isSaving, setIsSaving] = useState(false);
     
     const { data: categories = [] } = useQuery<Category[]>({
         queryKey: ['categories'],
-        queryFn: fetchCategories,
+        queryFn: categoryService.fetchCategories,
         staleTime: 5 * 60 * 1000,
     });
 
@@ -33,11 +36,15 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                 setDate(initialData.date.split('T')[0]);
                 setDescription(initialData.description);
                 setCategoryId(initialData.category_id || '');
+                setIntervalMonths(initialData.interval_months || 0);
+                setEndDate(initialData.end_date ? initialData.end_date.split('T')[0] : '');
             } else {
                 setAmount('');
                 setDate(new Date().toISOString().split('T')[0]);
                 setDescription('');
                 setCategoryId('');
+                setIntervalMonths(0);
+                setEndDate('');
             }
         }
     }, [isOpen, initialData]);
@@ -50,7 +57,9 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                 amount: parseFloat(amount),
                 date: new Date(date).toISOString(),
                 description,
-                category_id: categoryId || undefined,
+                category_id: categoryId || null,
+                interval_months: intervalMonths,
+                end_date: intervalMonths > 0 && endDate ? new Date(endDate).toISOString() : undefined,
             };
             if (initialData) {
                 payload.status = initialData.status;
@@ -116,6 +125,37 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                                 value={date}
                                 onChange={e => setDate(e.target.value)}
                                 className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                {t('forecasting.frequency', 'Frequency')}
+                            </label>
+                            <select
+                                value={intervalMonths}
+                                onChange={e => setIntervalMonths(parseInt(e.target.value))}
+                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white"
+                            >
+                                <option value={0}>{t('forecasting.interval.once', 'Once')}</option>
+                                <option value={1}>{t('forecasting.interval.monthly', 'Monthly')}</option>
+                                <option value={3}>{t('forecasting.interval.quarterly', 'Quarterly')}</option>
+                                <option value={6}>{t('forecasting.interval.halfYearly', 'Half-Yearly')}</option>
+                                <option value={12}>{t('forecasting.interval.yearly', 'Yearly')}</option>
+                            </select>
+                        </div>
+                        <div>
+                            <label className={`block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 ${intervalMonths === 0 ? 'opacity-50' : ''}`}>
+                                {t('forecasting.endDate', 'End Date')}
+                            </label>
+                            <input
+                                type="date"
+                                disabled={intervalMonths === 0}
+                                value={endDate}
+                                onChange={e => setEndDate(e.target.value)}
+                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
                             />
                         </div>
                     </div>

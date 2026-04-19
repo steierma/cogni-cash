@@ -7,4 +7,3 @@ type ReconciliationPairSuggestion struct {
 	TargetTransaction Transaction `json:"target_transaction"`
 	MatchScore        float64     `json:"match_score"`
 }
-

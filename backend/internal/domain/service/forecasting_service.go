@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math"
-	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -183,7 +183,8 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 	recurring := s.detectRecurring(normalizedHistory, varCats, patternExclusionMap)
 
 	// 4. Project discrete events into future
-	predictions := s.projectFuture(userID, recurring, fromDate, toDate)
+	predictions := make([]entity.PredictedTransaction, 0)
+	predictions = append(predictions, s.projectFuture(userID, recurring, fromDate, toDate)...)
 
 	// 5. Add Variable Spending Budgets
 	budgetPredictions := s.calculateVariableBudgets(userID, history, varCats, fromDate, toDate)
@@ -196,20 +197,72 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 			s.Logger.Warn("Could not fetch planned transactions for forecasting", "error", err)
 		} else {
 			for _, pt := range plannedTransactions {
-				if pt.Status == entity.PlannedTransactionStatusPending && !pt.Date.Before(fromDate) && !pt.Date.After(toDate) {
-					predictions = append(predictions, entity.PredictedTransaction{
-						Transaction: entity.Transaction{
-							ID:           pt.ID,
-							Description:  fmt.Sprintf("Planned: %s", pt.Description),
-							Amount:       pt.Amount,
-							BookingDate:  pt.Date,
-							ValutaDate:   pt.Date,
-							CategoryID:   pt.CategoryID,
-							IsPrediction: true,
-							Type:         templateType(pt.Amount),
-						},
-						Probability: 1.0, // User-defined, absolute certainty
-					})
+				// Only process Pending or Matched (if we want to project from history, but here we focus on pending/active)
+				// Actually, we only project from Pending ones as they are the "Rolling Head".
+				if pt.Status != entity.PlannedTransactionStatusPending {
+					continue
+				}
+
+				// Soft Suppression: Check if this manual planned transaction overlaps with an auto-detected pattern
+				isSuperseded := false
+				for _, pred := range predictions {
+					// We only compare against auto-detected predictions
+					if !pred.IsPrediction || strings.HasPrefix(pred.Description, "Planned:") {
+						continue
+					}
+
+					if pt.CategoryID != nil && pred.CategoryID != nil && *pt.CategoryID == *pred.CategoryID {
+						// Amount similarity (±20%, min 50.0)
+						amtDiff := math.Abs(pt.Amount - pred.Amount)
+						maxAllowed := math.Max(math.Abs(pred.Amount)*0.20, 50.0)
+
+						if amtDiff <= maxAllowed {
+							// Date proximity: Must be within the same month and roughly same day (±7 days)
+							// Or for recurring, just same month is often enough if amount matches
+							dayDiff := math.Abs(pt.Date.Sub(pred.BookingDate).Hours() / 24)
+							if dayDiff <= 7 || (pt.Date.Month() == pred.BookingDate.Month() && pt.Date.Year() == pred.BookingDate.Year()) {
+								isSuperseded = true
+								break
+							}
+						}
+					}
+				}
+
+				// Project occurrences
+				current := pt.Date
+				for {
+					if !current.After(toDate) && !current.Before(fromDate) {
+						idSeed := fmt.Sprintf("%s-pt-%s-%s", userID, pt.ID, current.Format("2006-01-02"))
+						id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(idSeed))
+
+						desc := fmt.Sprintf("Planned: %s", pt.Description)
+						if isSuperseded {
+							desc += " (Superseded by auto-forecast)"
+						}
+
+						predictions = append(predictions, entity.PredictedTransaction{
+							Transaction: entity.Transaction{
+								ID:              id,
+								Description:     desc,
+								Amount:          pt.Amount,
+								BookingDate:     current,
+								ValutaDate:      current,
+								CategoryID:      pt.CategoryID,
+								IsPrediction:    true,
+								Type:            templateType(pt.Amount),
+								SkipForecasting: isSuperseded,
+							},
+							Probability: 1.0,
+						})
+					}
+
+					if pt.IntervalMonths <= 0 {
+						break
+					}
+					current = current.AddDate(0, pt.IntervalMonths, 0)
+					if current.After(toDate) || (pt.EndDate != nil && current.After(*pt.EndDate)) {
+						break
+					}
 				}
 			}
 		}
@@ -338,7 +391,7 @@ func (s *ForecastingService) detectRecurring(history []entity.Transaction, varCa
 			diff := group[i].BookingDate.Sub(last.BookingDate)
 			days := diff.Hours() / 24
 
-			interval := getIntervalFromDays(days)
+			interval := getIntervalFromDays(days, 3.0)
 
 			// Match existing interval or any new valid interval
 			if interval > 0 && (detectedInterval == 0 || interval == detectedInterval) {
@@ -370,7 +423,7 @@ func (s *ForecastingService) detectRecurring(history []entity.Transaction, varCa
 			minRequired = 2
 		}
 
-		if len(sequence) >= minRequired {
+		if len(sequence) >= minRequired && detectedInterval > 0 {
 			recurring = append(recurring, recurringPattern{
 				template: sequence[len(sequence)-1],
 				interval: detectedInterval,
@@ -390,26 +443,75 @@ func isSequenceVerified(seq []entity.Transaction) bool {
 	return false
 }
 
-func getIntervalFromDays(days float64) int {
-	if days >= 25 && days <= 35 {
-		return 1 // Monthly
+func (s *ForecastingService) CalculateCategoryAverage(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID, strategy string) (float64, error) {
+	// 1. Fetch historical transactions (last 3 years for pattern detection)
+	histStart := time.Now().AddDate(-3, 0, 0)
+	history, err := s.repo.FindTransactions(ctx, entity.TransactionFilter{
+		UserID:     userID,
+		CategoryID: &categoryID,
+		FromDate:   &histStart,
+	})
+	if err != nil {
+		return 0, err
 	}
-	if days >= 80 && days <= 100 {
-		return 3 // Quarterly
+
+	startDate := getStartDateForStrategy(strategy, time.Now())
+
+	// Group history by month
+	monthlyTotals := make(map[string]float64)
+	for _, tx := range history {
+		if !startDate.IsZero() && tx.BookingDate.Before(startDate) {
+			continue
+		}
+		monthKey := tx.BookingDate.Format("2006-01")
+		monthlyTotals[monthKey] += tx.Amount
 	}
-	if days >= 170 && days <= 190 {
-		return 6 // Half-yearly
+
+	if len(monthlyTotals) == 0 {
+		return 0, nil
 	}
-	if days >= 350 && days <= 380 {
-		return 12 // Yearly
+
+	sum := 0.0
+	for _, amt := range monthlyTotals {
+		sum += amt
 	}
-	return 0
+	return sum / float64(len(monthlyTotals)), nil
+}
+
+func getStartDateForStrategy(strategy string, now time.Time) time.Time {
+	if strategy == "all" {
+		return time.Time{} // No limit
+	}
+
+	// Try parsing Nm or Ny (e.g., 6m, 2y)
+	if len(strategy) > 1 {
+		unit := strategy[len(strategy)-1]
+		valStr := strategy[:len(strategy)-1]
+		val, err := strconv.Atoi(valStr)
+		if err == nil && val > 0 {
+			if unit == 'm' {
+				return now.AddDate(0, -val, 0)
+			} else if unit == 'y' {
+				return now.AddDate(-val, 0, 0)
+			}
+		}
+	}
+
+	// Default fallback (3y)
+	return now.AddDate(-3, 0, 0)
 }
 
 func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history []entity.Transaction, varCats map[uuid.UUID]entity.Category, from, to time.Time) []entity.PredictedTransaction {
 	var predictions []entity.PredictedTransaction
 	if len(varCats) == 0 {
 		return predictions
+	}
+
+	// Calculate start dates for each category based on its strategy
+	now := time.Now()
+	catStartDates := make(map[uuid.UUID]time.Time)
+	for id, cat := range varCats {
+		catStartDates[id] = getStartDateForStrategy(cat.ForecastStrategy, now)
 	}
 
 	// 1. Calculate historical monthly averages for each variable category
@@ -424,6 +526,11 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 		}
 
 		catID := *tx.CategoryID
+		startDate := catStartDates[catID]
+		if !startDate.IsZero() && tx.BookingDate.Before(startDate) {
+			continue
+		}
+
 		monthKey := tx.BookingDate.Format("2006-01")
 		if _, ok := catMonthlyTotals[catID]; !ok {
 			catMonthlyTotals[catID] = make(map[string]float64)
@@ -458,10 +565,14 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 			remainingBudget := avg
 
 			// If we are in the current month, subtract what we already spent
-			now := time.Now()
 			if curr.Year() == now.Year() && curr.Month() == now.Month() {
 				monthSpent := 0.0
 				monthKey := now.Format("2006-01")
+				// We ALWAYS use current month's real total, regardless of strategy limit,
+				// to ensure accurate "remaining budget" calculation.
+				// However, catMonthlyTotals only contains data within the strategy window.
+				// If current month is outside the window (unlikely for 3m+), we'd need to fetch it.
+				// But current month is ALWAYS within the window for 3m, 6m, 12m, 3y, all.
 				if months, ok := catMonthlyTotals[catID]; ok {
 					monthSpent = months[monthKey]
 				}
@@ -477,22 +588,15 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 				continue
 			}
 
-			// Distribute the remaining budget over the rest of the month
-			// OR just put it on the last day of the month as a "placeholder"
-			// To keep it simple and clean on the chart, we'll put one placeholder at the end of the month
-			// (or the 'to' date, whichever is earlier)
+			// Place at the end of the month
 			targetDate := endOfMonth
 			if targetDate.After(to) {
 				targetDate = to
 			}
-
-			// If targetDate is in the past compared to 'from', use 'from'
 			if targetDate.Before(from) {
 				targetDate = from
 			}
 
-			// Create a deterministic ID so the frontend can have stable keys
-			// STABILITY: Seed with UserID (Salt), Category ID and Month to ensure it survives budget updates and prevents cross-user inference
 			idSeed := fmt.Sprintf("%s-var-budget-%s-%s", userID, cat.ID, targetDate.Format("2006-01"))
 			id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(idSeed))
 
@@ -511,7 +615,6 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 			})
 		}
 
-		// Advance to next month
 		curr = startOfMonth.AddDate(0, 1, 0)
 	}
 
@@ -529,6 +632,9 @@ func (s *ForecastingService) projectFuture(userID uuid.UUID, recurring []recurri
 	var predictions []entity.PredictedTransaction
 
 	for _, rt := range recurring {
+		if rt.interval <= 0 {
+			continue // Safety: Only project patterns with a valid interval
+		}
 		template := rt.template
 		current := template.BookingDate
 		for {
@@ -558,25 +664,6 @@ func (s *ForecastingService) projectFuture(userID uuid.UUID, recurring []recurri
 	}
 
 	return predictions
-}
-
-var (
-	yearRegex      = regexp.MustCompile(`\b(20\d{2})\b`)
-	monthYearRegex = regexp.MustCompile(`\b(\d{2}[/\.]\d{2,4})\b`)
-)
-
-func normalizeDescription(desc string) string {
-	d := strings.ToLower(strings.TrimSpace(desc))
-	// Remove year patterns like "2024" or "2023"
-	d = yearRegex.ReplaceAllString(d, "")
-	// Remove month/year patterns like "05/24"
-	d = monthYearRegex.ReplaceAllString(d, "")
-	// Clean up extra spaces
-	d = strings.Join(strings.Fields(d), " ")
-	if len(d) > 50 {
-		d = d[:50]
-	}
-	return d
 }
 
 func (s *ForecastingService) buildTimeSeries(startBalance float64, predictions []entity.PredictedTransaction, from, to time.Time) []entity.ForecastPoint {

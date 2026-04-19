@@ -2,7 +2,7 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Receipt, Eye, Pencil, Download, Trash2, LineChart as LineChartIcon, ArrowUpDown, ArrowUp, ArrowDown, FileText } from 'lucide-react';
 import { fmtCurrency } from '../../utils/formatters';
 import { formatYearMonth, getAdjustedNetto, type ColKey, type SortDirection } from './utils';
-import type { Payslip } from '../../api/types';
+import type { Payslip } from "../../api/types/payslip";
 
 interface PayslipTableProps {
     isLoading: boolean;

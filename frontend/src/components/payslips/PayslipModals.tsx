@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Eye, FileText, FileUp, Pencil, Split } from 'lucide-react';
 import { FilePreview } from '../FilePreview';
-import type { Payslip } from '../../api/types';
+import type { Payslip } from "../../api/types/payslip";
 import { fmtCurrency } from '../../utils/formatters';
 import { formatYearMonth } from './utils';
 import { PayslipForm } from './PayslipForm';

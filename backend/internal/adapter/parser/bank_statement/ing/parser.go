@@ -1,7 +1,6 @@
 package ing
 
 import (
-	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -10,12 +9,12 @@ import (
 	"strings"
 	"time"
 
+	"cogni-cash/internal/adapter/parser/pdfutil"
 	"cogni-cash/internal/domain/entity"
 
 	"log/slog"
 
 	"github.com/google/uuid"
-	"github.com/ledongthuc/pdf"
 )
 
 // ErrFormatMismatch indicates this file is not for this parser
@@ -43,9 +42,17 @@ func NewParser(logger *slog.Logger) *Parser { return &Parser{Logger: logger} }
 
 func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
 	p.Logger.Info("Parsing ING PDF")
-	tokens, raw, err := extractTokens(fileBytes)
+	raw, err := pdfutil.ExtractText(fileBytes)
 	if err != nil {
 		return entity.BankStatement{}, fmt.Errorf("ing parser: extract text: %w", err)
+	}
+
+	var tokens []string
+	for _, l := range strings.Split(raw, "\n") {
+		t := strings.TrimSpace(l)
+		if t != "" {
+			tokens = append(tokens, t)
+		}
 	}
 
 	// 1. THE SNIFF TEST: Be specific to avoid false positives from other banks
@@ -85,33 +92,6 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 
 	p.Logger.Info("Successfully parsed ING PDF")
 	return stmt, nil
-}
-
-func extractTokens(fileBytes []byte) ([]string, string, error) {
-	readerAt := bytes.NewReader(fileBytes)
-	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
-	if err != nil {
-		return nil, "", err
-	}
-
-	var tokens []string
-	for i := 1; i <= r.NumPage(); i++ {
-		page := r.Page(i)
-		if page.V.IsNull() {
-			continue
-		}
-		text, err := page.GetPlainText(nil)
-		if err != nil {
-			continue
-		}
-		for _, l := range strings.Split(text, "\n") {
-			t := strings.TrimSpace(l)
-			if t != "" {
-				tokens = append(tokens, t)
-			}
-		}
-	}
-	return tokens, strings.Join(tokens, "\n"), nil
 }
 
 func extractAccountHolder(tokens []string) string {

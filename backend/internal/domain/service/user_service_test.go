@@ -277,4 +277,3 @@ func TestUserService_DeleteUser_NotFound(t *testing.T) {
 		t.Error("expected error for non-existent user")
 	}
 }
-

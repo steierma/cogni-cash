@@ -209,7 +209,9 @@ func (m *mockNotificationSvc) SendPasswordResetEmail(_ context.Context, _ entity
 	m.lastResetURL = url
 	return nil
 }
-func (m *mockNotificationSvc) SendTestEmail(_ context.Context, _ string, _ uuid.UUID) error { return nil }
+func (m *mockNotificationSvc) SendTestEmail(_ context.Context, _ string, _ uuid.UUID) error {
+	return nil
+}
 
 // --- Mock Settings Repository ---
 
@@ -223,7 +225,7 @@ func (m *mockSettingsRepoForAuth) Get(_ context.Context, key string, _ uuid.UUID
 func (m *mockSettingsRepoForAuth) GetAll(_ context.Context, _ uuid.UUID) (map[string]string, error) {
 	return m.settings, nil
 }
-func (m *mockSettingsRepoForAuth) Set(_ context.Context, key, value string, _ uuid.UUID) error {
+func (m *mockSettingsRepoForAuth) Set(_ context.Context, key, value string, _ uuid.UUID, _ bool) error {
 	m.settings[key] = value
 	return nil
 }
@@ -262,7 +264,7 @@ func TestAuthService_PasswordReset(t *testing.T) {
 	t.Run("ConfirmPasswordReset success", func(t *testing.T) {
 		// 1. Request to get a token
 		_ = svc.RequestPasswordReset(context.Background(), "test@example.com")
-		
+
 		// Extract token from mock URL (e.g. http://localhost:3000/reset-password?token=...)
 		url := notifSvc.lastResetURL
 		token := url[len(url)-64:] // 32 bytes hex = 64 chars
@@ -548,4 +550,3 @@ func TestAuthService_EnsureAdminUser_EmptyCredentials(t *testing.T) {
 		t.Errorf("expected nil (skip), got: %v", err)
 	}
 }
-

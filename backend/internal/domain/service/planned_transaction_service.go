@@ -44,10 +44,10 @@ func (s *plannedTransactionService) Update(ctx context.Context, pt *entity.Plann
 	if err != nil {
 		return err
 	}
-	
+
 	// Preserve fields that shouldn't change
 	pt.CreatedAt = existing.CreatedAt
-	
+
 	return s.repo.Update(ctx, pt)
 }
 
@@ -97,6 +97,31 @@ func (s *plannedTransactionService) MatchTransactions(ctx context.Context, userI
 			if err := s.repo.Update(ctx, pt); err != nil {
 				return err
 			}
+
+			// Rolling Head: Spawn next instance if recurring
+			if pt.IntervalMonths > 0 {
+				nextDate := pt.Date.AddDate(0, pt.IntervalMonths, 0)
+
+				// Only spawn if not past end date
+				if pt.EndDate == nil || !nextDate.After(*pt.EndDate) {
+					nextPT := &entity.PlannedTransaction{
+						ID:             uuid.New(),
+						UserID:         pt.UserID,
+						Amount:         pt.Amount,
+						Date:           nextDate,
+						Description:    pt.Description,
+						CategoryID:     pt.CategoryID,
+						Status:         entity.PlannedTransactionStatusPending,
+						IntervalMonths: pt.IntervalMonths,
+						EndDate:        pt.EndDate,
+						CreatedAt:      time.Now().UTC(),
+					}
+					if err := s.repo.Create(ctx, nextPT); err != nil {
+						return err
+					}
+				}
+			}
+
 			// Once matched, we don't want to match it again in this loop
 			break
 		}

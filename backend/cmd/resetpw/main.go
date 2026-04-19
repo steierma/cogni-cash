@@ -2,10 +2,12 @@
 // Standalone helper: bcrypt-hash a password and UPDATE it in the users table.
 //
 // Usage (via Makefile):
-//   make db-reset-password USER=admin PASSWORD=newpass
+//
+//	make db-reset-password USER=admin PASSWORD=newpass
 //
 // Direct usage:
-//   cd backend && go run ./cmd/resetpw -user admin -password newpass
+//
+//	cd backend && go run ./cmd/resetpw -user admin -password newpass
 package main
 
 import (
@@ -74,4 +76,3 @@ func envOr(key, def string) string {
 	}
 	return def
 }
-

@@ -126,11 +126,11 @@ func TestForecastingService_SkipHistorical(t *testing.T) {
 			ContentHash: "gym-1",
 		},
 		{
-			UserID:      userID,
-			Description: "Gym",
-			Amount:      -50.0,
-			BookingDate: now.AddDate(0, -2, 0),
-			ContentHash: "gym-2",
+			UserID:          userID,
+			Description:     "Gym",
+			Amount:          -50.0,
+			BookingDate:     now.AddDate(0, -2, 0),
+			ContentHash:     "gym-2",
 			SkipForecasting: true, // This should break the pattern detection
 		},
 		{

@@ -145,7 +145,7 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 	if !ok || p.UserID != userID {
 		return nil, "", "", entity.ErrPayslipNotFound
 	}
-	
+
 	mimeType := "application/octet-stream"
 	if len(p.OriginalFileContent) > 0 {
 		mimeType = http.DetectContentType(p.OriginalFileContent)
@@ -153,7 +153,7 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 			mimeType = mimeType[:idx]
 		}
 	}
-	
+
 	return p.OriginalFileContent, mimeType, p.OriginalFileName, nil
 }
 

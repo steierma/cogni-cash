@@ -31,6 +31,7 @@ type Adapter struct {
 	privateKey *rsa.PrivateKey
 	logger     *slog.Logger
 	client     *http.Client
+	BaseURL    string
 
 	mu            sync.RWMutex
 	accountsCache map[string][]entity.BankAccount
@@ -42,6 +43,7 @@ func NewAdapter(appID string, privateKey *rsa.PrivateKey, logger *slog.Logger) *
 		privateKey:    privateKey,
 		logger:        logger,
 		client:        &http.Client{Timeout: 30 * time.Second},
+		BaseURL:       baseURL,
 		accountsCache: make(map[string][]entity.BankAccount),
 	}
 }
@@ -65,7 +67,7 @@ func (a *Adapter) doRequest(ctx context.Context, method, path string, bodyData i
 		return nil, fmt.Errorf("enablebanking: failed to sign JWT: %w", err)
 	}
 
-	req, _ := http.NewRequestWithContext(ctx, method, baseURL+path, bodyData)
+	req, _ := http.NewRequestWithContext(ctx, method, a.BaseURL+path, bodyData)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
 
@@ -80,6 +82,7 @@ func (a *Adapter) doRequest(ctx context.Context, method, path string, bodyData i
 		return nil, fmt.Errorf("enablebanking: error status %d: %s", resp.StatusCode, string(respBody))
 	}
 
+	a.logger.DebugContext(ctx, "Enable Banking API response", "method", method, "path", path, "status", resp.StatusCode, "response", string(respBody))
 	return respBody, nil
 }
 
@@ -187,12 +190,16 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, 
 		} `json:"accounts"`
 	}
 	if err := json.Unmarshal(resp, &res); err != nil {
+		a.logger.Error("failed to unmarshal Enable Banking session response", "error", err)
 		return "", err
 	}
+
+	a.logger.Info("received accounts from Enable Banking session", "session_id", res.SessionID, "account_count", len(res.Accounts))
 
 	// Convert to domain entities
 	bankAccounts := make([]entity.BankAccount, len(res.Accounts))
 	for i, r := range res.Accounts {
+		a.logger.Debug("processing Enable Banking account", "uid", r.UID, "name", r.Name, "iban", r.AccountID.IBAN)
 		// Fallback to BBAN if IBAN is not provided
 		iban := r.AccountID.IBAN
 		if iban == "" {
@@ -222,6 +229,7 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, 
 	a.mu.Lock()
 	a.accountsCache[res.SessionID] = bankAccounts
 	a.mu.Unlock()
+	a.logger.Info("cached accounts for upcoming fetch", "session_id", res.SessionID, "count", len(bankAccounts))
 
 	return res.SessionID, nil
 }
@@ -258,58 +266,107 @@ func (a *Adapter) FetchAccounts(ctx context.Context, userID uuid.UUID, requisiti
 	}
 	a.mu.Unlock()
 
-	if !exists {
-		return nil, fmt.Errorf("enablebanking: no accounts cached for session id: %s", requisitionID)
+	if exists {
+		a.logger.Info("retrieved accounts from memory cache", "count", len(accounts), "user_id", userID)
+		return accounts, nil
 	}
 
-	return accounts, nil
+	// If not in cache (e.g. after restart), fetch from Enable Banking API
+	a.logger.Info("memory cache empty, fetching accounts from Enable Banking API", "session_id", requisitionID, "user_id", userID)
+	resp, err := a.doRequest(ctx, "GET", "/sessions/"+requisitionID, nil)
+	if err != nil {
+		return nil, fmt.Errorf("enablebanking: failed to fetch session details: %w", err)
+	}
+
+	var res struct {
+		Accounts []struct {
+			UID       string `json:"uid"`
+			AccountID struct {
+				IBAN string `json:"iban"`
+				BBAN string `json:"bban"`
+			} `json:"account_id"`
+			Currency        string `json:"currency"`
+			Name            string `json:"name"`
+			CashAccountType string `json:"cash_account_type"`
+		} `json:"accounts"`
+	}
+	if err := json.Unmarshal(resp, &res); err != nil {
+		return nil, fmt.Errorf("enablebanking: failed to unmarshal session accounts: %w", err)
+	}
+
+	bankAccounts := make([]entity.BankAccount, len(res.Accounts))
+	for i, r := range res.Accounts {
+		iban := r.AccountID.IBAN
+		if iban == "" {
+			iban = r.AccountID.BBAN
+		}
+
+		accType := entity.StatementTypeGiro
+		switch r.CashAccountType {
+		case "CARD":
+			accType = entity.StatementTypeCreditCard
+		case "SVGS", "MONE":
+			accType = entity.StatementTypeExtraAccount
+		}
+
+		bankAccounts[i] = entity.BankAccount{
+			ProviderAccountID: r.UID,
+			IBAN:              iban,
+			Name:              r.Name,
+			Currency:          r.Currency,
+			AccountType:       accType,
+		}
+	}
+
+	a.logger.Info("successfully recovered accounts from Enable Banking API", "count", len(bankAccounts), "user_id", userID)
+	return bankAccounts, nil
 }
 
 func extractRemittanceData(raw string) (creditorID, mandateReference, description, location string) {
-        description = raw // Default fallback
+	description = raw // Default fallback
 
-        if strings.Contains(raw, "remittanceinformation:") {
-                // Extract Creditor ID safely
-                cidStart := strings.Index(raw, "creditorid:")
-                if cidStart != -1 {
-                        cidStart += len("creditorid:")
-                        cidEnd := strings.Index(raw[cidStart:], ",")
-                        if cidEnd != -1 {
-                                creditorID = raw[cidStart : cidStart+cidEnd]
-                        } else {
-                                creditorID = raw[cidStart:]
-                        }
-                }
+	if strings.Contains(raw, "remittanceinformation:") {
+		// Extract Creditor ID safely
+		cidStart := strings.Index(raw, "creditorid:")
+		if cidStart != -1 {
+			cidStart += len("creditorid:")
+			cidEnd := strings.Index(raw[cidStart:], ",")
+			if cidEnd != -1 {
+				creditorID = raw[cidStart : cidStart+cidEnd]
+			} else {
+				creditorID = raw[cidStart:]
+			}
+		}
 
-                // Extract Mandate Reference
-                mrStart := strings.Index(raw, "mandatereference:")
-                if mrStart != -1 {
-                        mrStart += len("mandatereference:")
-                        mrEnd := strings.Index(raw[mrStart:], ",")
-                        if mrEnd != -1 {
-                                mandateReference = raw[mrStart : mrStart+mrEnd]
-                        } else {
-                                mandateReference = raw[mrStart:]
-                        }
-                }
+		// Extract Mandate Reference
+		mrStart := strings.Index(raw, "mandatereference:")
+		if mrStart != -1 {
+			mrStart += len("mandatereference:")
+			mrEnd := strings.Index(raw[mrStart:], ",")
+			if mrEnd != -1 {
+				mandateReference = raw[mrStart : mrStart+mrEnd]
+			} else {
+				mandateReference = raw[mrStart:]
+			}
+		}
 
-                // Extract the actual description text
-                remStart := strings.Index(raw, "remittanceinformation:")
-                if remStart != -1 {
-                        description = raw[remStart+len("remittanceinformation:"):]
+		// Extract the actual description text
+		remStart := strings.Index(raw, "remittanceinformation:")
+		if remStart != -1 {
+			description = raw[remStart+len("remittanceinformation:"):]
 
-                        // Regex to find city names before "Datum" or " DE "
-                        // Matches letters (including German umlauts), allowing spaces/hyphens inside,
-                        // right before the keyword "Datum" or isolated "DE".
-                        locRegex := regexp.MustCompile(`(?i)([A-ZÄÖÜa-zäöüß]+(?:[\s\-][A-ZÄÖÜa-zäöüß]+)*)\s*(?:Datum|\s+DE\s+)`)
-                        matches := locRegex.FindStringSubmatch(description)
-                        if len(matches) > 1 {
-                                location = strings.TrimSpace(matches[1])
-                        }
-                }
-        }
+			// Regex to find city names before "Datum" or " DE "
+			// Matches letters (including German umlauts), allowing spaces/hyphens inside,
+			// right before the keyword "Datum" or isolated "DE".
+			locRegex := regexp.MustCompile(`(?i)([A-ZÄÖÜa-zäöüß]+(?:[\s\-][A-ZÄÖÜa-zäöüß]+)*)\s*(?:Datum|\s+DE\s+)`)
+			matches := locRegex.FindStringSubmatch(description)
+			if len(matches) > 1 {
+				location = strings.TrimSpace(matches[1])
+			}
+		}
+	}
 
-        return strings.TrimSpace(creditorID), strings.TrimSpace(mandateReference), strings.TrimSpace(description), location
+	return strings.TrimSpace(creditorID), strings.TrimSpace(mandateReference), strings.TrimSpace(description), location
 }
 func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, providerAccountID string, dateFrom *time.Time, dateTo *time.Time) ([]entity.Transaction, float64, error) {
 	if providerAccountID == "dummy_acc_id" || strings.HasPrefix(providerAccountID, "mock_") {
@@ -335,7 +392,7 @@ func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, provi
 		a.logger.Error("failed to fetch transactions from Enable Banking", "account_id", providerAccountID, "error", err)
 		return nil, 0, err
 	}
-	a.logger.Debug("successfully fetched transactions from Enable Banking", "account_id", providerAccountID, "response", resp)
+	a.logger.Info("successfully fetched transactions from Enable Banking", "account_id", providerAccountID)
 
 	var res struct {
 		Transactions []struct {
@@ -359,6 +416,17 @@ func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, provi
 			Debtor struct {
 				Name string `json:"name"`
 			} `json:"debtor"`
+			CreditorAccount *struct {
+				IBAN string `json:"iban"`
+				BBAN string `json:"bban"`
+			} `json:"creditor_account"`
+			DebtorAccount *struct {
+				IBAN string `json:"iban"`
+				BBAN string `json:"bban"`
+			} `json:"debtor_account"`
+			BankTransactionCode *struct {
+				Description string `json:"description"`
+			} `json:"bank_transaction_code"`
 		} `json:"transactions"`
 	}
 	if err := json.Unmarshal(resp, &res); err != nil {
@@ -434,10 +502,31 @@ func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, provi
 			}
 		}
 
-		// Counterparty: creditor for debits, debtor for credits
-		counterparty := cName
-		if txnType == "credit" {
-			counterparty = dName
+		// Counterparty Info:
+		// For DBIT: Counterparty is the Creditor
+		// For CRDT: Counterparty is the Debtor
+		counterpartyName := cName
+		counterpartyIban := ""
+		if txnType == "debit" {
+			if r.CreditorAccount != nil {
+				counterpartyIban = r.CreditorAccount.IBAN
+				if counterpartyIban == "" {
+					counterpartyIban = r.CreditorAccount.BBAN
+				}
+			}
+		} else {
+			counterpartyName = dName
+			if r.DebtorAccount != nil {
+				counterpartyIban = r.DebtorAccount.IBAN
+				if counterpartyIban == "" {
+					counterpartyIban = r.DebtorAccount.BBAN
+				}
+			}
+		}
+
+		bankTxCode := ""
+		if r.BankTransactionCode != nil {
+			bankTxCode = r.BankTransactionCode.Description
 		}
 
 		// 4. REFERENCE
@@ -450,16 +539,18 @@ func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, provi
 		}
 
 		transactions = append(transactions, entity.Transaction{
-			BookingDate:        bookingDate,
-			ValutaDate:         valutaDate,
-			Description:        desc,
-			Location:           location,
-			Amount:             amt,
-			Currency:           r.AmountObj.Currency,
-			Type:               entity.TransactionType(txnType),
-			Reference:          ref,
-			MandateReference:   mandateRef,
-			CounterpartyName:   counterparty,
+			BookingDate:         bookingDate,
+			ValutaDate:          valutaDate,
+			Description:         desc,
+			Location:            location,
+			Amount:              amt,
+			Currency:            r.AmountObj.Currency,
+			Type:                entity.TransactionType(txnType),
+			Reference:           ref,
+			MandateReference:    mandateRef,
+			CounterpartyName:    counterpartyName,
+			CounterpartyIban:    counterpartyIban,
+			BankTransactionCode: bankTxCode,
 		})
 	}
 

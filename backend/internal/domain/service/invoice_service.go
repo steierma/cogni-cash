@@ -42,17 +42,23 @@ var ErrEmptyRawText = entity.ErrEmptyRawText
 //
 // It depends exclusively on ports and has no infrastructure imports.
 type InvoiceService struct {
-	invoiceRepo   port.InvoiceRepository
-	categoryRepo  port.CategoryRepository
-	parser        port.InvoiceParser // extracts text from invoice files (PDF, …)
-	aiCategorizer port.InvoiceAICategorizer
-	logger        *slog.Logger
+	invoiceRepo     port.InvoiceRepository
+	categoryRepo    port.CategoryRepository
+	sharingRepo     port.SharingRepository
+	notificationSvc port.NotificationUseCase
+	userRepo        port.UserRepository
+	parser          port.InvoiceParser // extracts text from invoice files (PDF, …)
+	aiCategorizer   port.InvoiceAICategorizer
+	logger          *slog.Logger
 }
 
 // NewInvoiceService creates a new InvoiceService.
 func NewInvoiceService(
 	invoiceRepo port.InvoiceRepository,
 	categoryRepo port.CategoryRepository,
+	sharingRepo port.SharingRepository,
+	notificationSvc port.NotificationUseCase,
+	userRepo port.UserRepository,
 	parser port.InvoiceParser,
 	aiCategorizer port.InvoiceAICategorizer,
 	logger *slog.Logger,
@@ -61,12 +67,72 @@ func NewInvoiceService(
 		logger = slog.Default()
 	}
 	return &InvoiceService{
-		invoiceRepo:   invoiceRepo,
-		categoryRepo:  categoryRepo,
-		parser:        parser,
-		aiCategorizer: aiCategorizer,
-		logger:        logger,
+		invoiceRepo:     invoiceRepo,
+		categoryRepo:    categoryRepo,
+		sharingRepo:     sharingRepo,
+		notificationSvc: notificationSvc,
+		userRepo:        userRepo,
+		parser:          parser,
+		aiCategorizer:   aiCategorizer,
+		logger:          logger,
 	}
+}
+
+// ── Sharing ────────────────────────────────────────────────────────────────
+
+func (s *InvoiceService) ShareInvoice(ctx context.Context, invoiceID, ownerID, sharedWithID uuid.UUID, permission string) error {
+	if ownerID == sharedWithID {
+		return fmt.Errorf("cannot share invoice with yourself")
+	}
+
+	// Verify ownership
+	inv, err := s.invoiceRepo.FindByID(ctx, invoiceID, ownerID)
+	if err != nil {
+		return fmt.Errorf("invoice not found or not owned by you: %w", err)
+	}
+	if inv.UserID != ownerID {
+		return fmt.Errorf("only the owner can share an invoice")
+	}
+
+	if err := s.sharingRepo.ShareInvoice(ctx, invoiceID, ownerID, sharedWithID, permission); err != nil {
+		return err
+	}
+
+	// Notify the user
+	if s.notificationSvc != nil && s.userRepo != nil {
+		recipient, err := s.userRepo.FindByID(ctx, sharedWithID)
+		if err == nil {
+			s.logger.Info("Sending invoice sharing notification", "to", recipient.Email, "invoice_id", invoiceID)
+			// Using SendTestEmail as a placeholder. In a production app, we would use a dedicated
+			// SendSharingInvitation method.
+			_ = s.notificationSvc.SendTestEmail(ctx, recipient.Email, ownerID)
+		}
+	}
+
+	return nil
+}
+
+func (s *InvoiceService) RevokeInvoiceShare(ctx context.Context, invoiceID, ownerID, sharedWithID uuid.UUID) error {
+	inv, err := s.invoiceRepo.FindByID(ctx, invoiceID, ownerID)
+	if err != nil {
+		return fmt.Errorf("invoice not found: %w", err)
+	}
+
+	// Either the owner or the recipient can revoke/remove the share
+	if inv.UserID != ownerID && ownerID != sharedWithID {
+		return fmt.Errorf("unauthorized to revoke this share")
+	}
+
+	return s.sharingRepo.RevokeInvoiceShare(ctx, invoiceID, inv.UserID, sharedWithID)
+}
+
+func (s *InvoiceService) ListInvoiceShares(ctx context.Context, invoiceID, ownerID uuid.UUID) ([]uuid.UUID, error) {
+	_, err := s.invoiceRepo.FindByID(ctx, invoiceID, ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("invoice not found or unauthorized: %w", err)
+	}
+
+	return s.sharingRepo.ListInvoiceShares(ctx, invoiceID, ownerID)
 }
 
 // WithCategories is deprecated and removed as categories are now fetched per user.

@@ -23,8 +23,7 @@ type Adapter struct {
 
 	mu sync.Mutex
 
-	cachedEB     *enablebanking.Adapter
-	ebAppID      string
+	ebAdapters   map[string]*enablebanking.Adapter
 	ebPrivateKey *rsa.PrivateKey
 
 	mockProvider *mock.MockBankProvider
@@ -36,6 +35,7 @@ func NewAdapter(settingsRepo port.SettingsRepository, ebPrivateKey *rsa.PrivateK
 		settingsRepo: settingsRepo,
 		ebPrivateKey: ebPrivateKey,
 		logger:       logger,
+		ebAdapters:   make(map[string]*enablebanking.Adapter),
 		mockProvider: mock.NewMockBankProvider(),
 	}
 }
@@ -43,12 +43,9 @@ func NewAdapter(settingsRepo port.SettingsRepository, ebPrivateKey *rsa.PrivateK
 func (a *Adapter) getProvider(ctx context.Context, userID uuid.UUID) (port.BankProvider, error) {
 	providerType, _ := a.settingsRepo.Get(ctx, "bank_provider", userID)
 
-	a.mu.Lock()
-	defer a.mu.Unlock()
-
 	if providerType == "" {
-			providerType = "enablebanking"
-		}
+		providerType = "enablebanking"
+	}
 
 	if providerType == "enablebanking" {
 		appID, _ := a.settingsRepo.Get(ctx, "enablebanking_app_id", userID)
@@ -62,11 +59,17 @@ func (a *Adapter) getProvider(ctx context.Context, userID uuid.UUID) (port.BankP
 			return nil, fmt.Errorf("enablebanking configured but private key was not loaded from environment")
 		}
 
-		if a.cachedEB == nil || a.ebAppID != appID {
-			a.cachedEB = enablebanking.NewAdapter(appID, a.ebPrivateKey, a.logger)
-			a.ebAppID = appID
+		a.mu.Lock()
+		defer a.mu.Unlock()
+
+		if adapter, ok := a.ebAdapters[appID]; ok {
+			return adapter, nil
 		}
-		return a.cachedEB, nil
+
+		// Erstelle neuen Adapter für diese AppID
+		adapter := enablebanking.NewAdapter(appID, a.ebPrivateKey, a.logger)
+		a.ebAdapters[appID] = adapter
+		return adapter, nil
 	}
 
 	return nil, fmt.Errorf("unsupported bank provider: %s", providerType)

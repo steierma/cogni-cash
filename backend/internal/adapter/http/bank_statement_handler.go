@@ -529,10 +529,18 @@ func (h *Handler) parseTransactionFilter(r *http.Request) entity.TransactionFilt
 		f.IncludePredictions = true
 	}
 
+	if q.Get("include_shared") == "true" {
+		f.IncludeShared = true
+	}
+
 	// Add support for StatementType filtering
 	if st := q.Get("statement_type"); st != "" {
 		stType := entity.StatementType(st)
 		f.StatementType = &stType
+	}
+
+	if subID, err := uuid.Parse(q.Get("subscription_id")); err == nil {
+		f.SubscriptionID = &subID
 	}
 
 	if limit, err := strconv.Atoi(q.Get("limit")); err == nil {

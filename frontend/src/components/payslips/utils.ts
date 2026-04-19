@@ -1,5 +1,4 @@
-import type { Payslip } from '../../api/types';
-
+import type { Payslip } from "../../api/types/payslip";
 export type ColKey = 'period' | 'employer' | 'gross' | 'net' | 'adjNet' | 'payout' | 'leasing';
 export type SortDirection = 'asc' | 'desc';
 

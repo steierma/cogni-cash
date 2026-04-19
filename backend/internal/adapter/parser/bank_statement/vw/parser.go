@@ -11,10 +11,10 @@ import (
 	"strings"
 	"time"
 
+	"cogni-cash/internal/adapter/parser/pdfutil"
 	"cogni-cash/internal/domain/entity"
 
 	"github.com/google/uuid"
-	"github.com/ledongthuc/pdf"
 )
 
 var ErrFormatMismatch = errors.New("vw parser: file content does not match format")
@@ -32,7 +32,7 @@ func (p *Parser) Parse(ctx context.Context, _ uuid.UUID, fileBytes []byte) (enti
 	}
 
 	// 2. Otherwise try PDF
-	rawText, err := extractPDFText(fileBytes)
+	rawText, err := pdfutil.ExtractText(fileBytes)
 	if err != nil {
 		return entity.BankStatement{}, fmt.Errorf("vw parser: failed to read pdf: %w", err)
 	}
@@ -203,7 +203,6 @@ func min(a, b int) int {
 	return b
 }
 
-
 func parseTransactions(text string) []entity.Transaction {
 	start := strings.Index(text, "Umsatzinformationen")
 	if start != -1 {
@@ -317,20 +316,4 @@ func parseGermanFloat(s string) (float64, error) {
 	s = strings.ReplaceAll(s, ".", "")
 	s = strings.ReplaceAll(s, ",", ".")
 	return strconv.ParseFloat(s, 64)
-}
-
-func extractPDFText(fileBytes []byte) (string, error) {
-	readerAt := bytes.NewReader(fileBytes)
-	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
-	if err != nil {
-		return "", err
-	}
-
-	var buf bytes.Buffer
-	b, err := r.GetPlainText()
-	if err != nil {
-		return "", err
-	}
-	buf.ReadFrom(b)
-	return buf.String(), nil
 }

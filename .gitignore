@@ -34,7 +34,7 @@ backend/.env
 *.swp
 
 /backend/balance/history/*
-/backend/payslips/history/*
+/payslips/*
 **/*Monatsabrechnung*.pdf
 **/*Entgeltnachweis*.pdf
 /backend/internal/adapter/parser/payslip/cariad/parser_test.go
@@ -54,3 +54,4 @@ backend/.env
 mobile_hermit/android/build/
 mobile_hermit/ios_bak/
 mobile_hermit/bin/inspect_temp.dart
+/coverage.out

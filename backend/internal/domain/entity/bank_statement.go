@@ -29,31 +29,34 @@ const (
 
 // Transaction represents a single line-item on a bank statement.
 type Transaction struct {
-	ID                 uuid.UUID       `json:"id"`
-	UserID             uuid.UUID       `json:"user_id"`
-	BankStatementID    *uuid.UUID      `json:"bank_statement_id,omitempty"`
-	BankAccountID      *uuid.UUID      `json:"bank_account_id,omitempty"`
-	BookingDate        time.Time       `json:"booking_date"`
-	ValutaDate         time.Time       `json:"valuta_date"`
-	Description        string          `json:"description"`
-	CounterpartyName   string          `json:"counterparty_name,omitempty"`
-	CounterpartyIban   string          `json:"counterparty_iban,omitempty"`
-	BankTransactionCode string         `json:"bank_transaction_code,omitempty"`
-	MandateReference   string          `json:"mandate_reference,omitempty"`
-	Location           string          `json:"location,omitempty"` // <-- NEW Optional Field
-	Amount             float64         `json:"amount"`
-	Currency           string          `json:"currency"`
-	Type               TransactionType `json:"type"`
-	Reference          string          `json:"reference"`
-	CategoryID         *uuid.UUID      `json:"category_id"`
-	ContentHash        string          `json:"content_hash"`
-	IsReconciled       bool            `json:"is_reconciled"`
-	ReconciliationID   *uuid.UUID      `json:"reconciliation_id,omitempty"`
-	Reviewed           bool            `json:"reviewed"`
-	StatementType      StatementType   `json:"statement_type"`
-	IsPrediction       bool            `json:"is_prediction"`      // <-- NEW Field
-	SkipForecasting    bool            `json:"skip_forecasting"`   // <-- NEW Field: Exclude historical pattern
-	IsPayslipVerified  bool            `json:"is_payslip_verified"` // <-- NEW Field: Verified against payslip
+	ID                  uuid.UUID       `json:"id"`
+	UserID              uuid.UUID       `json:"user_id"`
+	BankStatementID     *uuid.UUID      `json:"bank_statement_id,omitempty"`
+	BankAccountID       *uuid.UUID      `json:"bank_account_id,omitempty"`
+	BookingDate         time.Time       `json:"booking_date"`
+	ValutaDate          time.Time       `json:"valuta_date"`
+	Description         string          `json:"description"`
+	CounterpartyName    string          `json:"counterparty_name,omitempty"`
+	CounterpartyIban    string          `json:"counterparty_iban,omitempty"`
+	BankTransactionCode string          `json:"bank_transaction_code,omitempty"`
+	MandateReference    string          `json:"mandate_reference,omitempty"`
+	Location            string          `json:"location,omitempty"` // <-- NEW Optional Field
+	Amount              float64         `json:"amount"`
+	Currency            string          `json:"currency"`
+	Type                TransactionType `json:"type"`
+	Reference           string          `json:"reference"`
+	CategoryID          *uuid.UUID      `json:"category_id"`
+	ContentHash         string          `json:"content_hash"`
+	IsReconciled        bool            `json:"is_reconciled"`
+	ReconciliationID    *uuid.UUID      `json:"reconciliation_id,omitempty"`
+	Reviewed            bool            `json:"reviewed"`
+	StatementType       StatementType   `json:"statement_type"`
+	IsPrediction        bool            `json:"is_prediction"`       // <-- NEW Field
+	SkipForecasting     bool            `json:"skip_forecasting"`    // <-- NEW Field: Exclude historical pattern
+	IsPayslipVerified   bool            `json:"is_payslip_verified"` // <-- NEW Field: Verified against payslip
+	IsShared            bool            `json:"is_shared"`           // Collaborative Finance: Is category shared
+	OwnerID             *uuid.UUID      `json:"owner_id,omitempty"`  // Collaborative Finance: Original owner of the transaction
+	SubscriptionID      *uuid.UUID      `json:"subscription_id,omitempty"`
 }
 
 // BankStatement is the top-level entity representing one parsed Kontoauszug.
@@ -70,9 +73,9 @@ type BankStatement struct {
 	StatementType       StatementType `json:"statement_type"` // "giro" | "credit_card" — set by the parser
 	Transactions        []Transaction `json:"transactions"`
 	SkippedTransactions []Transaction `json:"skipped_transactions,omitempty"` // Used to store skipped duplicates for a potential future cleanup table
-	OriginalFile        []byte        `json:"-"`            // Exclude from JSON payload
-	ImportedAt          time.Time     `json:"imported_at"`  // set by the DB on insert
-	ContentHash         string        `json:"content_hash"` // SHA-256 over stable statement fields — used to prevent duplicate imports
+	OriginalFile        []byte        `json:"-"`                              // Exclude from JSON payload
+	ImportedAt          time.Time     `json:"imported_at"`                    // set by the DB on insert
+	ContentHash         string        `json:"content_hash"`                   // SHA-256 over stable statement fields — used to prevent duplicate imports
 }
 
 func (b *BankStatement) IsValid() error {
@@ -121,6 +124,8 @@ type TransactionFilter struct {
 	Reviewed           *bool          // Filter for reviewed status
 	StatementType      *StatementType // Added to support filtering by statement type (e.g., extra_account)
 	IncludePredictions bool           // <-- NEW Field
+	IncludeShared      bool           // Collaborative Finance: Include transactions from shared categories
+	SubscriptionID     *uuid.UUID     // Filter by linked subscription
 	Limit              int            // Pagination limit
 	Offset             int            // Pagination offset
 }

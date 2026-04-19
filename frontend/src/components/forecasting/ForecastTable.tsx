@@ -3,8 +3,7 @@ import { Zap, TrendingDown, Star, RotateCcw, Trash2, Info, ChevronRight, Search,
 import { Link } from 'react-router-dom';
 import { fmtCurrency, fmtDate } from '../../utils/formatters';
 import CategoryBadge from '../CategoryBadge';
-import type { PredictedTransaction } from '../../api/types';
-
+import type { PredictedTransaction } from "../../api/types/transaction";
 export type ForecastColKey = 'date' | 'description' | 'category' | 'probability' | 'amount';
 
 interface ForecastTableProps {

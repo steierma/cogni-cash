@@ -5,10 +5,16 @@ import {useTranslation} from 'react-i18next';
 import {
     AlertCircle, ArrowRight, Calendar, ChevronRight, Landmark,
     TrendingDown, TrendingUp, Wallet, BarChart3, PieChart,
-    PiggyBank, LayoutDashboard, Unlink, Zap
+    PiggyBank, LayoutDashboard, Unlink, Zap, RefreshCcw
 } from 'lucide-react';
-import {fetchBankStatements, fetchTransactions, fetchAnalytics, fetchPayslips, fetchForecast} from '../api/client';
-import type {BankStatementSummary, Transaction, TransactionAnalytics, Payslip, CashFlowForecast} from '../api/types';
+import { bankService } from '../api/services/bankService';
+import { transactionService } from '../api/services/transactionService';
+import { payslipService } from '../api/services/payslipService';
+import { forecastingService } from '../api/services/forecastingService';
+import { subscriptionService } from '../api/services/subscriptionService';
+import type { BankStatementSummary } from "../api/types/bank";
+import type { Transaction, TransactionAnalytics, CashFlowForecast } from "../api/types/transaction";
+import type { Payslip } from "../api/types/payslip";
 import {fmtCurrency, fmtDate} from '../utils/formatters';
 import CategoryBadge from '../components/CategoryBadge';
 
@@ -147,6 +153,53 @@ function StatementCard({stmt}: { stmt: BankStatementSummary }) {
     );
 }
 
+function SubscriptionSummaryCard() {
+    const {t} = useTranslation();
+    const {data: subscriptions = [], isLoading} = useQuery({
+        queryKey: ['subscriptions'],
+        queryFn: subscriptionService.fetchSubscriptions,
+    });
+
+    const activeSubs = subscriptions.filter(s => s.status === 'active');
+    const totalMonthly = activeSubs.reduce((acc, s) => {
+        const amount = s.amount;
+        if (s.billing_cycle === 'yearly') return acc + (amount / 12);
+        return acc + (amount / (s.billing_interval || 1));
+    }, 0);
+
+    if (isLoading || subscriptions.length === 0) return null;
+
+    return (
+        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6 mb-6">
+            <div className="flex items-center justify-between mb-4">
+                <div className="flex items-center gap-2 text-gray-800 dark:text-gray-200">
+                    <RefreshCcw size={18} className="text-indigo-500 dark:text-indigo-400"/>
+                    <h2 className="text-base font-semibold">{t('layout.subscriptions')}</h2>
+                </div>
+                <Link
+                    to="/subscriptions"
+                    className="text-xs font-medium text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 flex items-center gap-1"
+                >
+                    {t('dashboard.bankStatements.viewAll')} <ChevronRight size={14}/>
+                </Link>
+            </div>
+
+            <div className="flex items-end justify-between">
+                <div>
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-tight">{t('subscriptions.monthlySpend')}</p>
+                    <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
+                        {fmtCurrency(totalMonthly, 'EUR')}
+                    </p>
+                </div>
+                <div className="text-right">
+                    <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-tight">Active Services</p>
+                    <p className="text-lg font-bold text-indigo-600 dark:text-indigo-400">{activeSubs.length}</p>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function ForecastingWidget() {
     const {t} = useTranslation();
     const {data: forecast, isLoading} = useQuery<CashFlowForecast>({
@@ -154,11 +207,11 @@ function ForecastingWidget() {
         queryFn: () => {
             const toDate = new Date();
             toDate.setDate(toDate.getDate() + 30);
-            return fetchForecast(undefined, toDate.toISOString().split('T')[0]);
+            return forecastingService.fetchForecast(undefined, toDate.toISOString().split('T')[0]);
         },
     });
 
-    if (isLoading || !forecast || forecast.predictions.length === 0) return null;
+    if (isLoading || !forecast || !forecast.predictions || forecast.predictions.length === 0) return null;
 
     const upcoming = forecast.predictions.slice(0, 4);
 
@@ -212,22 +265,22 @@ export default function DashboardPage() {
 
     const payslipsQuery = useQuery<Payslip[], Error>({
         queryKey: ['payslips'],
-        queryFn: () => fetchPayslips(),
+        queryFn: () => payslipService.fetchPayslips(),
     });
 
     const statementsQuery = useQuery<BankStatementSummary[]>({
         queryKey: ['bank-statements'],
-        queryFn: fetchBankStatements,
+        queryFn: bankService.fetchStatements,
     });
 
     const transactionsQuery = useQuery<Transaction[]>({
         queryKey: ['transactions', hideReconciled],
-        queryFn: () => fetchTransactions(undefined, hideReconciled),
+        queryFn: () => transactionService.fetchTransactions(undefined, hideReconciled),
     });
 
     const analyticsQuery = useQuery<TransactionAnalytics>({
         queryKey: ['analytics', hideReconciled],
-        queryFn: () => fetchAnalytics(hideReconciled),
+        queryFn: () => transactionService.fetchAnalytics(hideReconciled),
     });
 
     const isLoading = statementsQuery.isLoading || transactionsQuery.isLoading || analyticsQuery.isLoading;
@@ -242,11 +295,11 @@ export default function DashboardPage() {
     const chartData = analytics?.time_series ?? [];
 
     const maxFlowValue = chartData.length
-        ? Math.max(...chartData.flatMap(d => [d.income, d.expense, 1]))
+        ? Math.max(...chartData.flatMap(d => [d.income || 0, d.expense || 0, 1]))
         : 1;
 
-    const maxCategoryValue = analytics?.category_totals?.length
-        ? Math.max(...analytics.category_totals.map(c => c.amount))
+    const maxCategoryValue = (analytics?.category_totals || []).length
+        ? Math.max(...(analytics?.category_totals || []).map(c => c.amount || 0))
         : 1;
 
     return (
@@ -400,9 +453,9 @@ export default function DashboardPage() {
                             <h2 className="text-base font-semibold">{t('dashboard.topCategories.title')}</h2>
                         </div>
 
-                        {analytics.category_totals.length > 0 ? (
+                        {(analytics?.category_totals || []).length > 0 ? (
                             <div className="space-y-4 flex-1 flex flex-col justify-center">
-                                {analytics.category_totals.filter(c => c.type === 'expense').slice(0, 5).map((cat) => (
+                                {(analytics?.category_totals || []).filter(c => c.type === 'expense').slice(0, 5).map((cat) => (
                                     <div key={cat.category}>
                                         <div className="flex justify-between items-end mb-1.5">
                                             <span
@@ -435,6 +488,9 @@ export default function DashboardPage() {
 
             {/* Forecasting Widget */}
             {!isLoading && <ForecastingWidget />}
+
+            {/* Subscriptions Widget */}
+            {!isLoading && <SubscriptionSummaryCard />}
 
             {/* Swipeable Statements Section */}
             <div>

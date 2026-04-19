@@ -31,6 +31,7 @@ type BankStatementService struct {
 	parsers          map[string][]port.BankStatementParser
 	repo             port.BankStatementRepository
 	plannedTxService port.PlannedTransactionUseCase
+	discoveryService port.DiscoveryUseCase
 	aiParser         port.BankStatementAIParser
 	Logger           *slog.Logger
 }
@@ -48,6 +49,11 @@ func NewBankStatementService(repo port.BankStatementRepository, logger *slog.Log
 
 func (s *BankStatementService) WithPlannedTransactionService(svc port.PlannedTransactionUseCase) *BankStatementService {
 	s.plannedTxService = svc
+	return s
+}
+
+func (s *BankStatementService) WithDiscoveryService(svc port.DiscoveryUseCase) *BankStatementService {
+	s.discoveryService = svc
 	return s
 }
 
@@ -281,6 +287,12 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 	if s.plannedTxService != nil && len(stmt.Transactions) > 0 {
 		if err := s.plannedTxService.MatchTransactions(ctx, userID, stmt.Transactions); err != nil {
 			s.Logger.Error("Failed to match planned transactions", "error", err, "user_id", userID)
+		}
+	}
+
+	if s.discoveryService != nil && len(stmt.Transactions) > 0 {
+		if err := s.discoveryService.MatchTransactions(ctx, userID, stmt.Transactions); err != nil {
+			s.Logger.Error("Failed to match subscription transactions", "error", err, "user_id", userID)
 		}
 	}
 

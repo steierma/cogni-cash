@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 
@@ -217,18 +218,30 @@ func (r *BankStatementRepository) FindMatchingCategory(ctx context.Context, user
 	return nil, nil // Not implemented for memory repository
 }
 
-
 func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	tx, ok := r.transactions[hash]
 	if !ok || tx.UserID != userID {
-		return entity.ErrTransactionNotFound
+		return errors.New("transaction not found")
 	}
 	tx.CategoryID = categoryID
 	r.transactions[hash] = tx
 	return nil
 }
+
+func (r *BankStatementRepository) UpdateTransactionSubscription(ctx context.Context, hash string, subID *uuid.UUID, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tx, ok := r.transactions[hash]
+	if !ok || tx.UserID != userID {
+		return errors.New("transaction not found")
+	}
+	tx.SubscriptionID = subID
+	r.transactions[hash] = tx
+	return nil
+}
+
 
 func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	r.mu.Lock()
@@ -328,6 +341,9 @@ func (r *BankStatementRepository) matchFilter(tx entity.Transaction, filter enti
 		return false
 	}
 	if filter.Reviewed != nil && tx.Reviewed != *filter.Reviewed {
+		return false
+	}
+	if filter.SubscriptionID != nil && (tx.SubscriptionID == nil || *tx.SubscriptionID != *filter.SubscriptionID) {
 		return false
 	}
 	if filter.Search != "" {

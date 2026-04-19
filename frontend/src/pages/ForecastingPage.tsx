@@ -26,8 +26,10 @@ import {
     YAxis,
     ReferenceLine
 } from 'recharts';
-import { fetchForecast, excludeForecastProjection, includeForecastProjection, fetchPatternExclusions, includePattern, fetchCategories } from '../api/client';
-import type { CashFlowForecast, PatternExclusion, Category } from '../api/types';
+import { forecastingService } from '../api/services/forecastingService';
+import { categoryService } from '../api/services/categoryService';
+import type { CashFlowForecast, PatternExclusion } from "../api/types/transaction";
+import type { Category } from "../api/types/category";
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 
 interface CustomTooltipProps {
@@ -50,9 +52,9 @@ const CustomTooltip = ({ active, payload, label, t }: CustomTooltipProps) => {
                         +{fmtCurrency(payload[0].payload.income, 'EUR')} {t('dashboard.cashFlow.income')}
                     </p>
                 )}
-                {payload[0].payload.expense < 0 && (
+                {payload[0].payload.expense > 0 && (
                     <p className="text-rose-600 dark:text-rose-400 text-xs">
-                        {fmtCurrency(payload[0].payload.expense, 'EUR')} {t('dashboard.cashFlow.expense')}
+                        -{fmtCurrency(payload[0].payload.expense, 'EUR')} {t('dashboard.cashFlow.expense')}
                     </p>
                 )}
             </div>
@@ -122,7 +124,7 @@ export default function ForecastingPage() {
         queryKey: ['forecast', range, toDateStr],
         queryFn: () => {
             const today = new Date().toISOString().split('T')[0];
-            return fetchForecast(today, toDateStr);
+            return forecastingService.fetchForecast(today, toDateStr);
         },
         staleTime: 5 * 60 * 1000,
         refetchInterval: 60000,
@@ -130,30 +132,30 @@ export default function ForecastingPage() {
 
     const blockedPatternsQuery = useQuery<PatternExclusion[]>({
         queryKey: ['blocked-patterns'],
-        queryFn: fetchPatternExclusions,
+        queryFn: () => forecastingService.fetchPatternExclusions(),
     });
 
     const categoriesQuery = useQuery<Category[]>({
         queryKey: ['categories'],
-        queryFn: fetchCategories,
+        queryFn: () => categoryService.fetchCategories(),
     });
 
     const excludeMutation = useMutation({
-        mutationFn: (id: string) => excludeForecastProjection(id),
+        mutationFn: (id: string) => forecastingService.excludeProjection(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['forecast'] });
         }
     });
 
     const includeMutation = useMutation({
-        mutationFn: (id: string) => includeForecastProjection(id),
+        mutationFn: (id: string) => forecastingService.includeProjection(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['forecast'] });
         }
     });
 
     const includePatternMutation = useMutation({
-        mutationFn: (term: string) => includePattern(term),
+        mutationFn: (term: string) => forecastingService.includePattern(term),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['forecast'] });
             queryClient.invalidateQueries({ queryKey: ['blocked-patterns'] });

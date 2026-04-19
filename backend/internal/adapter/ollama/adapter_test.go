@@ -23,7 +23,7 @@ func (m *mockSettingsRepo) Get(_ context.Context, key string, _ uuid.UUID) (stri
 	return m.settings[key], nil
 }
 
-func (m *mockSettingsRepo) Set(_ context.Context, key, value string, _ uuid.UUID) error {
+func (m *mockSettingsRepo) Set(_ context.Context, key, value string, _ uuid.UUID, isSensitive bool) error {
 	m.settings[key] = value
 	return nil
 }

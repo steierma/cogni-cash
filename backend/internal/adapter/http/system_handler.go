@@ -29,10 +29,10 @@ func (h *Handler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
 	bankProvider := "enablebanking"
 	if h.settingsSvc != nil {
 		userID := h.getUserID(r.Context())
-	if userID == uuid.Nil {
-		writeError(w, http.StatusUnauthorized, "unauthorized")
-		return
-	}
+		if userID == uuid.Nil {
+			writeError(w, http.StatusUnauthorized, "unauthorized")
+			return
+		}
 		if val, err := h.settingsSvc.Get(r.Context(), "bank_provider", userID); err == nil && val != "" {
 			bankProvider = val
 		}
@@ -70,7 +70,16 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	settings, err := h.settingsSvc.GetAll(r.Context(), userID)
+
+	// User laden, um Admin-Status für das Filtern der Settings zu prüfen
+	user, err := h.userSvc.GetUser(r.Context(), userID.String())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify permissions")
+		return
+	}
+	isAdmin := user.Role == "admin"
+
+	settings, err := h.settingsSvc.GetAllMasked(r.Context(), userID, isAdmin)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to load settings")
 		return
@@ -96,7 +105,17 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	if err := h.settingsSvc.UpdateMultiple(r.Context(), payload, userID); err != nil {
+
+	// Fetch user to check role
+	user, err := h.userSvc.GetUser(r.Context(), userID.String())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify permissions")
+		return
+	}
+
+	isAdmin := user.Role == "admin"
+
+	if err := h.settingsSvc.UpdateMultiple(r.Context(), payload, userID, isAdmin); err != nil {
 		writeError(w, http.StatusInternalServerError, "failed to update settings")
 		return
 	}

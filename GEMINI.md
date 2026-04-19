@@ -11,7 +11,7 @@ These instructions are foundational mandates for Gemini CLI. They take absolute 
 ## 2. Development Methodology (TDD)
 - **TDD is Mandatory:** No feature code is written without a failing test first.
 - **Black-Box Testing:** Test domain logic using mocks and `package service_test`.
-- **Validation:** Use `docs/AI_CONSISTENCY_CHECKLIST.md` for any structural or API change.
+- **Validation:** Use docs/processes/AI_CONSISTENCY_CHECKLIST.md for any structural or API change.
 
 ## 3. Project Navigation Guide
 - `backend/`: Go implementation (Hexagonal Architecture).
@@ -43,6 +43,6 @@ These instructions are foundational mandates for Gemini CLI. They take absolute 
 ## 6. Operational Maintenance & Memory
 - **Mandatory Synchronization:** After every significant change:
   1. Update **`MEMORY.md`** (keep it lean, move history to `docs/HISTORY.md`).
-  2. Update **`DATABASE_SCHEMA.md`** after any database migration.
+  2. Update **`docs/` root files** (`DATABASE_SCHEMA.md`, `ARCHITECTURE.md`, `API_REFERENCE.md`, `DEPLOYMENT.md`, etc.) if the change impacts their respective areas.
   3. Update **`README.md`** and **`INSTALL.md`** if features or setup steps change.
   4. Update **`backend/balance/dummy-data.sql`** to maintain test data integrity.

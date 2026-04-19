@@ -65,11 +65,11 @@ func TestTransactionService_AutoCategorize_HybridMatching(t *testing.T) {
 	catGroceries := uuid.New()
 	userID := uuid.New()
 
-	tx1 := entity.Transaction{ContentHash: "h1", Description: "REWE", Amount: -10.0} // Will match in DB
+	tx1 := entity.Transaction{ContentHash: "h1", Description: "REWE", Amount: -10.0}       // Will match in DB
 	tx2 := entity.Transaction{ContentHash: "h2", Description: "New Vendor", Amount: -20.0} // Will NOT match in DB
 
 	repo := &mockRepo{
-		existingTxns: []entity.Transaction{tx1, tx2},
+		existingTxns:   []entity.Transaction{tx1, tx2},
 		findMatchingID: &catGroceries, // Simulate DB match for all queries
 	}
 
@@ -127,4 +127,3 @@ func TestTransactionService_AutoCategorize_HybridMatching(t *testing.T) {
 		t.Error("h2 category not updated from LLM result")
 	}
 }
-

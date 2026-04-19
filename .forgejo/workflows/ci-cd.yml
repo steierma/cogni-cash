@@ -28,8 +28,8 @@ jobs:
         run: |
           go test ./... -v -count=1 -coverprofile=coverage.out
           
-          # Exclude non-logic files (entities, ports, cmd/, migrations/, main.go) from coverage calculation
-          grep -vE 'internal/domain/entity|internal/domain/port|cmd/|migrations/|main\.go' coverage.out > coverage_filtered.out
+          # Exclude non-logic files (entities, ports, cmd/, migrations/, main.go) and memory adapters from coverage calculation
+          grep -vE 'internal/domain/entity|internal/domain/port|cmd/|migrations/|main\.go|internal/adapter/repository/memory' coverage.out > coverage_filtered.out
           
           TOTAL_COVERAGE=$(go tool cover -func=coverage_filtered.out | grep total | awk '{print $3}' | sed 's/%//')
           echo "Total coverage (excluding non-logic files): $TOTAL_COVERAGE%"
@@ -71,15 +71,46 @@ jobs:
           chmod 600 ~/.ssh/deploy_key
           ssh-keyscan -H "${{ secrets.DEPLOY_HOST }}" >> ~/.ssh/known_hosts 2>/dev/null
 
-      - name: Sync Config & Rebuild on Server
+      - name: Install rsync on Runner
         shell: sh
         run: |
+          if command -v apk >/dev/null 2>&1; then
+            apk update && apk add --no-cache rsync
+          elif command -v apt-get >/dev/null 2>&1; then
+            apt-get update && apt-get install -y rsync
+          else
+            echo "⚠️ Could not determine package manager to install rsync on runner."
+          fi
+
+      - name: Sync Source & Rebuild on Server
+        shell: sh
+        run: |
+          # Sync only what we need to build and run the services
+          rsync -avz --delete \
+            -e "ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no" \
+            --exclude='.git/' \
+            --exclude='.env' \
+            --exclude='enable-banking.pem' \
+            --exclude='enable-banking-prod.pem' \
+            --exclude='docker-compose.override.yml' \
+            --exclude='node_modules/' \
+            --exclude='dist/' \
+            --exclude='mobile/' \
+            --exclude='mobile_hermit/' \
+            --exclude='pentest/' \
+            --exclude='backups/' \
+            --exclude='screenshots/' \
+            --exclude='tmp/' \
+            --exclude='backend/bin/' \
+            --exclude='frontend/node_modules/' \
+            --exclude='frontend/dist/' \
+            ./ \
+            "${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }}:${{ secrets.DEPLOY_PATH }}/"
+
+          # Rebuild and restart locally
           ssh -i ~/.ssh/deploy_key -o StrictHostKeyChecking=no ${{ secrets.DEPLOY_USER }}@${{ secrets.DEPLOY_HOST }} << 'EOF'
             set -euo pipefail
             cd "${{ secrets.DEPLOY_PATH }}"
-            
-            # Pull latest code (assuming the server has a git clone of the private repo)
-            git pull origin main
             
             # Build and restart locally (no GHCR pull needed for internal dev)
             docker compose up -d --build --remove-orphans

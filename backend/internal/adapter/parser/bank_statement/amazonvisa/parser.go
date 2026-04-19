@@ -159,7 +159,7 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 	}
 	stmt.OldBalance = stmt.NewBalance - total
 
-		// Validation is now handled globally by BankStatementService calling stmt.IsValid()
+	// Validation is now handled globally by BankStatementService calling stmt.IsValid()
 	p.logger.Info("Successfully parsed Amazon Visa XLS")
 	return stmt, nil
 }

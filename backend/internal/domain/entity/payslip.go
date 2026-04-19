@@ -8,8 +8,8 @@ import (
 
 // Payslip represents a parsed monthly salary statement (generalized for international use).
 type Payslip struct {
-	ID         string    `json:"id"`
-	UserID     uuid.UUID `json:"user_id"`
+	ID     string    `json:"id"`
+	UserID uuid.UUID `json:"user_id"`
 
 	OriginalFileName    string `json:"original_file_name,omitempty"`
 	OriginalFileContent []byte `json:"-"`
@@ -41,21 +41,22 @@ type Bonus struct {
 type PayslipFilter struct {
 	UserID   uuid.UUID
 	Employer string // Optional: Filter by employer name
+	Year     int    // Optional: Filter by period year
 	Limit    int    // Pagination limit
 	Offset   int    // Pagination offset
 }
 
 // PayslipSummary provides pre-calculated statistics for the dashboard/mobile view.
 type PayslipSummary struct {
-	TotalGross    float64 `json:"total_gross"`
-	TotalNet      float64 `json:"total_net"`
-	TotalPayout   float64 `json:"total_payout"`
-	TotalBonuses  float64 `json:"total_bonuses"`
-	PayslipCount  int     `json:"payslip_count"`
-	LatestNetPay  float64 `json:"latest_net_pay"`
-	NetPayTrend   float64 `json:"net_pay_trend"` // Percentage change from previous
-	LatestPeriod  string  `json:"latest_period"`   // YYYY-MM
-	Trends        []PayslipTrend `json:"trends"`   // Last 12 months for charting
+	TotalGross   float64        `json:"total_gross"`
+	TotalNet     float64        `json:"total_net"`
+	TotalPayout  float64        `json:"total_payout"`
+	TotalBonuses float64        `json:"total_bonuses"`
+	PayslipCount int            `json:"payslip_count"`
+	LatestNetPay float64        `json:"latest_net_pay"`
+	NetPayTrend  float64        `json:"net_pay_trend"` // Percentage change from previous
+	LatestPeriod string         `json:"latest_period"` // YYYY-MM
+	Trends       []PayslipTrend `json:"trends"`        // Last 12 months for charting
 }
 
 // PayslipTrend represents a data point for salary charts.

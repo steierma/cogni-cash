@@ -5,17 +5,18 @@ import { useSearchParams } from 'react-router-dom';
 import {
     Trash2, Download, Edit2, Upload, X, Search, Database,
     ChevronUp, ChevronDown, Loader2, Filter, BarChart3,
-    TrendingUp, Store, CheckSquare, Square, Layers, FileText
+    TrendingUp, Store, CheckSquare, Square, Layers, FileText, Share2, Users, Eye
 } from 'lucide-react';
-import { FilePreview } from '../components/FilePreview';
-import {
-    deleteInvoice, fetchInvoices, importInvoice,
-    downloadInvoiceFile, updateInvoice, fetchCategories, getInvoicePreviewUrl,
-    type InvoiceUpdatePayload
-} from '../api/client';
-import { fmtCurrency, fmtDate } from '../utils/formatters';
-import type { Invoice, Category } from '../api/types';
 
+import ShareInvoiceModal from '../components/ShareInvoiceModal';
+import { EditInvoiceModal, PreviewInvoiceModal } from '../components/invoices/InvoiceModals';
+import { invoiceService, type InvoiceUpdatePayload } from '../api/services/invoiceService';
+import { categoryService } from '../api/services/categoryService';
+import { authService } from '../api/services/authService';
+import { fmtCurrency, fmtDate } from '../utils/formatters';
+import type { Invoice } from "../api/types/invoice";
+import type { Category } from "../api/types/category";
+import type { User } from "../api/types/system";
 type SortKey = 'issued_at' | 'vendor' | 'category' | 'description' | 'amount';
 type SortDir = 'asc' | 'desc';
 
@@ -26,10 +27,11 @@ interface FilterState {
     to: string;
     amountMin: string;
     amountMax: string;
+    source: 'all' | 'mine' | 'shared';
 }
 
 const initialFilters: FilterState = {
-    search: '', category: 'all', from: '', to: '', amountMin: '', amountMax: ''
+    search: '', category: 'all', from: '', to: '', amountMin: '', amountMax: '', source: 'all'
 };
 
 export default function InvoicesPage() {
@@ -48,7 +50,8 @@ export default function InvoicesPage() {
             from: searchParams.get('from') || '',
             to: searchParams.get('to') || '',
             amountMin: searchParams.get('amountMin') || '',
-            amountMax: searchParams.get('amountMax') || ''
+            amountMax: searchParams.get('amountMax') || '',
+            source: (searchParams.get('source') as 'all' | 'mine' | 'shared') || 'all'
         };
     }, [searchParams]);
 
@@ -75,6 +78,7 @@ export default function InvoicesPage() {
         if (appliedFilters.to) next.set('to', appliedFilters.to);
         if (appliedFilters.amountMin) next.set('amountMin', appliedFilters.amountMin);
         if (appliedFilters.amountMax) next.set('amountMax', appliedFilters.amountMax);
+        if (appliedFilters.source !== 'all') next.set('source', appliedFilters.source);
         
         if (sortKey !== 'issued_at') next.set('sortKey', sortKey);
         if (sortDir !== 'desc') next.set('sortDir', sortDir);
@@ -91,30 +95,32 @@ export default function InvoicesPage() {
     const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
 
     const [editingInvoice, setEditingInvoice] = useState<Invoice | null>(null);
-    const [editDesc, setEditDesc] = useState('');
-    const [editCatId, setEditCatId] = useState<string>('');
-    const [editVendor, setEditVendor] = useState('');
-    const [editAmount, setEditAmount] = useState('');
-    const [editCurrency, setEditCurrency] = useState('EUR');
-    const [editIssuedAt, setEditIssuedAt] = useState('');
+    const [previewingInvoice, setPreviewingInvoice] = useState<Invoice | null>(null);
+    const [sharingInvoice, setSharingInvoice] = useState<Invoice | null>(null);
 
     const [previewInfo, setPreviewInfo] = useState<{url: string, mimeType: string} | null>(null);
     const [isPreviewLoading, setIsPreviewLoading] = useState<string | null>(null);
 
     // --- Data Fetching ---
     const { data: invoices = [], isLoading } = useQuery({
-        queryKey: ['invoices'],
-        queryFn: fetchInvoices,
+        queryKey: ['invoices', appliedFilters.source],
+        queryFn: () => invoiceService.fetchInvoices(appliedFilters.source),
     });
 
     const { data: categories = [] } = useQuery({
         queryKey: ['categories'],
-        queryFn: fetchCategories,
+        queryFn: categoryService.fetchCategories,
     });
+
+    const { data: me } = useQuery<User, Error>({
+        queryKey: ['me'],
+        queryFn: authService.fetchMe,
+    });
+
 
     // --- Mutations ---
     const deleteMutation = useMutation({
-        mutationFn: deleteInvoice,
+        mutationFn: invoiceService.delete,
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['invoices'] });
             setSelectedIds(new Set());
@@ -122,21 +128,23 @@ export default function InvoicesPage() {
     });
 
     const importMutation = useMutation({
-        mutationFn: importInvoice,
+        mutationFn: invoiceService.import,
         onSuccess: () => qc.invalidateQueries({ queryKey: ['invoices'] }),
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string, data: InvoiceUpdatePayload }) => updateInvoice(id, data),
+        mutationFn: ({ id, data }: { id: string, data: InvoiceUpdatePayload }) => invoiceService.update(id, data),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['invoices'] });
             setEditingInvoice(null);
+            setPreviewingInvoice(null);
+            closePreview();
         },
     });
 
     const batchCatMutation = useMutation({
         mutationFn: async ({ ids, categoryId }: { ids: string[]; categoryId: string }) => {
-            await Promise.all(ids.map(id => updateInvoice(id, { category_id: categoryId || null })));
+            await Promise.all(ids.map(id => invoiceService.update(id, { category_id: categoryId || null })));
         },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['invoices'] });
@@ -165,37 +173,12 @@ export default function InvoicesPage() {
         if (e.dataTransfer.files?.length > 0) handleFiles(e.dataTransfer.files);
     };
 
-    const openEditModal = (inv: Invoice) => {
-        setEditingInvoice(inv);
-        setEditDesc(inv.description || '');
-        setEditCatId(inv.category_id || '');
-        setEditVendor(inv.vendor?.name || '');
-        setEditAmount(inv.amount != null ? String(inv.amount) : '');
-        setEditCurrency(inv.currency || 'EUR');
-        setEditIssuedAt(inv.issued_at ? inv.issued_at.slice(0, 10) : '');
-    };
-
-    const handleSaveEdit = () => {
-        if (!editingInvoice) return;
-        const parsedAmount = parseFloat(editAmount.replace(',', '.'));
-        updateMutation.mutate({
-            id: editingInvoice.id,
-            data: {
-                vendor: { id: editingInvoice.vendor?.id ?? '', name: editVendor },
-                description: editDesc,
-                category_id: editCatId || null,
-                amount: isNaN(parsedAmount) ? editingInvoice.amount : parsedAmount,
-                currency: editCurrency || editingInvoice.currency,
-                issued_at: editIssuedAt || editingInvoice.issued_at,
-            }
-        });
-    };
-
-    const handlePreview = async (id: string) => {
+    const handlePreview = async (inv: Invoice) => {
         try {
-            setIsPreviewLoading(id);
-            const info = await getInvoicePreviewUrl(id);
+            setIsPreviewLoading(inv.id);
+            const info = await invoiceService.getPreviewUrl(inv.id);
             setPreviewInfo(info);
+            setPreviewingInvoice(inv);
         } catch {
             alert(t('invoices.previewFailed'));
         } finally {
@@ -206,6 +189,7 @@ export default function InvoicesPage() {
     const closePreview = () => {
         if (previewInfo) URL.revokeObjectURL(previewInfo.url);
         setPreviewInfo(null);
+        setPreviewingInvoice(null);
     };
 
     const toggleSort = (key: SortKey) => {
@@ -249,6 +233,12 @@ export default function InvoicesPage() {
         if (appliedFilters.category !== 'all') {
             if (appliedFilters.category === 'uncategorized') rows = rows.filter((inv) => !inv.category_id);
             else rows = rows.filter((inv) => inv.category_id === appliedFilters.category);
+        }
+
+        if (appliedFilters.source === 'mine') {
+            rows = rows.filter((inv) => inv.user_id === me?.id);
+        } else if (appliedFilters.source === 'shared') {
+            rows = rows.filter((inv) => inv.user_id !== me?.id);
         }
 
         const day = (d: string) => d?.length > 10 ? d.slice(0, 10) : d;
@@ -412,8 +402,8 @@ export default function InvoicesPage() {
                     </div>
                 </div>
 
-                {/* Row 1: Search & Category */}
-                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+                {/* Row 1: Search & Category & Source */}
+                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
                     <div className="relative sm:col-span-2">
                         <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 dark:text-gray-500" />
                         <input
@@ -432,6 +422,17 @@ export default function InvoicesPage() {
                             <option value="all">{t('transactions.filters.allCategories')}</option>
                             <option value="uncategorized">⚠️ {t('transactions.filters.uncategorizedOnly')}</option>
                             {categories.filter(c => !c.deleted_at || c.id === draftFilters.category).map((c: Category) => <option key={c.id} value={c.id}>{c.name}</option>)}
+                        </select>
+                    </div>
+                    <div>
+                        <select
+                            value={draftFilters.source}
+                            onChange={(e) => setDraftFilters(f => ({ ...f, source: e.target.value as any }))}
+                            className="w-full py-2 px-3 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500/50"
+                        >
+                            <option value="all">{t('sharing.filters.all', 'All Invoices')}</option>
+                            <option value="mine">{t('sharing.filters.mine', 'My Invoices')}</option>
+                            <option value="shared">{t('sharing.filters.shared', 'Shared with me')}</option>
                         </select>
                     </div>
                 </div>
@@ -641,7 +642,14 @@ export default function InvoicesPage() {
                                             {fmtDate(inv.issued_at, 'short')}
                                         </td>
                                         <td className="px-4 py-3 text-gray-800 dark:text-gray-200 font-medium whitespace-nowrap">
-                                            {inv.vendor?.name || t('invoices.unknownVendor')}
+                                            <div className="flex items-center gap-2">
+                                                {inv.user_id !== me?.id && (
+                                                    <span title={t('transactions.table.shared')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 uppercase tracking-tighter">
+                                                        <Users size={9} /> {t('transactions.table.shared')}
+                                                    </span>
+                                                )}
+                                                {inv.vendor?.name || t('invoices.unknownVendor')}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-3">
                                             <select
@@ -665,22 +673,29 @@ export default function InvoicesPage() {
                                         <td className="px-4 py-3 text-right">
                                             <div className="flex justify-end space-x-1">
                                                 <button
-                                                    onClick={() => handlePreview(inv.id)}
+                                                    onClick={() => handlePreview(inv)}
                                                     disabled={isPreviewLoading === inv.id}
                                                     title={t('invoices.preview')}
                                                     className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-fuchsia-600 dark:hover:text-fuchsia-400 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 rounded-lg transition-colors disabled:opacity-50"
                                                 >
-                                                    {isPreviewLoading === inv.id ? <Loader2 size={16} className="animate-spin" /> : <FileText size={16} />}
+                                                    {isPreviewLoading === inv.id ? <Loader2 size={16} className="animate-spin" /> : <Eye size={16} />}
                                                 </button>
                                                 <button
-                                                    onClick={() => downloadInvoiceFile(inv.id, inv.vendor?.name)}
+                                                    onClick={() => invoiceService.downloadFile(inv.id, inv.vendor?.name)}
                                                     title={t('invoices.download')}
                                                     className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
                                                 >
                                                     <Download size={16} />
                                                 </button>
                                                 <button
-                                                    onClick={() => openEditModal(inv)}
+                                                    onClick={() => setSharingInvoice(inv)}
+                                                    title={t('common.share')}
+                                                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                >
+                                                    <Share2 size={16} />
+                                                </button>
+                                                <button
+                                                    onClick={() => setEditingInvoice(inv)}
                                                     title={t('invoices.edit')}
                                                     className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
                                                 >
@@ -749,127 +764,36 @@ export default function InvoicesPage() {
                 </div>
             )}
 
-            {/* Edit Modal */}
+            {/* Modals */}
             {editingInvoice && (
-                <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-xl w-full max-w-lg border border-gray-100 dark:border-gray-800">
-                        <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                                <Edit2 size={18} className="text-indigo-500" />
-                                {t('invoices.editTitle')}
-                            </h3>
-                            <button onClick={() => setEditingInvoice(null)} className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="p-4 space-y-4">
-                            {/* Vendor */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('invoices.vendor')}</label>
-                                <input
-                                    type="text"
-                                    value={editVendor}
-                                    onChange={(e) => setEditVendor(e.target.value)}
-                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent block p-2.5 outline-none"
-                                />
-                            </div>
-                            {/* Date */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('invoices.date')}</label>
-                                <input
-                                    type="date"
-                                    value={editIssuedAt}
-                                    onChange={(e) => setEditIssuedAt(e.target.value)}
-                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent block p-2.5 outline-none [color-scheme:light] dark:[color-scheme:dark]"
-                                />
-                            </div>
-                            {/* Amount + Currency */}
-                            <div className="grid grid-cols-3 gap-3">
-                                <div className="col-span-2">
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('invoices.amount')}</label>
-                                    <input
-                                        type="number"
-                                        step="0.01"
-                                        value={editAmount}
-                                        onChange={(e) => setEditAmount(e.target.value)}
-                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent block p-2.5 outline-none font-mono"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('invoices.currency')}</label>
-                                    <input
-                                        type="text"
-                                        maxLength={3}
-                                        value={editCurrency}
-                                        onChange={(e) => setEditCurrency(e.target.value.toUpperCase())}
-                                        className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent block p-2.5 outline-none font-mono uppercase"
-                                    />
-                                </div>
-                            </div>
-                            {/* Category */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('invoices.category')}</label>
-                                <select
-                                    value={editCatId}
-                                    onChange={(e) => setEditCatId(e.target.value)}
-                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent block p-2.5 outline-none"
-                                >
-                                    <option value="">{t('common.none')}</option>
-                                    {categories.filter(c => !c.deleted_at || c.id === editCatId).map((c: Category) => (
-                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            {/* Description */}
-                            <div>
-                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('invoices.description')}</label>
-                                <textarea
-                                    value={editDesc}
-                                    onChange={(e) => setEditDesc(e.target.value)}
-                                    rows={3}
-                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-900 dark:text-gray-100 text-sm rounded-xl focus:ring-2 focus:ring-indigo-500 focus:border-transparent block p-2.5 outline-none resize-none"
-                                />
-                            </div>
-                        </div>
-                        <div className="flex items-center justify-end space-x-3 p-4 border-t border-gray-100 dark:border-gray-800">
-                            <button
-                                onClick={() => setEditingInvoice(null)}
-                                className="px-4 py-2 text-sm font-medium text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-xl transition-colors"
-                            >
-                                {t('common.cancel')}
-                            </button>
-                            <button
-                                onClick={handleSaveEdit}
-                                disabled={updateMutation.isPending}
-                                className="px-4 py-2 text-sm font-medium text-white bg-indigo-600 hover:bg-indigo-700 rounded-xl transition-colors disabled:opacity-50 flex items-center gap-2"
-                            >
-                                {updateMutation.isPending && <Loader2 size={14} className="animate-spin" />}
-                                {t('common.save')}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <EditInvoiceModal 
+                    invoice={editingInvoice}
+                    categories={categories}
+                    onClose={() => setEditingInvoice(null)}
+                    onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                    isPending={updateMutation.isPending}
+                />
             )}
 
-            {/* PDF Preview Modal */}
-            {previewInfo && (
-                <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
-                        <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                            <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                                <FileText className="text-fuchsia-500" size={20} />
-                                {t('invoices.previewTitle')}
-                            </h3>
-                            <button onClick={closePreview} className="text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
-                                <X size={20} />
-                            </button>
-                        </div>
-                        <div className="flex-1 w-full bg-gray-200 dark:bg-gray-950 p-2 sm:p-4">
-                            <FilePreview url={previewInfo.url} mimeType={previewInfo.mimeType} title={t('invoices.previewTitle')} />
-                        </div>
-                    </div>
-                </div>
+            {previewingInvoice && previewInfo && (
+                <PreviewInvoiceModal
+                    invoice={previewingInvoice}
+                    previewUrl={previewInfo.url}
+                    mimeType={previewInfo.mimeType}
+                    categories={categories}
+                    onClose={closePreview}
+                    onUpdate={(id, data) => updateMutation.mutate({ id, data })}
+                    isPending={updateMutation.isPending}
+                />
             )}
-        </div>
-    );
-}
+
+            {/* Sharing Modal */}
+            {sharingInvoice && (
+                <ShareInvoiceModal
+                    invoice={sharingInvoice}
+                    onClose={() => setSharingInvoice(null)}
+                />
+            )}
+            </div>
+            );
+            }

@@ -1,10 +1,12 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
-import { Check, Pencil, Plus, Trash2, X, Tags, RotateCcw, Eye, EyeOff, ArrowRight } from 'lucide-react';
-import { createCategory, deleteCategory, fetchCategories, updateCategory, restoreCategory } from '../api/client';
-import type { Category } from '../api/types';
+import { Check, Pencil, Plus, Trash2, X, Tags, RotateCcw, Eye, EyeOff, ArrowRight, Users, Loader2 } from 'lucide-react';
+import { categoryService } from '../api/services/categoryService';
+import type { Category } from "../api/types/category";
+import ShareCategoryModal from '../components/ShareCategoryModal';
+import { fmtCurrency } from '../utils/formatters';
 
 const PALETTE = [
     '#6366f1', '#8b5cf6', '#ec4899', '#f97316', '#f59e0b',
@@ -37,22 +39,65 @@ function ColorPicker({ value, onChange }: { value: string; onChange: (c: string)
     );
 }
 
+function StrategyPreview({ categoryId, strategy }: { categoryId?: string; strategy: string }) {
+    const { t } = useTranslation();
+    const [debouncedStrategy, setDebouncedStrategy] = useState(strategy);
+
+    useEffect(() => {
+        const timer = setTimeout(() => {
+            if (/^(\d+[my]|all)$/.test(strategy)) {
+                setDebouncedStrategy(strategy);
+            }
+        }, 500);
+        return () => clearTimeout(timer);
+    }, [strategy]);
+
+    const { data, isLoading, isError } = useQuery({
+        queryKey: ['category-average', categoryId, debouncedStrategy],
+        queryFn: () => categoryService.fetchAverage(categoryId!, debouncedStrategy),
+        enabled: !!categoryId && /^(\d+[my]|all)$/.test(debouncedStrategy),
+        staleTime: 30000,
+    });
+
+    if (!/^(\d+[my]|all)$/.test(strategy)) return null;
+
+    return (
+        <div className="mt-1.5 flex items-center gap-2 min-h-[1.5rem]">
+            <span className="text-[10px] font-bold text-indigo-600 dark:text-indigo-400 uppercase tracking-tight">
+                {t('categories.predictionPreview')}:
+            </span>
+            {isLoading ? (
+                <Loader2 size={12} className="animate-spin text-gray-400" />
+            ) : isError ? (
+                <span className="text-[10px] text-red-500">—</span>
+            ) : (
+                <span className="text-xs font-semibold text-gray-900 dark:text-gray-100">
+                    {fmtCurrency(data?.average ?? 0)} / {t('forecasting.average').toLowerCase()}
+                </span>
+            )}
+        </div>
+    );
+}
+
 function CategoryRow({
                          cat,
                          onSaved,
                          onDelete,
                          onRestore,
+                         onShare,
                      }: {
     cat: Category;
-    onSaved: (id: string, name: string, color: string, isVariable: boolean) => void;
+    onSaved: (id: string, name: string, color: string, isVariable: boolean, strategy: string) => void;
     onDelete: (id: string) => void;
     onRestore: (id: string) => void;
+    onShare: (cat: Category) => void;
 }) {
     const { t } = useTranslation();
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(cat.name);
     const [editColor, setEditColor] = useState(cat.color);
     const [editIsVariable, setEditIsVariable] = useState(cat.is_variable_spending);
+    const [editStrategy, setEditStrategy] = useState(cat.forecast_strategy || '3y');
     const isDeleted = !!cat.deleted_at;
 
     if (isEditing) {
@@ -60,7 +105,7 @@ function CategoryRow({
             <tr className="bg-gray-50 dark:bg-gray-800/50">
                 <td colSpan={3} className="px-4 py-4">
                     <div className="space-y-4">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
                                 <input
@@ -83,6 +128,28 @@ function CategoryRow({
                                     <span className="text-sm text-gray-600 dark:text-gray-400">{t('categories.variableSpendingLabel')}</span>
                                 </div>
                             </div>
+                            {editIsVariable && (
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('categories.forecastStrategy')}</label>
+                                    <div className="flex flex-col gap-1">
+                                        <input
+                                            type="text"
+                                            value={editStrategy}
+                                            onChange={(e) => setEditStrategy(e.target.value)}
+                                            placeholder="e.g. 6m, 1y, all"
+                                            className={`w-full px-3 py-2 text-sm rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 ${
+                                                !/^(\d+[my]|all)$/.test(editStrategy) ? 'border-red-500' : 'border-gray-200 dark:border-gray-700'
+                                            }`}
+                                        />
+                                        <div className="flex flex-col">
+                                            <p className="text-[10px] text-gray-400 leading-tight">
+                                                {t('categories.forecastStrategyHelp')}
+                                            </p>
+                                            <StrategyPreview categoryId={cat.id} strategy={editStrategy} />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                         <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{t('common.color')}</label>
@@ -91,7 +158,7 @@ function CategoryRow({
                         <div className="flex items-center gap-2 pt-2">
                             <button
                                 onClick={() => {
-                                    onSaved(cat.id, editName, editColor, editIsVariable);
+                                    onSaved(cat.id, editName, editColor, editIsVariable, editStrategy);
                                     setIsEditing(false);
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-green-600 hover:bg-green-700 text-white text-sm font-medium rounded-lg transition-colors"
@@ -103,6 +170,7 @@ function CategoryRow({
                                     setEditName(cat.name);
                                     setEditColor(cat.color);
                                     setEditIsVariable(cat.is_variable_spending);
+                                    setEditStrategy(cat.forecast_strategy || '3y');
                                     setIsEditing(false);
                                 }}
                                 className="flex items-center gap-1.5 px-3 py-1.5 bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600 text-gray-800 dark:text-gray-200 text-sm font-medium rounded-lg transition-colors"
@@ -128,6 +196,11 @@ function CategoryRow({
                         {cat.is_variable_spending && (
                             <span className="text-[10px] text-indigo-500 font-bold uppercase tracking-tighter">
                                 {t('categories.isVariableSpending')}
+                            </span>
+                        )}
+                        {cat.is_shared && (
+                            <span className="text-[10px] text-green-500 font-bold uppercase tracking-tighter flex items-center gap-0.5">
+                                <Users size={10} /> {t('categories.shared')}
                             </span>
                         )}
                         {isDeleted && (
@@ -156,6 +229,13 @@ function CategoryRow({
                         >
                             <ArrowRight size={16} />
                         </Link>
+                        <button
+                            onClick={() => onShare(cat)}
+                            className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-green-600 dark:hover:text-green-400 hover:bg-green-50 dark:hover:bg-green-900/30 rounded-lg transition-colors mr-2"
+                            title={t('categories.share')}
+                        >
+                            <Users size={16} />
+                        </button>
                         <button
                             onClick={() => setIsEditing(true)}
                             className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/30 rounded-lg transition-colors mr-2"
@@ -192,40 +272,43 @@ export default function CategoriesPage() {
     const [newName, setNewName] = useState('');
     const [newColor, setNewColor] = useState(PALETTE[0]);
     const [newIsVariable, setNewIsVariable] = useState(false);
+    const [newStrategy, setNewStrategy] = useState('3y');
     const [showDeleted, setShowDeleted] = useState(false);
+    const [shareTarget, setShareTarget] = useState<Category | null>(null);
 
     const { data: categories = [], isLoading } = useQuery({
         queryKey: ['categories'],
-        queryFn: fetchCategories,
+        queryFn: () => categoryService.fetchCategories(),
     });
 
     const createMut = useMutation({
-        mutationFn: (c: { name: string; color: string; isVariable: boolean }) => createCategory(c.name, c.color, c.isVariable),
+        mutationFn: (c: { name: string; color: string; isVariable: boolean; strategy: string }) => categoryService.create(c.name, c.color, c.isVariable, c.strategy),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
     });
 
     const updateMut = useMutation({
-        mutationFn: (c: { id: string; name: string; color: string; isVariable: boolean }) => updateCategory(c.id, c.name, c.color, c.isVariable),
+        mutationFn: (c: { id: string; name: string; color: string; isVariable: boolean; strategy: string }) => categoryService.update(c.id, c.name, c.color, c.isVariable, c.strategy),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
     });
 
     const deleteMut = useMutation({
-        mutationFn: deleteCategory,
+        mutationFn: (id: string) => categoryService.delete(id),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
     });
 
     const restoreMut = useMutation({
-        mutationFn: restoreCategory,
+        mutationFn: (id: string) => categoryService.restore(id),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['categories'] }),
     });
 
     const handleCreate = () => {
         if (!newName.trim()) return;
-        createMut.mutate({ name: newName.trim(), color: newColor, isVariable: newIsVariable });
+        createMut.mutate({ name: newName.trim(), color: newColor, isVariable: newIsVariable, strategy: newStrategy });
         setIsCreating(false);
         setNewName('');
         setNewColor(PALETTE[0]);
         setNewIsVariable(false);
+        setNewStrategy('3y');
     };
 
     const sorted = categories
@@ -275,7 +358,7 @@ export default function CategoriesPage() {
                 <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-5 shadow-sm">
                     <h3 className="font-semibold text-gray-900 dark:text-gray-100 mb-4">{t('categories.createCategory')}</h3>
                     <div className="space-y-4 max-w-lg">
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                             <div>
                                 <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('common.name')}</label>
                                 <input
@@ -298,11 +381,33 @@ export default function CategoriesPage() {
                                     />
                                     <span className="text-sm text-gray-600 dark:text-gray-400">{t('categories.variableSpendingLabel')}</span>
                                 </div>
-                                <p className="text-[10px] text-gray-400 leading-tight">
-                                    {t('categories.variableSpendingHelp')}
-                                </p>
                             </div>
+                            {newIsVariable && (
+                                <div>
+                                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">{t('categories.forecastStrategy')}</label>
+                                    <div className="flex flex-col gap-1">
+                                        <input
+                                            type="text"
+                                            value={newStrategy}
+                                            onChange={(e) => setNewStrategy(e.target.value)}
+                                            placeholder="e.g. 6m, 1y, all"
+                                            className={`w-full px-3 py-2 text-sm rounded-lg border bg-white dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 ${
+                                                !/^(\d+[my]|all)$/.test(newStrategy) ? 'border-red-500' : 'border-gray-200 dark:border-gray-700'
+                                            }`}
+                                        />
+                                        <div className="flex flex-col">
+                                            <p className="text-[10px] text-gray-400 leading-tight">
+                                                {t('categories.forecastStrategyHelp')}
+                                            </p>
+                                            <StrategyPreview strategy={newStrategy} />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
+                        <p className="text-[10px] text-gray-400 leading-tight">
+                            {t('categories.variableSpendingHelp')}
+                        </p>
                         <div>
                             <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-2">{t('common.color')}</label>
                             <ColorPicker value={newColor} onChange={setNewColor} />
@@ -343,7 +448,7 @@ export default function CategoriesPage() {
                             <CategoryRow
                                 key={cat.id}
                                 cat={cat}
-                                onSaved={(id, name, color, isVariable) => updateMut.mutate({ id, name, color, isVariable })}
+                                onSaved={(id, name, color, isVariable, strategy) => updateMut.mutate({ id, name, color, isVariable, strategy })}
                                 onDelete={(id) => {
                                     const targetCat = categories.find(c => c.id === id);
                                     if (targetCat && confirm(t('categories.deleteConfirm', { name: targetCat.name }))) {
@@ -356,6 +461,7 @@ export default function CategoriesPage() {
                                         restoreMut.mutate(id);
                                     }
                                 }}
+                                onShare={(c) => setShareTarget(c)}
                             />
                         ))}
                         </tbody>
@@ -370,6 +476,13 @@ export default function CategoriesPage() {
                 <div className="p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl text-red-700 dark:text-red-400 text-sm mt-4">
                     {t('common.errorUpdateDb')}
                 </div>
+            )}
+
+            {shareTarget && (
+                <ShareCategoryModal
+                    category={shareTarget}
+                    onClose={() => setShareTarget(null)}
+                />
             )}
         </div>
     );

@@ -1,9 +1,9 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { Plus, Edit2, Trash2, CheckCircle2, Clock, AlertCircle } from 'lucide-react';
-import { fetchPlannedTransactions, createPlannedTransaction, updatePlannedTransaction, deletePlannedTransaction } from '../../api/client';
-import type { PlannedTransaction, CreatePlannedTransactionRequest, UpdatePlannedTransactionRequest } from '../../api/types';
+import { Plus, Edit2, Trash2, CheckCircle2, Clock, AlertCircle, Repeat } from 'lucide-react';
+import { forecastingService } from '../../api/services/forecastingService';
+import type { PlannedTransaction, CreatePlannedTransactionRequest, UpdatePlannedTransactionRequest } from "../../api/types/transaction";
 import { fmtCurrency, fmtDate } from '../../utils/formatters';
 import CategoryBadge from '../CategoryBadge';
 import PlannedTransactionModal from './PlannedTransactionModal';
@@ -16,11 +16,11 @@ export default function PlannedTransactionsList() {
 
     const { data: transactions = [], isLoading } = useQuery({
         queryKey: ['planned-transactions'],
-        queryFn: fetchPlannedTransactions,
+        queryFn: forecastingService.fetchPlannedTransactions,
     });
 
     const createMutation = useMutation({
-        mutationFn: (data: CreatePlannedTransactionRequest) => createPlannedTransaction(data),
+        mutationFn: (data: CreatePlannedTransactionRequest) => forecastingService.createPlannedTransaction(data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['planned-transactions'] });
             queryClient.invalidateQueries({ queryKey: ['forecast'] });
@@ -28,7 +28,7 @@ export default function PlannedTransactionsList() {
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: UpdatePlannedTransactionRequest }) => updatePlannedTransaction(id, data),
+        mutationFn: ({ id, data }: { id: string; data: UpdatePlannedTransactionRequest }) => forecastingService.updatePlannedTransaction(id, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['planned-transactions'] });
             queryClient.invalidateQueries({ queryKey: ['forecast'] });
@@ -36,7 +36,7 @@ export default function PlannedTransactionsList() {
     });
 
     const deleteMutation = useMutation({
-        mutationFn: (id: string) => deletePlannedTransaction(id),
+        mutationFn: (id: string) => forecastingService.deletePlannedTransaction(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['planned-transactions'] });
             queryClient.invalidateQueries({ queryKey: ['forecast'] });
@@ -116,7 +116,26 @@ export default function PlannedTransactionsList() {
                                             {fmtDate(tx.date)}
                                         </td>
                                         <td className="px-6 py-4 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                            {tx.description}
+                                            <div className="flex flex-col">
+                                                <span>{tx.description}</span>
+                                                {tx.interval_months > 0 && (
+                                                    <span className="text-[10px] text-indigo-500 dark:text-indigo-400 flex items-center gap-1 uppercase tracking-wider mt-0.5">
+                                                        <Repeat size={10} />
+                                                        {tx.interval_months === 1 ? t('forecasting.interval.monthly') :
+                                                         tx.interval_months === 3 ? t('forecasting.interval.quarterly') :
+                                                         tx.interval_months === 6 ? t('forecasting.interval.halfYearly') :
+                                                         tx.interval_months === 12 ? t('forecasting.interval.yearly') :
+                                                         `${tx.interval_months} ${t('common.months')}`}
+                                                        {tx.end_date && ` • ${t('forecasting.until')} ${fmtDate(tx.end_date)}`}
+                                                    </span>
+                                                )}
+                                                {tx.is_superseded && (
+                                                    <span className="text-[10px] text-amber-500 flex items-center gap-1 uppercase tracking-wider mt-0.5">
+                                                        <AlertCircle size={10} />
+                                                        {t('forecasting.superseded', 'Superseded by auto-forecast')}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-6 py-4">
                                             <CategoryBadge category={tx.category_id} />

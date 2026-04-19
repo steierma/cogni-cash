@@ -52,6 +52,15 @@ var ErrReconciliationNotFound = errors.New("reconciliation not found")
 // ErrTransactionNotFound is returned when a referenced transaction cannot be located.
 var ErrTransactionNotFound = errors.New("transaction not found")
 
+// ErrDocumentNotFound is returned when a referenced document cannot be located.
+var ErrDocumentNotFound = errors.New("document not found")
+
+// ErrDocumentDuplicate is returned when a document with the same content hash already exists.
+var ErrDocumentDuplicate = errors.New("document already exists (duplicate)")
+
+// ErrSubscriptionNotFound is returned when a referenced subscription cannot be located.
+var ErrSubscriptionNotFound = errors.New("subscription not found")
+
 // ErrPlannedTransactionNotFound is returned when a referenced planned transaction cannot be located.
 var ErrPlannedTransactionNotFound = errors.New("planned transaction not found")
 
@@ -66,4 +75,3 @@ var ErrInvalidCredentials = errors.New("invalid username or password")
 
 // ErrResetTokenInvalid is returned when a password reset token is missing, expired, or incorrect.
 var ErrResetTokenInvalid = errors.New("invalid or expired reset token")
-

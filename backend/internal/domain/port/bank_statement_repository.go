@@ -20,6 +20,7 @@ type BankStatementRepository interface {
 	GetCategorizationExamples(ctx context.Context, userID uuid.UUID, examplesCount int) ([]entity.CategorizationExample, error)
 	FindMatchingCategory(ctx context.Context, userID uuid.UUID, txn TransactionToCategorize) (*uuid.UUID, error)
 	UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
+	UpdateTransactionSubscription(ctx context.Context, contentHash string, subscriptionID *uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReviewed(ctx context.Context, contentHash string, userID uuid.UUID) error
 	UpdateTransactionSkipForecasting(ctx context.Context, contentHash string, skip bool, userID uuid.UUID) error

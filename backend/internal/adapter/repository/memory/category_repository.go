@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
@@ -81,7 +82,7 @@ func (r *CategoryRepository) FindAll(ctx context.Context, userID uuid.UUID) ([]e
 	defer r.mu.RUnlock()
 	var categories []entity.Category
 	for _, c := range r.categories {
-		if c.UserID == userID {
+		if c.UserID == userID && c.DeletedAt == nil {
 			categories = append(categories, c)
 		}
 	}
@@ -95,7 +96,9 @@ func (r *CategoryRepository) Delete(ctx context.Context, id uuid.UUID, userID uu
 	if !ok || category.UserID != userID {
 		return entity.ErrCategoryNotFound
 	}
-	delete(r.categories, id)
+	now := time.Now()
+	category.DeletedAt = &now
+	r.categories[id] = category
 	return nil
 }
 

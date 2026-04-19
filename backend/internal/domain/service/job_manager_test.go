@@ -114,4 +114,3 @@ func TestTransactionService_CancelJob(t *testing.T) {
 		t.Errorf("expected idle status, got %q", status.Status)
 	}
 }
-

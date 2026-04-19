@@ -1,19 +1,18 @@
 package cariad
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"regexp"
 	"strconv"
 	"strings"
 
+	"cogni-cash/internal/adapter/parser/pdfutil"
 	"cogni-cash/internal/domain/entity"
 
 	"log/slog"
 
 	"github.com/google/uuid"
-	"github.com/ledongthuc/pdf"
 )
 
 var (
@@ -35,7 +34,7 @@ func NewParser(logger *slog.Logger) *Parser {
 
 func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity.Payslip, error) {
 	p.Logger.Info("Parsing CARIAD Payslip PDF")
-	raw, err := extractRawText(fileBytes)
+	raw, err := pdfutil.ExtractText(fileBytes)
 	if err != nil {
 		p.Logger.Error("Failed to extract text from Payslip", "error", err)
 		return entity.Payslip{}, fmt.Errorf("cariad parser: extract text: %w", err)
@@ -75,31 +74,6 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 
 	p.Logger.Info("Successfully parsed Payslip", "monthNum", payslip.PeriodMonthNum, "net_pay", payslip.NetPay)
 	return payslip, nil
-}
-
-// ---- text extraction -------------------------------------------------------
-
-func extractRawText(fileBytes []byte) (string, error) {
-	readerAt := bytes.NewReader(fileBytes)
-	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
-	if err != nil {
-		return "", err
-	}
-
-	var rawBuilder strings.Builder
-	for i := 1; i <= r.NumPage(); i++ {
-		page := r.Page(i)
-		if page.V.IsNull() {
-			continue
-		}
-		text, err := page.GetPlainText(nil)
-		if err != nil {
-			continue
-		}
-		rawBuilder.WriteString(text)
-		rawBuilder.WriteString("\n")
-	}
-	return rawBuilder.String(), nil
 }
 
 // ---- targeted window scanners ----------------------------------------------

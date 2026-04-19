@@ -84,7 +84,8 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 	if !inv.IssuedAt.IsZero() {
 		issuedAt = &inv.IssuedAt
 	}
-	r.Logger.Info("Updating invoice", "id", inv.ID, "user_id", inv.UserID)
+	r.Logger.Info("Updating invoice (checking permissions)", "id", inv.ID, "user_id", inv.UserID)
+	// Permission check: either the owner or someone with 'edit' permission can update.
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE invoices SET
 			category_id  = $2,
@@ -93,7 +94,11 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 			currency     = $5,
 			invoice_date = $6,
 			description  = $7
-		WHERE id = $1 AND user_id = $8`,
+		WHERE id = $1 AND (
+			user_id = $8 
+			OR id IN (SELECT invoice_id FROM shared_invoices WHERE shared_with_user_id = $8 AND permission_level = 'edit')
+			OR category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $8 AND permission_level = 'edit')
+		)`,
 		inv.ID, inv.CategoryID, inv.Vendor.Name, inv.Amount, inv.Currency, issuedAt, inv.Description, inv.UserID,
 	)
 	if err != nil {
@@ -105,15 +110,24 @@ func (r *InvoiceRepository) Update(ctx context.Context, inv entity.Invoice) erro
 	return nil
 }
 
-// FindByID retrieves a single Invoice by UUID.
+// FindByID retrieves a single Invoice by UUID, including shared ones.
 func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error) {
-	r.Logger.Info("Finding invoice by ID", "id", id, "user_id", userID)
+	r.Logger.Info("Finding invoice by ID (including shared)", "id", id, "user_id", userID)
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, category_id, vendor, amount, currency, invoice_date,
-		       content_hash, original_file_name,
-		       description
-		FROM invoices WHERE id = $1 AND user_id = $2`, id, userID)
-	inv, err := scanInvoice(row)
+		SELECT 
+			i.id, i.user_id, i.category_id, i.vendor, i.amount, i.currency, i.invoice_date,
+			i.content_hash, i.original_file_name,
+			i.description,
+			(i.user_id != $2) as is_shared,
+			COALESCE((SELECT array_agg(shared_with_user_id) FROM shared_invoices WHERE invoice_id = i.id), '{}') as shared_with,
+			i.user_id as owner_id
+		FROM invoices i 
+		WHERE i.id = $1 AND (
+			i.user_id = $2 
+			OR i.id IN (SELECT invoice_id FROM shared_invoices WHERE shared_with_user_id = $2)
+			OR i.category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $2)
+		)`, id, userID)
+	inv, err := scanInvoiceWithSharing(row)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.Invoice{}, entity.ErrInvoiceNotFound
@@ -123,19 +137,38 @@ func (r *InvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID u
 	return inv, nil
 }
 
-// FindAll returns all Invoices ordered by creation time descending.
+// FindAll returns all Invoices (owned and shared) ordered by creation time descending.
 func (r *InvoiceRepository) FindAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error) {
-	r.Logger.Info("Finding all invoices", "user_id", filter.UserID)
-	
+	r.Logger.Info("Finding all invoices (including shared)", "user_id", filter.UserID, "include_shared", filter.IncludeShared, "source", filter.Source)
+
 	query := `
-		SELECT id, user_id, category_id, vendor, amount, currency, invoice_date,
-		       content_hash, original_file_name,
-		       description
-		FROM invoices
-		WHERE user_id = $1
-		ORDER BY created_at DESC`
-	
+		SELECT 
+			i.id, i.user_id, i.category_id, i.vendor, i.amount, i.currency, i.invoice_date,
+			i.content_hash, i.original_file_name,
+			i.description,
+			(i.user_id != $1) as is_shared,
+			COALESCE((SELECT array_agg(shared_with_user_id) FROM shared_invoices WHERE invoice_id = i.id), '{}') as shared_with,
+			i.user_id as owner_id
+		FROM invoices i`
+
 	args := []any{filter.UserID}
+	where := ""
+
+	if filter.IncludeShared || filter.Source == "all" {
+		where = " WHERE (i.user_id = $1 OR i.id IN (SELECT invoice_id FROM shared_invoices WHERE shared_with_user_id = $1) OR i.category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $1))"
+	} else if filter.Source == "shared" {
+		where = " WHERE (i.id IN (SELECT invoice_id FROM shared_invoices WHERE shared_with_user_id = $1) OR i.category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $1)) AND i.user_id != $1"
+	} else {
+		// Default: only mine
+		where = " WHERE i.user_id = $1"
+	}
+
+	if filter.Year > 0 {
+		where += fmt.Sprintf(" AND EXTRACT(YEAR FROM i.invoice_date) = $%d", len(args)+1)
+		args = append(args, filter.Year)
+	}
+
+	query += where + " ORDER BY i.created_at DESC"
 
 	if filter.Limit > 0 {
 		args = append(args, filter.Limit)
@@ -154,7 +187,7 @@ func (r *InvoiceRepository) FindAll(ctx context.Context, filter entity.InvoiceFi
 
 	var invoices []entity.Invoice
 	for rows.Next() {
-		inv, err := scanInvoice(rows)
+		inv, err := scanInvoiceWithSharing(rows)
 		if err != nil {
 			return nil, fmt.Errorf("invoice repo: scan: %w", err)
 		}
@@ -193,8 +226,14 @@ func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string
 func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error) {
 	var content []byte
 	var name *string
-	err := r.pool.QueryRow(ctx,
-		`SELECT original_file_content, original_file_name FROM invoices WHERE id = $1 AND user_id = $2`, id, userID).
+	err := r.pool.QueryRow(ctx, `
+		SELECT original_file_content, original_file_name 
+		FROM invoices 
+		WHERE id = $1 AND (
+			user_id = $2 
+			OR id IN (SELECT invoice_id FROM shared_invoices WHERE shared_with_user_id = $2)
+			OR category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $2)
+		)`, id, userID).
 		Scan(&content, &name)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -209,18 +248,18 @@ func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, u
 	if name != nil {
 		nameStr = *name
 	}
-	
+
 	mimeType := http.DetectContentType(content)
 	if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
 		mimeType = mimeType[:idx]
 	}
-	
+
 	return content, mimeType, nameStr, nil
 }
 
 // ── scanner helper ──────────────────────────────────────────────────────────
 
-func scanInvoice(row scanner) (entity.Invoice, error) {
+func scanInvoiceWithSharing(row scanner) (entity.Invoice, error) {
 	var (
 		inv         entity.Invoice
 		categoryID  *uuid.UUID
@@ -241,6 +280,9 @@ func scanInvoice(row scanner) (entity.Invoice, error) {
 		&contentHash,
 		&origName,
 		&description,
+		&inv.IsShared,
+		&inv.SharedWith,
+		&inv.OwnerID,
 	)
 	if err != nil {
 		return entity.Invoice{}, err

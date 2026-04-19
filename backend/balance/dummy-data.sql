@@ -10,7 +10,7 @@ DECLARE
     stmt_giro_id UUID;
     stmt_savings_id UUID;
     curr_date DATE := '2016-01-01';
-    end_date DATE := '2026-03-01';
+    end_date DATE := '2026-04-01';
 
     -- Variables for randomization
     recon_amount NUMERIC(15,2);
@@ -34,13 +34,13 @@ BEGIN
     SELECT id INTO cat_misc FROM categories WHERE name = 'Sonstige Ausgaben' AND user_id = admin_id;
 
     -- 2. Create and fetch new custom categories for a realistic distribution
-    INSERT INTO categories (name, color, user_id, is_variable_spending) VALUES ('Tech & Software', '#3b82f6', admin_id, true)
+    INSERT INTO categories (name, color, user_id, is_variable_spending, forecast_strategy) VALUES ('Tech & Software', '#3b82f6', admin_id, true, '6m')
     ON CONFLICT (name, user_id) DO UPDATE SET name=EXCLUDED.name RETURNING id INTO cat_tech;
 
-    INSERT INTO categories (name, color, user_id, is_variable_spending) VALUES ('Groceries & Food', '#10b981', admin_id, true)
+    INSERT INTO categories (name, color, user_id, is_variable_spending, forecast_strategy) VALUES ('Groceries & Food', '#10b981', admin_id, true, '3m')
     ON CONFLICT (name, user_id) DO UPDATE SET name=EXCLUDED.name RETURNING id INTO cat_groceries;
 
-    INSERT INTO categories (name, color, user_id, is_variable_spending) VALUES ('Utilities & Internet', '#f97316', admin_id, false)
+    INSERT INTO categories (name, color, user_id, is_variable_spending, forecast_strategy) VALUES ('Utilities & Internet', '#f97316', admin_id, false, '3y')
     ON CONFLICT (name, user_id) DO UPDATE SET name=EXCLUDED.name RETURNING id INTO cat_utilities;
 
     -- 3. Loop month by month for 10 years
@@ -91,7 +91,10 @@ BEGIN
 
         -- 5. Tech & Subscriptions (Tech & Software)
         INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '12 days', curr_date + interval '12 days', 'Hetzner Online GmbH', -invoice_amount, 'debit', cat_tech, md5(gen_random_uuid()::text), false, 'giro', true, 'Hetzner Online GmbH', false, false);
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '12 days', curr_date + interval '12 days', 'Hetzner Online GmbH', -25.00, 'debit', cat_tech, md5(gen_random_uuid()::text), false, 'giro', true, 'Hetzner Online GmbH', false, false);
+
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '5 days', curr_date + interval '5 days', 'Netflix.com', -17.99, 'debit', cat_misc, md5(gen_random_uuid()::text), false, 'giro', true, 'Netflix', false, false);
 
         -- ---------------------------------------------------------
         -- OPEN RECONCILIATIONS (1:1 Transfers)
@@ -148,10 +151,106 @@ BEGIN
     -- ---------------------------------------------------------
     -- Planned Transactions (Manual Forecasts)
     -- ---------------------------------------------------------
-    INSERT INTO planned_transactions (id, user_id, amount, date, description, category_id, status)
-    VALUES (gen_random_uuid(), admin_id, -800.00, (CURRENT_DATE + interval '1 month')::DATE, 'Summer Vacation', cat_misc, 'pending');
+    INSERT INTO planned_transactions (id, user_id, amount, date, description, category_id, status, interval_months, end_date, is_superseded)
+    VALUES (gen_random_uuid(), admin_id, -800.00, (CURRENT_DATE + interval '1 month')::DATE, 'Summer Vacation', cat_misc, 'pending', 0, NULL, false);
 
-    INSERT INTO planned_transactions (id, user_id, amount, date, description, category_id, status)
-    VALUES (gen_random_uuid(), admin_id, 300.00, (CURRENT_DATE + interval '2 months')::DATE, 'Tax Refund', cat_income, 'pending');
+    INSERT INTO planned_transactions (id, user_id, amount, date, description, category_id, status, interval_months, end_date, is_superseded)
+    VALUES (gen_random_uuid(), admin_id, 300.00, (CURRENT_DATE + interval '2 months')::DATE, 'Tax Refund', cat_income, 'pending', 0, NULL, false);
+
+    INSERT INTO planned_transactions (id, user_id, amount, date, description, category_id, status, interval_months, end_date, is_superseded)
+    VALUES (gen_random_uuid(), admin_id, -50.00, (CURRENT_DATE + interval '15 days')::DATE, 'Recurring Subscription', cat_misc, 'pending', 1, (CURRENT_DATE + interval '1 year')::DATE, false);
+
+    -- ---------------------------------------------------------
+    -- Subscriptions (New Feature Sample)
+    -- ---------------------------------------------------------
+    INSERT INTO subscriptions (user_id, merchant_name, amount, billing_cycle, billing_interval, category_id, status, last_occurrence, next_occurrence)
+    VALUES (admin_id, 'Hetzner Online GmbH', 25.00, 'monthly', 1, cat_tech, 'active', CURRENT_DATE - interval '12 days', CURRENT_DATE + interval '18 days');
+
+    INSERT INTO subscriptions (user_id, merchant_name, amount, billing_cycle, billing_interval, category_id, status, last_occurrence, next_occurrence)
+    VALUES (admin_id, 'Netflix', 17.99, 'monthly', 1, cat_misc, 'active', CURRENT_DATE - interval '5 days', CURRENT_DATE + interval '25 days');
+
+END $$;
+
+-- ---------------------------------------------------------
+-- Shared Categories & Collaborative Data
+-- ---------------------------------------------------------
+DO $$
+DECLARE
+    admin_id UUID;
+    demo_id UUID;
+    shared_cat_id UUID;
+    stmt_id UUID;
+BEGIN
+    -- 1. Ensure 'demo' user exists for sharing example
+    -- password is 'password' hashed with bcrypt (cost 10)
+    INSERT INTO users (username, email, password_hash, full_name, role)
+    VALUES ('demo', 'demo@localhost', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgNoTfQjZ4mE7.v4/e0G7X0.m1t2', 'Demo User', 'manager')
+    ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name
+    RETURNING id INTO demo_id;
+
+    SELECT id INTO admin_id FROM users WHERE username = 'admin' LIMIT 1;
+    
+    IF demo_id IS NULL THEN
+        SELECT id INTO demo_id FROM users WHERE username = 'demo' LIMIT 1;
+    END IF;
+
+    -- If admin still doesn't exist (unexpected), skip
+    IF admin_id IS NULL OR demo_id IS NULL THEN
+        RETURN;
+    END IF;
+
+    -- 1. Identify the 'Groceries & Food' category owned by admin
+    SELECT id INTO shared_cat_id FROM categories WHERE name = 'Groceries & Food' AND user_id = admin_id;
+
+    -- 2. Create the sharing relationship
+    INSERT INTO shared_categories (category_id, owner_user_id, shared_with_user_id, permission_level)
+    VALUES (shared_cat_id, admin_id, demo_id, 'edit')
+    ON CONFLICT DO NOTHING;
+
+    -- 3. Add some transactions for 'demo' using admin's category (Live Feed)
+    -- Demo paid for Pizza
+    INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, transaction_type, category_id, content_hash, reviewed, statement_type)
+    VALUES (demo_id, NULL, '2026-04-11', '2026-04-11', 'Pizza Night (Shared)', -45.50, 'debit', shared_cat_id, md5('demo_tx_1'), true, 'giro')
+    ON CONFLICT DO NOTHING;
+
+    -- Demo bought drinks
+    INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, transaction_type, category_id, content_hash, reviewed, statement_type)
+    VALUES (demo_id, NULL, '2026-04-08', '2026-04-08', 'Shared Drinks & Snacks', -22.10, 'debit', shared_cat_id, md5('demo_tx_2'), true, 'giro')
+    ON CONFLICT DO NOTHING;
+
+    -- 4. Add some transactions for 'admin' using the same shared category (Live Feed)
+    -- This ensures 'demo' sees 'admin's' transactions when include_shared=true
+    INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, transaction_type, category_id, content_hash, reviewed, statement_type)
+    VALUES (admin_id, NULL, '2026-04-12', '2026-04-12', 'Weekly Groceries (Admin)', -89.90, 'debit', shared_cat_id, md5('admin_shared_tx_1'), true, 'giro')
+    ON CONFLICT DO NOTHING;
+
+    INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, transaction_type, category_id, content_hash, reviewed, statement_type)
+    VALUES (admin_id, NULL, '2026-04-05', '2026-04-05', 'Shared Household Items', -34.20, 'debit', shared_cat_id, md5('admin_shared_tx_2'), true, 'giro')
+    ON CONFLICT DO NOTHING;
+
+    -- 5. Create a shared invoice
+    -- Admin shares an invoice with Demo
+    SELECT id INTO stmt_id FROM invoices WHERE user_id = admin_id LIMIT 1;
+    IF stmt_id IS NOT NULL THEN
+        INSERT INTO shared_invoices (invoice_id, owner_user_id, shared_with_user_id, permission_level)
+        VALUES (stmt_id, admin_id, demo_id, 'view')
+        ON CONFLICT DO NOTHING;
+    END IF;
+
+    -- 6. Seed Discovery Whitelisting & Caching
+    -- Add a manually ignored pattern
+    INSERT INTO subscription_discovery_feedback (user_id, merchant_name, status, source)
+    VALUES (admin_id, 'ALDI Sued', 'DECLINED', 'USER')
+    ON CONFLICT DO NOTHING;
+
+    -- Add an AI-filtered pattern
+    INSERT INTO subscription_discovery_feedback (user_id, merchant_name, status, source)
+    VALUES (admin_id, 'REWE Markt GmbH', 'AI_REJECTED', 'AI')
+    ON CONFLICT DO NOTHING;
+
+    -- Add a whitelisted pattern (restored or AI-verified)
+    INSERT INTO subscription_discovery_feedback (user_id, merchant_name, status, source)
+    VALUES (admin_id, 'Netflix.com', 'ALLOWED', 'AI')
+    ON CONFLICT DO NOTHING;
 
 END $$;

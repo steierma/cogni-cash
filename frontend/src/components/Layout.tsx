@@ -4,10 +4,11 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
     ArrowLeftRight, BarChart3, Briefcase, ChevronLeft, ChevronRight, FileText, Landmark,
-    LayoutDashboard, Link2, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List, Zap
+    LayoutDashboard, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List, Zap, Archive, RefreshCcw
 } from 'lucide-react';
-import {fetchSettings, updateSettings, fetchMe, logout, fetchSystemInfo} from '../api/client';
-import type { User, SystemInfo } from '../api/types';
+import {settingsService} from '../api/services/settingsService';
+import {authService} from '../api/services/authService';
+import type { User, SystemInfo } from "../api/types/system";
 
 const ALL_NAV_GROUPS = [
     {
@@ -24,8 +25,9 @@ const ALL_NAV_GROUPS = [
             {to: '/bank-connections', i18nKeyLabel: 'layout.bankConnections', Icon: Landmark},
             {to: '/bank-statements', i18nKeyLabel: 'layout.statements', Icon: List},
             {to: '/transactions', i18nKeyLabel: 'layout.transactions', Icon: ArrowLeftRight},
-            {to: '/reconcile', i18nKeyLabel: 'layout.reconcile', Icon: Link2},
+            {to: '/subscriptions', i18nKeyLabel: 'layout.subscriptions', Icon: RefreshCcw},
             {to: '/categories', i18nKeyLabel: 'layout.categories', Icon: Tag},
+            {to: '/sharing', i18nKeyLabel: 'layout.sharing', Icon: Users},
         ]
     },
     {
@@ -33,6 +35,7 @@ const ALL_NAV_GROUPS = [
         items: [
             {to: '/payslips', i18nKeyLabel: 'layout.payslips', Icon: Briefcase},
             {to: '/invoices', i18nKeyLabel: 'layout.invoices', Icon: FileText},
+            {to: '/documents', i18nKeyLabel: 'layout.documents', Icon: Archive},
         ]
     },
     {
@@ -52,17 +55,18 @@ export default function Layout({children}: { children?: React.ReactNode }) {
 
     const {data: settings} = useQuery<Record<string, string>>({
         queryKey: ['settings'],
-        queryFn: fetchSettings,
+        queryFn: settingsService.fetchSettings,
     });
 
     const {data: currentUser} = useQuery<User>({
         queryKey: ['currentUser'],
-        queryFn: fetchMe,
+        queryFn: authService.fetchMe,
     });
 
     const {data: sysInfo} = useQuery<SystemInfo>({
         queryKey: ['systemInfo'],
-        queryFn: fetchSystemInfo,
+        queryFn: settingsService.fetchSystemInfo,
+        enabled: (currentUser as User)?.role === 'admin',
     });
 
     // Directly derive state from the query instead of syncing to a local useState via useEffect
@@ -91,7 +95,7 @@ export default function Layout({children}: { children?: React.ReactNode }) {
     }, [layoutMode]);
 
     const settingsMut = useMutation({
-        mutationFn: (newSettings: Record<string, string>) => updateSettings(newSettings),
+        mutationFn: (newSettings: Record<string, string>) => settingsService.updateSettings(newSettings),
         // Optimistic UI Update: Apply changes instantly to the UI before the server responds
         onMutate: async (newSettings) => {
             await queryClient.cancelQueries({ queryKey: ['settings'] });
@@ -121,7 +125,7 @@ export default function Layout({children}: { children?: React.ReactNode }) {
 
     const handleLogout = async () => {
         try {
-            await logout();
+            await authService.logout();
         } catch (error) {
             console.error('Logout failed', error);
         }
@@ -133,10 +137,18 @@ export default function Layout({children}: { children?: React.ReactNode }) {
     const showLabels = isMobileMenuOpen || isDesktopExpanded;
     const sidebarWidth = showLabels ? 'w-64' : 'w-20';
 
-    const visibleNavGroups = ALL_NAV_GROUPS.filter(group => {
-        if (group.adminOnly && currentUser?.role !== 'admin') return false;
-        return true;
-    });
+    const visibleNavGroups = ALL_NAV_GROUPS.map(group => {
+        if (group.adminOnly && currentUser?.role !== 'admin') return null;
+
+        const visibleItems = group.items.filter(item => {
+            if ((item as any).adminOnly && currentUser?.role !== 'admin') return false;
+            return true;
+        });
+
+        if (visibleItems.length === 0) return null;
+
+        return {...group, items: visibleItems};
+    }).filter(group => group !== null) as typeof ALL_NAV_GROUPS;
 
     return (
         <div className="min-h-[100dvh] flex bg-gray-50/50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-200">

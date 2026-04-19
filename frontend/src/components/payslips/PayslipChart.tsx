@@ -4,8 +4,7 @@ import { LineChart as LineChartIcon, ChevronDown, BarChart3 } from 'lucide-react
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, BarChart, Bar, Legend } from 'recharts';
 import { fmtCurrency } from '../../utils/formatters';
 import { formatYearMonth, getAdjustedNetto } from './utils';
-import type { Payslip } from '../../api/types';
-
+import type { Payslip } from "../../api/types/payslip";
 const CustomChartTooltip = ({ active, payload, label, t }: any) => {
     if (active && payload && payload.length) {
         const data = payload[0].payload;

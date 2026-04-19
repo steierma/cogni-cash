@@ -9,24 +9,32 @@ import (
 // Invoice is the domain entity produced by the categorization engine.
 // It records the vendor, amount, and the category assigned to it by the LLM.
 type Invoice struct {
-	ID                 uuid.UUID  `json:"id"`
-	UserID             uuid.UUID  `json:"user_id"`
-	Vendor             Vendor     `json:"vendor"`
-	CategoryID         *uuid.UUID `json:"category_id"`
-	Amount             float64    `json:"amount"`
-	Currency           string     `json:"currency"`
-	IssuedAt           time.Time  `json:"issued_at"`
-	Description        string     `json:"description"`
+	ID          uuid.UUID  `json:"id"`
+	UserID      uuid.UUID  `json:"user_id"`
+	Vendor      Vendor     `json:"vendor"`
+	CategoryID  *uuid.UUID `json:"category_id"`
+	Amount      float64    `json:"amount"`
+	Currency    string     `json:"currency"`
+	IssuedAt    time.Time  `json:"issued_at"`
+	Description string     `json:"description"`
 
 	// Deduplication & file storage — populated on file-upload imports (migration 002).
 	ContentHash         string `json:"content_hash,omitempty"`
 	OriginalFileName    string `json:"original_file_name,omitempty"`
 	OriginalFileContent []byte `json:"-"` // excluded from JSON responses
+
+	// Sharing metadata (added for Collaborative Finance Expansion)
+	IsShared   bool        `json:"is_shared"`
+	SharedWith []uuid.UUID `json:"shared_with"`
+	OwnerID    uuid.UUID   `json:"owner_id"`
 }
 
 // InvoiceFilter defines query parameters for listing invoices.
 type InvoiceFilter struct {
-	UserID uuid.UUID
-	Limit  int
-	Offset int
+	UserID        uuid.UUID
+	IncludeShared bool   // Collaborative Finance: Include invoices shared with the user
+	Source        string // "all", "mine", "shared"
+	Year          int    // Optional: Filter by invoice date year
+	Limit         int
+	Offset        int
 }

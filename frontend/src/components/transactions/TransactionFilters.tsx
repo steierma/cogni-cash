@@ -1,7 +1,8 @@
 import * as React from 'react';
 import { useTranslation } from 'react-i18next';
 import { Filter, Search, Loader2 } from 'lucide-react';
-import type { BankStatementSummary, Category } from '../../api/types';
+import type { BankStatementSummary } from "../../api/types/bank";
+import type { Category } from "../../api/types/category";
 import { fmtDate } from '../../utils/formatters';
 
 export interface FilterState {
@@ -13,6 +14,7 @@ export interface FilterState {
     to: string | null;
     amountMin: string;
     amountMax: string;
+    includeShared: boolean;
 }
 
 interface TransactionFiltersProps {
@@ -63,11 +65,24 @@ export default function TransactionFilters({
                     <Filter size={14} />
                     {t('transactions.filters.title')}
                 </div>
-                {isDraftDirty && (
-                    <span className="text-[10px] font-bold text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse">
+                <div className="flex items-center gap-4">
+                    <label className="flex items-center gap-2 cursor-pointer select-none">
+                        <div className="relative inline-flex items-center">
+                            <input
+                                type="checkbox"
+                                checked={localDraft.includeShared}
+                                onChange={(e) => setLocalDraft({ ...localDraft, includeShared: e.target.checked })}
+                                className="sr-only peer"
+                            />
+                            <div className="w-8 h-4 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-indigo-300 dark:peer-focus:ring-indigo-800 rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-3 after:w-3 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                        </div>
+                        <span className="text-xs font-medium text-gray-600 dark:text-gray-400">{t('transactions.filters.includeShared')}</span>
+                    </label>
+
+                    <span className={`text-[10px] font-bold text-indigo-500 dark:text-indigo-400 bg-indigo-50 dark:bg-indigo-900/30 px-2 py-0.5 rounded-full uppercase tracking-wider animate-pulse transition-opacity ${isDraftDirty ? 'opacity-100' : 'opacity-0'}`}>
                         {t('transactions.filters.unapplied')}
                     </span>
-                )}
+                </div>
             </div>
 
             <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3">

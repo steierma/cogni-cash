@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { fetchUsers, createUser, updateUser, deleteUser, fetchMe } from '../api/client';
-import type { User } from '../api/types';
+import { userService } from '../api/services/userService';
+import { authService } from '../api/services/authService';
+import type { User } from "../api/types/system";
 import {Plus, Edit2, ShieldAlert, Mail, MapPin, Search, Trash2, Users} from 'lucide-react';
 
 export default function UsersPage() {
@@ -22,16 +23,16 @@ export default function UsersPage() {
 
     const { data: users, isLoading } = useQuery<User[]>({
         queryKey: ['users', searchQuery],
-        queryFn: () => fetchUsers(searchQuery),
+        queryFn: () => userService.fetchUsers(searchQuery),
     });
 
     const { data: currentUser } = useQuery<User>({
         queryKey: ['currentUser'],
-        queryFn: fetchMe,
+        queryFn: () => authService.fetchMe(),
     });
 
     const createMutation = useMutation({
-        mutationFn: (newUserData: Partial<User> & { password?: string }) => createUser(newUserData),
+        mutationFn: (newUserData: Partial<User> & { password?: string }) => userService.createUser(newUserData),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['users'] });
             closeModal();
@@ -40,7 +41,7 @@ export default function UsersPage() {
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string; data: Partial<User> }) => updateUser(id, data),
+        mutationFn: ({ id, data }: { id: string; data: Partial<User> }) => userService.updateUser(id, data),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['users'] });
             closeModal();
@@ -49,7 +50,7 @@ export default function UsersPage() {
     });
 
     const delMutation = useMutation({
-        mutationFn: (id: string) => deleteUser(id),
+        mutationFn: (id: string) => userService.deleteUser(id),
         onSuccess: () => queryClient.invalidateQueries({ queryKey: ['users'] })
     });
 

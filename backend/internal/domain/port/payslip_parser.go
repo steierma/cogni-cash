@@ -12,4 +12,3 @@ import (
 type PayslipParser interface {
 	Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) (entity.Payslip, error)
 }
-

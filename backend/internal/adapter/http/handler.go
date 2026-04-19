@@ -25,17 +25,20 @@ type Handler struct {
 	bankStatementSvc      port.BankStatementUseCase
 	transactionSvc        port.TransactionUseCase
 	reconciliationSvc     port.ReconciliationUseCase
+	categorySvc           port.CategoryUseCase
 	settingsSvc           port.SettingsUseCase
 	payslipSvc            port.PayslipUseCase
 	bankSvc               port.BankUseCase
 	forecastingSvc        port.ForecastingUseCase
 	userSvc               port.UserUseCase
 	plannedTransactionSvc port.PlannedTransactionUseCase
+	sharingSvc            port.SharingUseCase
+	discoverySvc          port.DiscoveryUseCase
 	notificationSvc       port.NotificationUseCase
 	bridgeTokenSvc        port.BridgeAccessTokenUseCase
+	documentSvc           port.DocumentUseCase
 	payslipRepo           port.PayslipRepository
 	bankStmtRepo          port.BankStatementRepository
-	categoryRepo          port.CategoryRepository
 	reconciliationRepo    port.ReconciliationRepository
 	Logger                *slog.Logger
 	storageMode           string
@@ -96,6 +99,11 @@ func (h *Handler) WithBankService(svc port.BankUseCase) *Handler {
 	return h
 }
 
+func (h *Handler) WithDocumentService(svc port.DocumentUseCase) *Handler {
+	h.documentSvc = svc
+	return h
+}
+
 func (h *Handler) WithForecastingService(svc port.ForecastingUseCase) *Handler {
 	h.forecastingSvc = svc
 	return h
@@ -121,8 +129,8 @@ func (h *Handler) WithBankStatementRepository(repo port.BankStatementRepository)
 	return h
 }
 
-func (h *Handler) WithCategoryRepository(repo port.CategoryRepository) *Handler {
-	h.categoryRepo = repo
+func (h *Handler) WithCategoryService(svc port.CategoryUseCase) *Handler {
+	h.categorySvc = svc
 	return h
 }
 
@@ -138,6 +146,16 @@ func (h *Handler) WithPayslipService(svc port.PayslipUseCase) *Handler {
 
 func (h *Handler) WithPayslipRepository(repo port.PayslipRepository) *Handler {
 	h.payslipRepo = repo
+	return h
+}
+
+func (h *Handler) WithSharingService(svc port.SharingUseCase) *Handler {
+	h.sharingSvc = svc
+	return h
+}
+
+func (h *Handler) WithDiscoveryService(svc port.DiscoveryUseCase) *Handler {
+	h.discoverySvc = svc
 	return h
 }
 
@@ -172,8 +190,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Post("/auth/change-password/", h.changePassword)
 			r.Get("/auth/me/", h.getMe) // MUST BE OUTSIDE ADMIN MIDDLEWARE
 
-			r.Get("/system/info/", h.getSystemInfo)
-
+			r.With(h.adminMiddleware).Get("/system/info/", h.getSystemInfo)
+			
 			r.Route("/users/", func(r chi.Router) {
 				r.Use(h.adminMiddleware) // ONLY ADMINS CAN ACCESS THESE
 				r.Get("/", h.listUsers)
@@ -183,11 +201,12 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Delete("/{id}/", h.deleteUser)
 			})
 
-			r.Group(func(r chi.Router) {
-				r.Use(h.adminMiddleware)
-				r.Route("/settings/", func(r chi.Router) {
-					r.Get("/", h.getSettings)
-					r.Patch("/", h.updateSettings)
+			r.Route("/settings/", func(r chi.Router) {
+				r.Get("/", h.getSettings)
+				r.Patch("/", h.updateSettings)
+
+				r.Group(func(r chi.Router) {
+					r.Use(h.adminMiddleware)
 					r.Post("/test-email/", h.sendTestEmail)
 				})
 			})
@@ -199,6 +218,32 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Put("/{id}/", h.updateInvoice)
 				r.Delete("/{id}/", h.deleteInvoice)
 				r.Get("/{id}/download/", h.downloadInvoiceFile)
+
+				// Sharing
+				r.Post("/{id}/share/", h.shareInvoice)
+				r.Delete("/{id}/share/{user_id}/", h.revokeInvoiceShare)
+				r.Get("/{id}/shares/", h.listInvoiceShares)
+			})
+
+			r.Route("/sharing/", func(r chi.Router) {
+				r.Get("/dashboard/", h.getSharingDashboard)
+			})
+
+			r.Route("/subscriptions/", func(r chi.Router) {
+				r.Get("/", h.ListSubscriptions)
+				r.Get("/suggested/", h.GetSuggestedSubscriptions)
+				r.Get("/feedback/", h.GetDiscoveryFeedback)
+				r.Post("/approve/", h.ApproveSubscription)
+				r.Post("/decline/", h.DeclineSubscription)
+				r.Post("/remove-feedback/", h.RemoveDiscoveryFeedback)
+				r.Get("/{id}/", h.GetSubscription)
+				r.Put("/{id}/", h.UpdateSubscription)
+				r.Delete("/{id}/", h.DeleteSubscription)
+				r.Post("/{id}/enrich/", h.EnrichSubscription)
+				r.Post("/{id}/preview-cancellation/", h.PreviewCancellation)
+				r.Post("/{id}/cancel/", h.CancelSubscription)
+				r.Get("/{id}/events/", h.GetSubscriptionEvents)
+				r.Post("/from-transaction/", h.CreateSubscriptionFromTransaction)
 			})
 
 			r.Route("/bank-statements/", func(r chi.Router) {
@@ -231,17 +276,28 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Route("/categories/", func(r chi.Router) {
 				r.Get("/", h.listCategories)
 				r.Post("/", h.createCategory)
-				r.Put("/{id}/", h.updateCategory)
-				r.Delete("/{id}/", h.deleteCategory)
-				r.Post("/{id}/restore/", h.restoreCategory)
+
+				r.Route("/{id}/", func(r chi.Router) {
+					r.Put("/", h.updateCategory)
+					r.Delete("/", h.deleteCategory)
+					r.Post("/restore/", h.restoreCategory)
+					r.Get("/average/", h.getCategoryAverage)
+
+					// Sharing
+					r.Post("/share/", h.shareCategory)
+					r.Delete("/share/{user_id}/", h.revokeCategoryShare)
+					r.Get("/shares/", h.listCategoryShares)
+				})
 			})
 
-			r.Route("/reconciliations/", func(r chi.Router) {
+			reconciliationRoutes := func(r chi.Router) {
 				r.Get("/suggestions/", h.getReconciliationSuggestions)
 				r.Get("/", h.listReconciliations)
 				r.Post("/", h.createReconciliation)
 				r.Delete("/{id}/", h.deleteReconciliation)
-			})
+			}
+			r.Route("/reconciliations/", reconciliationRoutes)
+			r.Route("/reconciliation/", reconciliationRoutes) // Singular alias for robustness
 
 			r.Route("/planned-transactions/", func(r chi.Router) {
 				r.Get("/", h.listPlannedTransactions)
@@ -282,6 +338,16 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Get("/", h.listBridgeTokens)
 				r.Post("/", h.createBridgeToken)
 				r.Delete("/{id}/", h.revokeBridgeToken)
+			})
+
+			r.Route("/documents/", func(r chi.Router) {
+				r.Get("/", h.listDocuments)
+				r.Post("/upload/", h.uploadDocument)
+				r.Get("/tax-summary/{year}/", h.getTaxYearSummary)
+				r.Get("/{id}/", h.getDocument)
+				r.Put("/{id}/", h.updateDocument) // <-- ADD THIS
+				r.Delete("/{id}/", h.deleteDocument)
+				r.Get("/{id}/download/", h.downloadDocument)
 			})
 		})
 	})

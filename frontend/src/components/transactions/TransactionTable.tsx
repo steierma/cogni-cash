@@ -1,6 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, BarChart3, Slash } from 'lucide-react';
-import type { Category, Transaction, PatternExclusion } from '../../api/types';
+import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, BarChart3, Slash, Users, RefreshCcw } from 'lucide-react';
+import type { Category } from "../../api/types/category";
+import type { Transaction, PatternExclusion } from "../../api/types/transaction";
 import { fmtCurrency, fmtDate } from '../../utils/formatters';
 
 export type TxColKey = 'date' | 'description' | 'counterparty' | 'location' | 'reference' | 'category' | 'amount';
@@ -10,6 +11,7 @@ export type SortDir = 'asc' | 'desc';
 interface TransactionTableProps {
     transactions: Transaction[];
     categories: Category[];
+    currentUserId?: string;
     patternExclusions?: PatternExclusion[];
     selectedHashes: Set<string>;
     onToggleSelect: (hash: string) => void;
@@ -20,12 +22,14 @@ interface TransactionTableProps {
     onCategoryChange: (hash: string, categoryId: string) => void;
     onMarkReviewed?: (hash: string) => void;
     onTogglePatternExclusion?: (matchTerm: string, excluded: boolean) => void;
+    onCreateSubscription?: (tx: Transaction) => void;
     visibleCols: Record<TxColKey, boolean>;
 }
 
 export default function TransactionTable({
                                              transactions,
                                              categories,
+                                             currentUserId,
                                              patternExclusions = [],
                                              selectedHashes,
                                              onToggleSelect,
@@ -36,6 +40,7 @@ export default function TransactionTable({
                                              onCategoryChange,
                                              onMarkReviewed,
                                              onTogglePatternExclusion,
+                                             onCreateSubscription,
                                              visibleCols
                                          }: TransactionTableProps) {
     const { t } = useTranslation();
@@ -143,6 +148,11 @@ export default function TransactionTable({
                                         <div className="flex flex-col gap-1">
                                             {visibleCols.description && (
                                                 <span className={`flex items-center gap-1.5 text-gray-800 dark:text-gray-200 truncate`} title={tx.description}>
+                                                    {(tx.is_shared || (currentUserId && tx.user_id !== currentUserId)) && (
+                                                        <span title={t('transactions.table.shared')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 uppercase tracking-tighter">
+                                                            <Users size={9} /> {t('transactions.table.shared')}
+                                                        </span>
+                                                    )}
                                                     {tx.is_prediction && (
                                                         <span title={t('forecasting.isPrediction')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0 uppercase tracking-tighter">
                                                             <Zap size={9} /> {t('forecasting.isPrediction')}
@@ -255,6 +265,16 @@ export default function TransactionTable({
                                                 title={t('transactions.markAsReviewed', 'Mark as Reviewed')}
                                             >
                                                 <CheckSquare size={16} />
+                                            </button>
+                                        )}
+
+                                        {tx.amount < 0 && !tx.subscription_id && !tx.is_prediction && (
+                                            <button
+                                                onClick={() => onCreateSubscription?.(tx)}
+                                                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                title={t('transactions.createSubscription', 'Create Subscription')}
+                                            >
+                                                <RefreshCcw size={16} />
                                             </button>
                                         )}
                                     </div>

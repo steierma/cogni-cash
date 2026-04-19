@@ -99,8 +99,13 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 	args := []interface{}{filter.UserID}
 
 	if filter.Employer != "" {
-		query += " AND employer_name = $2"
+		query += fmt.Sprintf(" AND employer_name = $%d", len(args)+1)
 		args = append(args, filter.Employer)
+	}
+
+	if filter.Year > 0 {
+		query += fmt.Sprintf(" AND period_year = $%d", len(args)+1)
+		args = append(args, filter.Year)
 	}
 
 	query += " ORDER BY period_year DESC, period_month_num DESC, created_at DESC"
@@ -120,7 +125,7 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 	}
 	defer rows.Close()
 
-	var payslips []entity.Payslip
+	payslips := make([]entity.Payslip, 0)
 	for rows.Next() {
 		var p entity.Payslip
 		err := rows.Scan(
@@ -150,7 +155,7 @@ func (r *PayslipRepository) findBonuses(ctx context.Context, payslipID string, u
 	}
 	defer rows.Close()
 
-	var result []entity.Bonus
+	result := make([]entity.Bonus, 0)
 	for rows.Next() {
 		var b entity.Bonus
 		if err := rows.Scan(&b.Description, &b.Amount); err != nil {
@@ -242,7 +247,7 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 
 	query := `SELECT original_file_content, original_file_name FROM payslips WHERE id = $1 AND user_id = $2`
 	err := r.db.QueryRow(ctx, query, id, userID).Scan(&content, &filename)
-	
+
 	mimeType := "application/octet-stream"
 	if err == nil && len(content) > 0 {
 		mimeType = http.DetectContentType(content)
@@ -250,7 +255,7 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 			mimeType = mimeType[:idx]
 		}
 	}
-	
+
 	return content, mimeType, filename, err
 }
 

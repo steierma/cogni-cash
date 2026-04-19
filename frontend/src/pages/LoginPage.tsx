@@ -3,7 +3,7 @@ import { useMutation } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { AlertCircle, Lock, LogIn } from 'lucide-react';
-import { login } from '../api/client';
+import { authService } from '../api/services/authService';
 
 export default function LoginPage() {
     const { t } = useTranslation();
@@ -13,7 +13,7 @@ export default function LoginPage() {
     const navigate = useNavigate();
 
     const loginMut = useMutation({
-        mutationFn: () => login(username, password),
+        mutationFn: () => authService.login(username, password),
         onSuccess: () => {
             navigate('/');
         },

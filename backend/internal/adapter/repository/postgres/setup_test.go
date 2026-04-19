@@ -111,6 +111,8 @@ func clearTables(ctx context.Context, t *testing.T) {
 		"payslips",
 		"payslip_bonuses", // <-- Updated table name
 		"planned_transactions",
+		"documents",
+		"settings",
 	}
 	query := "TRUNCATE TABLE " + strings.Join(tables, ", ") + " CASCADE;"
 	_, err := globalPool.Exec(ctx, query)

@@ -2,18 +2,9 @@ import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
-import {
-    fetchBankConnections,
-    deleteBankConnection,
-    fetchBankInstitutions,
-    createBankConnection,
-    finishBankConnection,
-    syncBankAccounts,
-    updateBankAccountType,
-    fetchSystemInfo,
-    fetchSettings,
-    updateSettings
-} from '../api/client';
+import { bankService } from '../api/services/bankService';
+import { settingsService } from '../api/services/settingsService';
+import { authService } from '../api/services/authService';
 import {
     Plus,
     Trash2,
@@ -29,7 +20,7 @@ import {
     ChevronRight,
     History
 } from 'lucide-react';
-import type { BankConnection, BankInstitution } from '../api/types';
+import type { BankConnection, BankInstitution } from "../api/types/bank";
 import { fmtCurrency } from '../utils/formatters';
 
 export default function BankConnectionsPage() {
@@ -50,31 +41,37 @@ export default function BankConnectionsPage() {
     // ── Queries ──
     const { data: connections, isLoading: isConnsLoading } = useQuery<BankConnection[]>({
         queryKey: ['bank-connections'],
-        queryFn: fetchBankConnections,
+        queryFn: bankService.fetchConnections,
+    });
+
+    const { data: user } = useQuery<any>({
+        queryKey: ['me'],
+        queryFn: authService.fetchMe,
     });
 
     const { data: systemInfo } = useQuery({
         queryKey: ['system-info'],
-        queryFn: fetchSystemInfo,
+        queryFn: settingsService.fetchSystemInfo,
+        enabled: user?.role === 'admin',
     });
 
     const { data: settings } = useQuery({
         queryKey: ['settings'],
-        queryFn: fetchSettings,
+        queryFn: settingsService.fetchSettings,
     });
 
     const { data: institutions, isLoading: isInstsLoading, error: instsError } = useQuery<BankInstitution[]>({
         queryKey: ['bank-institutions', selectedCountry, isSandbox],
-        queryFn: () => fetchBankInstitutions(selectedCountry, isSandbox),
+        queryFn: () => bankService.fetchInstitutions(selectedCountry, isSandbox),
         enabled: isAddModalOpen,
         retry: false,
     });
 
     // ── Mutations ──
     const createConnMut = useMutation({
-        mutationFn: ({ id, country }: { id: string, country: string }) => {
+        mutationFn: ({ id, name, country }: { id: string, name: string, country: string }) => {
             const redirectUrl = window.location.origin + '/bank-connections';
-            return createBankConnection(id, country, redirectUrl, isSandbox);
+            return bankService.createConnection(id, name, country, redirectUrl, isSandbox);
         },
         onSuccess: (data) => {
             if (data.auth_link) {
@@ -87,7 +84,7 @@ export default function BankConnectionsPage() {
     });
 
     const finishConnMut = useMutation({
-        mutationFn: ({ reqId, code }: { reqId: string, code?: string }) => finishBankConnection(reqId, code),
+        mutationFn: ({ reqId, code }: { reqId: string, code?: string }) => bankService.finishConnection(reqId, code),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
             setSearchParams({});
@@ -95,21 +92,21 @@ export default function BankConnectionsPage() {
     });
 
     const deleteConnMut = useMutation({
-        mutationFn: (id: string) => deleteBankConnection(id),
+        mutationFn: (id: string) => bankService.deleteConnection(id),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
         },
     });
 
     const updateAccTypeMut = useMutation({
-        mutationFn: ({ id, type }: { id: string, type: string }) => updateBankAccountType(id, type),
+        mutationFn: ({ id, type }: { id: string, type: string }) => bankService.updateAccountType(id, type),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['bank-connections'] });
         },
     });
 
     const syncMut = useMutation({
-        mutationFn: syncBankAccounts,
+        mutationFn: bankService.syncAccounts,
         onSuccess: () => {
             setIsSyncing(false);
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
@@ -121,7 +118,7 @@ export default function BankConnectionsPage() {
     });
 
     const updateSettingsMut = useMutation({
-        mutationFn: updateSettings,
+        mutationFn: settingsService.updateSettings,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['settings'] });
         }
@@ -405,7 +402,7 @@ export default function BankConnectionsPage() {
                                     {filteredInstitutions.map(inst => (
                                         <button
                                             key={inst.id}
-                                            onClick={() => createConnMut.mutate({ id: inst.id, country: inst.country })}
+                                            onClick={() => createConnMut.mutate({ id: inst.id, name: inst.name, country: inst.country })}
                                             disabled={createConnMut.isPending}
                                             className="flex items-center gap-3 p-4 border border-gray-100 dark:border-gray-800 rounded-2xl hover:border-indigo-200 dark:hover:border-indigo-800 hover:bg-indigo-50/50 dark:hover:bg-indigo-900/20 text-left transition-all group disabled:opacity-50"
                                         >

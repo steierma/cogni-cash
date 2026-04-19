@@ -34,7 +34,7 @@ func TestForecastingService_ExclusionStability(t *testing.T) {
 	from := now.AddDate(0, 2, 0) // May
 	to := now.AddDate(0, 2, 0)
 	forecast, _ := svc.GetCashFlowForecast(context.Background(), userID, from, to)
-	
+
 	if len(forecast.Predictions) != 1 {
 		t.Fatalf("expected 1 prediction for May, got %d", len(forecast.Predictions))
 	}

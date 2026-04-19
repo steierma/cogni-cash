@@ -9,15 +9,20 @@ import (
 	"github.com/google/uuid"
 )
 
+type settingValue struct {
+	value       string
+	isSensitive bool
+}
+
 type SettingsRepository struct {
 	mu       sync.RWMutex
-	settings map[uuid.UUID]map[string]string
+	settings map[uuid.UUID]map[string]settingValue
 	userRepo port.UserRepository
 }
 
 func NewSettingsRepository(userRepo port.UserRepository) *SettingsRepository {
 	return &SettingsRepository{
-		settings: make(map[uuid.UUID]map[string]string),
+		settings: make(map[uuid.UUID]map[string]settingValue),
 		userRepo: userRepo,
 	}
 }
@@ -52,8 +57,8 @@ func (r *SettingsRepository) getSetting(userID uuid.UUID, key string) (string, b
 	if !ok {
 		return "", false
 	}
-	val, ok := userSettings[key]
-	return val, ok
+	sVal, ok := userSettings[key]
+	return sVal.value, ok
 }
 
 func (r *SettingsRepository) GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
@@ -65,18 +70,21 @@ func (r *SettingsRepository) GetAll(ctx context.Context, userID uuid.UUID) (map[
 		return res, nil
 	}
 	for k, v := range userSettings {
-		res[k] = v
+		res[k] = v.value
 	}
 	return res, nil
 }
 
-func (r *SettingsRepository) Set(ctx context.Context, key string, value string, userID uuid.UUID) error {
+func (r *SettingsRepository) Set(ctx context.Context, key string, value string, userID uuid.UUID, isSensitive bool) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	if _, ok := r.settings[userID]; !ok {
-		r.settings[userID] = make(map[string]string)
+		r.settings[userID] = make(map[string]settingValue)
 	}
-	r.settings[userID][key] = value
+	r.settings[userID][key] = settingValue{
+		value:       value,
+		isSensitive: isSensitive,
+	}
 	return nil
 }
 

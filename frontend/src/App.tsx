@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { fetchSettings } from './api/client';
+import { settingsService } from './api/services/settingsService';
 import i18n from './i18n';
 import Layout from './components/Layout';
 import DashboardPage from './pages/DashboardPage';
@@ -17,8 +17,13 @@ import ForecastingPage from './pages/ForecastingPage';
 import LoginPage from './pages/LoginPage';
 import AnalyticsPage from './pages/AnalyticsPage';
 import UsersPage from './pages/UsersPage';
+import SharingDashboard from './pages/SharingDashboard';
+import DocumentVaultPage from './pages/DocumentVaultPage';
+import TaxYearViewPage from './pages/TaxYearViewPage';
 import ForgotPasswordPage from './pages/ForgotPasswordPage';
 import ResetPasswordPage from './pages/ResetPasswordPage';
+import SubscriptionsPage from './pages/SubscriptionsPage';
+import SubscriptionDetailPage from './pages/SubscriptionDetailPage';
 
 const isAuthenticated = () => {
     return document.cookie.split(';').some((item) => item.trim().startsWith('cogni_cash_logged_in=true'));
@@ -26,9 +31,9 @@ const isAuthenticated = () => {
 
 function ProtectedRoutes() {
     // Fetch settings to apply the language preference globally
-    const { data: settings } = useQuery({
+    const { data: settings } = useQuery<Record<string, string>, Error>({
         queryKey: ['settings'],
-        queryFn: fetchSettings,
+        queryFn: settingsService.fetchSettings,
     });
 
     useEffect(() => {
@@ -62,9 +67,14 @@ export default function App() {
                     <Route path="/analytics" element={<AnalyticsPage />} />
                     <Route path="/forecasting" element={<ForecastingPage />} />
                     <Route path="/transactions" element={<TransactionsPage />} />
+                    <Route path="/subscriptions" element={<SubscriptionsPage />} />
+                    <Route path="/subscriptions/:id" element={<SubscriptionDetailPage />} />
                     <Route path="/invoices" element={<InvoicesPage />} />
                     <Route path="/payslips" element={<PayslipsPage />} />
+                    <Route path="/documents" element={<DocumentVaultPage />} />
+                    <Route path="/documents/tax/:year" element={<TaxYearViewPage />} />
                     <Route path="/categories" element={<CategoriesPage />} />
+                    <Route path="/sharing" element={<SharingDashboard />} />
                     <Route path="/reconcile" element={<ReconcilePage />} />
                     <Route path="/bank-statements" element={<BankStatementsPage />} />
                     <Route path="/bank-connections" element={<BankConnectionsPage />} />

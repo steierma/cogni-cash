@@ -232,4 +232,106 @@ func TestInvoiceRepository(t *testing.T) {
 			t.Errorf("expected ErrInvoiceNotFound, got %v", err)
 		}
 	})
+
+	t.Run("Sharing_Permissions", func(t *testing.T) {
+		clearTables(ctx, t)
+		ownerID := uuid.New()
+		sharedUserID := uuid.New()
+		_, _ = globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'owner_inv', 'hash', 'owner_inv@example.com')", ownerID)
+		_, _ = globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'shared_inv', 'hash', 'shared_inv@example.com')", sharedUserID)
+
+		catID := uuid.New()
+		_, _ = globalPool.Exec(ctx, "INSERT INTO categories (id, user_id, name, color) VALUES ($1, $2, 'Shared-inv-cat', '#000001')", catID, ownerID)
+
+		// Create two invoices for the owner
+		invDirectID := uuid.New()
+		invCatSharedID := uuid.New()
+
+		_ = repo.Save(ctx, entity.Invoice{
+			ID:       invDirectID,
+			UserID:   ownerID,
+			Vendor:   entity.Vendor{Name: "DirectShared"},
+			Amount:   100.0,
+			Currency: "EUR",
+		})
+		_ = repo.Save(ctx, entity.Invoice{
+			ID:         invCatSharedID,
+			UserID:     ownerID,
+			CategoryID: &catID,
+			Vendor:     entity.Vendor{Name: "CatShared"},
+			Amount:     200.0,
+			Currency:   "EUR",
+		})
+
+		// 1. Direct sharing with 'view' permission
+		_, err := globalPool.Exec(ctx, "INSERT INTO shared_invoices (invoice_id, owner_user_id, shared_with_user_id, permission_level) VALUES ($1, $2, $3, 'view')", invDirectID, ownerID, sharedUserID)
+		if err != nil {
+			t.Fatalf("failed to insert shared_invoices: %v", err)
+		}
+
+		// 2. Category sharing with 'edit' permission
+		_, err = globalPool.Exec(ctx, "INSERT INTO shared_categories (category_id, owner_user_id, shared_with_user_id, permission_level) VALUES ($1, $2, $3, 'edit')", catID, ownerID, sharedUserID)
+		if err != nil {
+			t.Fatalf("failed to insert shared_categories: %v", err)
+		}
+
+		// 3. User with 'view' access can FindByID
+		found, err := repo.FindByID(ctx, invDirectID, sharedUserID)
+		if err != nil {
+			t.Fatalf("FindByID (shared view): %v", err)
+		}
+		if found.ID != invDirectID {
+			t.Errorf("expected invDirectID")
+		}
+
+		// User with 'view' access gets error on Update
+		err = repo.Update(ctx, entity.Invoice{
+			ID:       invDirectID,
+			UserID:   sharedUserID,
+			Vendor:   entity.Vendor{Name: "Hacked"},
+			Amount:   999.0,
+			Currency: "EUR",
+		})
+		if !errors.Is(err, entity.ErrInvoiceNotFound) {
+			t.Errorf("expected ErrInvoiceNotFound for Update with view access, got %v", err)
+		}
+
+		// 4. User with 'edit' access can Update
+		err = repo.Update(ctx, entity.Invoice{
+			ID:         invCatSharedID,
+			UserID:     sharedUserID,
+			CategoryID: &catID,
+			Vendor:     entity.Vendor{Name: "CatSharedEdited"},
+			Amount:     250.0,
+			Currency:   "EUR",
+		})
+		if err != nil {
+			t.Fatalf("Update (shared edit): %v", err)
+		}
+
+		// 5. FindAll with IncludeShared=true
+		allShared, err := repo.FindAll(ctx, entity.InvoiceFilter{
+			UserID:        sharedUserID,
+			IncludeShared: true,
+		})
+		if err != nil {
+			t.Fatalf("FindAll (IncludeShared=true): %v", err)
+		}
+		if len(allShared) != 2 {
+			t.Errorf("expected 2 shared invoices, got %d", len(allShared))
+		}
+
+		// 5. FindAll with Source="shared"
+		sourceShared, err := repo.FindAll(ctx, entity.InvoiceFilter{
+			UserID:        sharedUserID,
+			IncludeShared: false,
+			Source:        "shared",
+		})
+		if err != nil {
+			t.Fatalf("FindAll (Source=shared): %v", err)
+		}
+		if len(sourceShared) != 2 {
+			t.Errorf("expected 2 source=shared invoices, got %d", len(sourceShared))
+		}
+	})
 }

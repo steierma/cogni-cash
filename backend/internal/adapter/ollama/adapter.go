@@ -100,6 +100,81 @@ JSON Schema Definition:
 Source Text:
 {{TEXT}}`
 
+const defaultDocumentPromptTemplate = `Analyze the provided document and perform classification, metadata extraction, and a short summary.
+Return ONLY a valid JSON object. Do not include explanations or markdown formatting outside of the JSON block.
+
+Classification: Choose the most appropriate document type from: [tax_certificate, receipt, contract, other].
+
+Metadata: Extract key information (e.g., date, amount, vendor, employer, reference numbers, etc.) as a JSON object.
+
+Summary: Provide a one-sentence summary of the document.
+
+JSON Schema:
+{
+  "document_type": "string",
+  "metadata": {
+    "key": "value"
+  },
+  "summary": "string"
+}
+
+DOCUMENT TEXT:
+{{TEXT}}`
+
+const defaultSubscriptionPromptTemplate = `Analyze the merchant and transaction descriptions to enrich subscription details.
+Return ONLY a valid JSON object. Do not include explanations or markdown formatting outside of the JSON block.
+
+Merchant: {{MERCHANT}}
+Transactions:
+{{TRANSACTIONS}}
+
+JSON Schema:
+{
+  "merchant_name": "string (cleaned/formal name)",
+  "customer_number": "string (if found in transactions)",
+  "contact_email": "string (support or billing email if known or found)",
+  "contact_phone": "string (support phone if known or found)",
+  "contact_website": "string (official website URL)",
+  "support_url": "string (direct link to help/support page)",
+  "cancellation_url": "string (direct link to cancellation or account management page)",
+  "is_trial": "boolean (true if these transactions look like a free trial phase)",
+  "notes": "string (short summary of the service)"
+}
+
+If a field is unknown, return an empty string or null for boolean.`
+
+const defaultVerificationPromptTemplate = `Analyze the merchant and transaction details to determine if it is a recurring subscription service.
+A subscription service is something like Netflix, Rent, Insurance, Gym, Software (SaaS), etc.
+One-off grocery purchases, random ATM withdrawals, or peer-to-peer transfers are NOT subscriptions.
+
+Merchant: {{MERCHANT}}
+Amount: {{AMOUNT}} {{CURRENCY}}
+Billing Cycle: {{CYCLE}}
+
+Return ONLY a valid JSON object. Do not include explanations.
+JSON Schema:
+{"is_subscription": boolean, "reason": "short explanation"}
+`
+
+const defaultCancellationLetterPromptTemplate = `Draft a formal cancellation letter for the following subscription.
+The letter should be professional and include all necessary details for the merchant to identify the contract.
+Return ONLY a valid JSON object. Do not include explanations or markdown formatting outside of the JSON block.
+
+User: {{USER_NAME}} <{{USER_EMAIL}}>
+Merchant: {{MERCHANT}}
+Customer Number: {{CUSTOMER_NUMBER}}
+End Date: {{END_DATE}}
+Notice Period: {{NOTICE_PERIOD}} days
+Language: {{LANGUAGE}}
+
+JSON Schema:
+{
+  "subject": "string",
+  "body": "string"
+}
+
+Draft the letter in the requested language ({{LANGUAGE}}).`
+
 // --- Google AI Types ---
 
 type geminiRequest struct {
@@ -554,11 +629,185 @@ func (a *Adapter) CategorizeTransactionsBatch(ctx context.Context, userID uuid.U
 	return results, nil
 }
 
+// ─── DOCUMENT VAULT PARSING ──────────────────────────────────────────────────
+
+func (a *Adapter) ClassifyAndExtract(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.DocumentType, map[string]interface{}, string, error) {
+	a.logger.Info("AI document classification and extraction initiated", "file", fileName, "mime_type", mimeType, "user_id", userID)
+
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return entity.DocTypeOther, nil, "", err
+	}
+
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_document_prompt", userID)
+	if strings.TrimSpace(promptTemplate) == "" {
+		promptTemplate = defaultDocumentPromptTemplate
+	}
+
+	// 1. Extract text for search (if PDF/Text)
+	var extractedText string
+	if a.extractor != nil {
+		// This handles PDFs
+		extractedText, _ = a.extractor.Extract(ctx, userID, fileBytes, mimeType)
+	}
+
+	isPDF := strings.Contains(mimeType, "application/pdf")
+	isImage := strings.HasPrefix(mimeType, "image/")
+
+	if extractedText == "" && !isPDF && !isImage {
+		extractedText = string(fileBytes)
+	}
+
+	// 2. Call LLM for classification and metadata
+	rawResp, err := a.processFileWithAI(ctx, userID, baseURL, token, model, mimeType, fileBytes, promptTemplate)
+	if err != nil {
+		return entity.DocTypeOther, nil, extractedText, err
+	}
+
+	return a.unmarshalDocumentClassification(rawResp, extractedText)
+}
+
+func (a *Adapter) VerifySubscriptionSuggestion(ctx context.Context, userID uuid.UUID, merchantName string, amount float64, currency string, billingCycle string) (bool, error) {
+	a.logger.Info("AI subscription verification initiated", "merchant", merchantName, "user_id", userID)
+
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return false, err
+	}
+
+	prompt := defaultVerificationPromptTemplate
+	prompt = strings.ReplaceAll(prompt, "{{MERCHANT}}", merchantName)
+	prompt = strings.ReplaceAll(prompt, "{{AMOUNT}}", fmt.Sprintf("%.2f", amount))
+	prompt = strings.ReplaceAll(prompt, "{{CURRENCY}}", currency)
+	prompt = strings.ReplaceAll(prompt, "{{CYCLE}}", billingCycle)
+
+	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	if err != nil {
+		return false, err
+	}
+
+	rawResp = cleanJSONResponse(rawResp)
+
+	var res struct {
+		IsSubscription bool `json:"is_subscription"`
+	}
+	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
+		a.logger.Error("failed to unmarshal AI subscription verification", "err", err, "raw", rawResp)
+		// Default to true if AI fails, to not miss potential subscriptions (conservative)
+		// Or false to be "stricter" as requested. Let's go with false for strictness.
+		return false, fmt.Errorf("llm adapter: parse verification json: %w", err)
+	}
+
+	return res.IsSubscription, nil
+}
+
+func (a *Adapter) EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string) (port.SubscriptionEnrichmentResult, error) {
+	a.logger.Info("AI subscription enrichment initiated", "merchant", merchantName, "user_id", userID)
+
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return port.SubscriptionEnrichmentResult{}, err
+	}
+
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_subscription_prompt", userID)
+	if strings.TrimSpace(promptTemplate) == "" {
+		promptTemplate = defaultSubscriptionPromptTemplate
+	}
+
+	txText := strings.Join(transactionDescriptions, "\n- ")
+	prompt := strings.ReplaceAll(promptTemplate, "{{MERCHANT}}", merchantName)
+	prompt = strings.ReplaceAll(prompt, "{{TRANSACTIONS}}", txText)
+
+	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	if err != nil {
+		return port.SubscriptionEnrichmentResult{}, err
+	}
+
+	rawResp = cleanJSONResponse(rawResp)
+
+	var res port.SubscriptionEnrichmentResult
+	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
+		a.logger.Error("failed to unmarshal AI subscription enrichment", "err", err, "raw", rawResp)
+		return port.SubscriptionEnrichmentResult{}, fmt.Errorf("llm adapter: parse json: %w", err)
+	}
+
+	return res, nil
+}
+
+func (a *Adapter) GenerateCancellationLetter(ctx context.Context, userID uuid.UUID, req port.CancellationLetterRequest) (port.CancellationLetterResult, error) {
+	a.logger.Info("AI cancellation letter generation initiated", "merchant", req.MerchantName, "user_id", userID)
+
+	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	if err != nil {
+		return port.CancellationLetterResult{}, err
+	}
+
+	promptTemplate, _ := a.settingsRepo.Get(ctx, "llm_cancellation_prompt", userID)
+	if strings.TrimSpace(promptTemplate) == "" {
+		promptTemplate = defaultCancellationLetterPromptTemplate
+	}
+
+	prompt := strings.ReplaceAll(promptTemplate, "{{USER_NAME}}", req.UserFullName)
+	prompt = strings.ReplaceAll(prompt, "{{USER_EMAIL}}", req.UserEmail)
+	prompt = strings.ReplaceAll(prompt, "{{MERCHANT}}", req.MerchantName)
+	prompt = strings.ReplaceAll(prompt, "{{CUSTOMER_NUMBER}}", req.CustomerNumber)
+	prompt = strings.ReplaceAll(prompt, "{{END_DATE}}", req.ContractEndDate)
+	prompt = strings.ReplaceAll(prompt, "{{NOTICE_PERIOD}}", fmt.Sprintf("%d", req.NoticePeriodDays))
+	prompt = strings.ReplaceAll(prompt, "{{LANGUAGE}}", req.Language)
+
+	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	if err != nil {
+		return port.CancellationLetterResult{}, err
+	}
+
+	rawResp = cleanJSONResponse(rawResp)
+
+	var res port.CancellationLetterResult
+	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
+		a.logger.Error("failed to unmarshal AI cancellation letter", "err", err, "raw", rawResp)
+		return port.CancellationLetterResult{}, fmt.Errorf("llm adapter: parse json: %w", err)
+	}
+
+	return res, nil
+}
+
+func (a *Adapter) unmarshalDocumentClassification(rawResp string, extractedText string) (entity.DocumentType, map[string]interface{}, string, error) {
+	rawResp = cleanJSONResponse(rawResp)
+
+	var res struct {
+		DocumentType string                 `json:"document_type"`
+		Metadata     map[string]interface{} `json:"metadata"`
+		Summary      string                 `json:"summary"`
+	}
+
+	if err := json.Unmarshal([]byte(rawResp), &res); err != nil {
+		a.logger.Error("failed to unmarshal AI document classification", "err", err, "raw", rawResp)
+		return entity.DocTypeOther, nil, extractedText, fmt.Errorf("llm adapter: parse json: %w", err)
+	}
+
+	docType := entity.DocumentType(strings.ToLower(res.DocumentType))
+	switch docType {
+	case entity.DocTypeTaxCertificate, entity.DocTypeReceipt, entity.DocTypeContract, entity.DocTypeOther:
+		// valid
+	default:
+		docType = entity.DocTypeOther
+	}
+
+	if res.Metadata == nil {
+		res.Metadata = make(map[string]interface{})
+	}
+	if res.Summary != "" {
+		res.Metadata["summary"] = res.Summary
+	}
+
+	return docType, res.Metadata, extractedText, nil
+}
+
 // ─── HTTP REQUEST HELPERS ────────────────────────────────────────────────────
 
 func (a *Adapter) doGeminiMultimodalRequest(ctx context.Context, url, token, model, prompt, mimeType string, fileBytes []byte) (string, error) {
 	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", url, model, token)
-	payload, _ := json.Marshal(geminiRequest{
+	payload, err := json.Marshal(geminiRequest{
 		Contents: []geminiContent{{
 			Parts: []geminiPart{
 				{Text: prompt},
@@ -569,8 +818,14 @@ func (a *Adapter) doGeminiMultimodalRequest(ctx context.Context, url, token, mod
 			},
 		}},
 	})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal gemini payload: %w", err)
+	}
 
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create gemini request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
@@ -596,10 +851,17 @@ func (a *Adapter) doGeminiMultimodalRequest(ctx context.Context, url, token, mod
 
 func (a *Adapter) doAIRequest(ctx context.Context, url, token, model, prompt string) (string, error) {
 	endpoint := fmt.Sprintf("%s/v1beta/models/%s:generateContent?key=%s", url, model, token)
-	payload, _ := json.Marshal(geminiRequest{
+	payload, err := json.Marshal(geminiRequest{
 		Contents: []geminiContent{{Parts: []geminiPart{{Text: prompt}}}},
 	})
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal gemini payload: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create gemini request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := a.client.Do(req)
@@ -625,16 +887,22 @@ func (a *Adapter) doAIRequest(ctx context.Context, url, token, model, prompt str
 }
 
 func (a *Adapter) doOllamaRequest(ctx context.Context, url, token, model, prompt string, images []string) (string, error) {
-	payload, _ := json.Marshal(ollamaGenerateRequest{
+	payload, err := json.Marshal(ollamaGenerateRequest{
 		Model:  model,
 		Prompt: prompt,
 		Stream: false,
 		Format: "json",
 		Images: images,
 	})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal ollama payload: %w", err)
+	}
 
 	fullURL := url + "/api/generate"
-	req, _ := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, fullURL, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create ollama request: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)

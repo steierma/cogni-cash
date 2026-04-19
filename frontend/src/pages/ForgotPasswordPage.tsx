@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Mail, ArrowLeft, CheckCircle2, AlertCircle } from 'lucide-react';
-import { requestPasswordReset } from '../api/client';
+import { authService } from '../api/services/authService';
 
 const ForgotPasswordPage = () => {
     const { t } = useTranslation();
@@ -15,7 +15,7 @@ const ForgotPasswordPage = () => {
         setLoading(true);
         setError('');
         try {
-            await requestPasswordReset(email);
+            await authService.requestPasswordReset(email);
             setSuccess(true);
         } catch (err: any) {
             setError(err.response?.data?.error || 'Failed to request password reset.');

@@ -20,6 +20,7 @@ type BankService struct {
 	stmtRepo         port.BankStatementRepository
 	settingsRepo     port.SettingsRepository
 	plannedTxService port.PlannedTransactionUseCase
+	discoveryService port.DiscoveryUseCase
 	provider         port.BankProvider
 	logger           *slog.Logger
 }
@@ -33,6 +34,11 @@ func NewBankService(repo port.BankRepository, stmtRepo port.BankStatementReposit
 		provider:         provider,
 		logger:           logger,
 	}
+}
+
+func (s *BankService) WithDiscoveryService(svc port.DiscoveryUseCase) *BankService {
+	s.discoveryService = svc
+	return s
 }
 
 func (s *BankService) GetInstitutions(ctx context.Context, userID uuid.UUID, countryCode string, isSandbox bool) ([]entity.BankInstitution, error) {
@@ -101,17 +107,22 @@ func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, re
 	status := entity.StatusLinked
 
 	if status == entity.StatusLinked {
+		s.logger.Info("fetching accounts from provider", "requisition_id", requisitionID, "user_id", userID)
 		accounts, err := s.provider.FetchAccounts(ctx, userID, requisitionID)
 		if err != nil {
+			s.logger.Error("failed to fetch accounts from provider", "requisition_id", requisitionID, "user_id", userID, "error", err)
 			return err
 		}
 		s.logger.Info("Fetched accounts for connection", "count", len(accounts), "connection_id", conn.ID, "user_id", conn.UserID)
 		for i := range accounts {
 			accounts[i].ConnectionID = conn.ID
 		}
+		s.logger.Info("upserting accounts to database", "count", len(accounts), "connection_id", conn.ID, "user_id", userID)
 		if err := s.repo.UpsertAccounts(ctx, accounts, userID); err != nil {
+			s.logger.Error("failed to upsert accounts to database", "connection_id", conn.ID, "user_id", userID, "error", err)
 			return err
 		}
+		s.logger.Info("successfully upserted accounts to database", "count", len(accounts), "connection_id", conn.ID, "user_id", userID)
 	}
 
 	s.logger.Info("Bank connection finalized", "connection_id", conn.ID, "status", status, "user_id", conn.UserID)
@@ -143,9 +154,11 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, user
 	s.logger.Info("Manually syncing account", "account_id", accountID, "user_id", userID)
 	acc, err := s.repo.GetAccountByID(ctx, accountID, userID)
 	if err != nil {
+		s.logger.Error("failed to get account by ID", "account_id", accountID, "user_id", userID, "error", err)
 		return err
 	}
 	if acc == nil {
+		s.logger.Warn("account not found for sync", "account_id", accountID, "user_id", userID)
 		return fmt.Errorf("account not found: %s", accountID)
 	}
 
@@ -157,13 +170,17 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, user
 		}
 	}
 	dateFrom := time.Now().AddDate(0, 0, -historyDays)
+	s.logger.Info("Syncing account with lookback", "account_id", accountID, "days", historyDays, "from", dateFrom.Format("2006-01-02"), "user_id", userID)
 
 	txns, balance, err := s.provider.FetchTransactions(ctx, userID, acc.ProviderAccountID, &dateFrom, nil)
 	if err != nil {
+		s.logger.Error("provider failed to fetch transactions", "account_id", accountID, "provider_id", acc.ProviderAccountID, "user_id", userID, "error", err)
 		errStr := err.Error()
 		_ = s.repo.UpdateAccountBalance(ctx, acc.ID, acc.Balance, time.Now(), &errStr, userID)
 		return err
 	}
+
+	s.logger.Info("Fetched transactions from provider", "account_id", accountID, "count", len(txns), "balance", balance, "user_id", userID)
 
 	for i := range txns {
 		txns[i].UserID = userID
@@ -173,9 +190,16 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, user
 	}
 
 	if err := s.stmtRepo.CreateTransactions(ctx, txns); err != nil {
+		s.logger.Error("failed to save transactions to database", "account_id", accountID, "user_id", userID, "error", err)
 		errStr := "Failed to save transactions: " + err.Error()
 		_ = s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), &errStr, userID)
 		return err
+	}
+
+	if s.discoveryService != nil && len(txns) > 0 {
+		if err := s.discoveryService.MatchTransactions(ctx, userID, txns); err != nil {
+			s.logger.Error("failed to match subscription transactions in sync", "user_id", userID, "error", err)
+		}
 	}
 
 	s.logger.Info("Sync completed for account", "account_id", acc.ID, "new_txns", len(txns), "new_balance", balance, "user_id", userID)
@@ -183,11 +207,14 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, user
 }
 
 func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) error {
-	s.logger.Info("Scheduled sync for all accounts", "user_id", userID)
+	s.logger.Info("=== BANK SYNC START ===", "user_id", userID)
 	conns, err := s.repo.GetConnectionsByUserID(ctx, userID)
 	if err != nil {
+		s.logger.Error("failed to get connections for user", "user_id", userID, "error", err)
 		return err
 	}
+
+	s.logger.Info("Found bank connections for sync", "count", len(conns), "user_id", userID)
 
 	historyDaysStr, _ := s.settingsRepo.Get(ctx, "bank_sync_history_days", userID)
 	historyDays := 14
@@ -197,26 +224,33 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 		}
 	}
 	dateFrom := time.Now().AddDate(0, 0, -historyDays)
+	s.logger.Info("Syncing all accounts with lookback", "days", historyDays, "from", dateFrom.Format("2006-01-02"), "user_id", userID)
 
 	for _, conn := range conns {
 		if conn.Status != entity.StatusLinked {
+			s.logger.Info("Skipping connection in status", "connection_id", conn.ID, "status", conn.Status, "user_id", userID)
 			continue
 		}
 
+		s.logger.Info("Syncing connection", "connection_id", conn.ID, "institution_name", conn.InstitutionName, "institution_id", conn.InstitutionID, "user_id", userID)
 		accs, err := s.repo.GetAccountsByConnectionID(ctx, conn.ID, userID)
 		if err != nil {
+			s.logger.Error("failed to get accounts for connection", "connection_id", conn.ID, "user_id", userID, "error", err)
 			continue
 		}
 
+		s.logger.Info("Found accounts for connection", "count", len(accs), "connection_id", conn.ID, "user_id", userID)
+
 		for _, acc := range accs {
+			s.logger.Info("Syncing account", "account_id", acc.ID, "provider_id", acc.ProviderAccountID, "user_id", userID)
 			txns, balance, err := s.provider.FetchTransactions(ctx, userID, acc.ProviderAccountID, &dateFrom, nil)
 			if err != nil {
-				s.logger.Error("failed to sync account", "account_id", acc.ID, "user_id", userID, "error", err)
+				s.logger.Error("failed to fetch transactions for account", "account_id", acc.ID, "user_id", userID, "error", err)
 				errStr := err.Error()
 				_ = s.repo.UpdateAccountBalance(ctx, acc.ID, acc.Balance, time.Now(), &errStr, userID)
 				continue
 			}
-			s.logger.Info("fetched transactions for account", "account_id", acc.ID, "user_id", userID, "transaction_count", len(txns), "balance", balance)
+			s.logger.Info("Fetched transactions for account", "account_id", acc.ID, "count", len(txns), "balance", balance, "user_id", userID)
 
 			// Add AccountID, StatementType and ContentHash to transactions
 			for i := range txns {
@@ -233,11 +267,20 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 				continue
 			}
 
+			if s.discoveryService != nil && len(txns) > 0 {
+				if err := s.discoveryService.MatchTransactions(ctx, userID, txns); err != nil {
+					s.logger.Error("failed to match subscription transactions in scheduled sync", "user_id", userID, "error", err)
+				}
+			}
+
 			if err := s.repo.UpdateAccountBalance(ctx, acc.ID, balance, time.Now(), nil, userID); err != nil {
 				s.logger.Error("failed to update account balance", "account_id", acc.ID, "user_id", userID, "error", err)
 			}
+			s.logger.Info("Sync completed for account", "account_id", acc.ID, "user_id", userID)
 		}
 	}
+
+	s.logger.Info("Finished sync process for all accounts", "user_id", userID)
 	return nil
 }
 

@@ -1,8 +1,7 @@
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
-import { fetchCategories } from '../api/client';
-import type { Category } from '../api/types';
-
+import { categoryService } from '../api/services/categoryService';
+import type { Category } from "../api/types/category";
 const FALLBACK: Record<string, string> = {
     'Haus und Hausrat':                           '#f59e0b',
     'Bildung, Gesundheit, Beauty und Wellness':   '#ec4899',
@@ -20,7 +19,7 @@ export default function CategoryBadge({ category }: { category?: string }) {
     const { t } = useTranslation();
     const { data: categories = [] } = useQuery<Category[]>({
         queryKey: ['categories'],
-        queryFn: fetchCategories,
+        queryFn: categoryService.fetchCategories,
         staleTime: 5 * 60 * 1000,
     });
 

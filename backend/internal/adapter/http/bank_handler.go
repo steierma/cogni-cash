@@ -82,6 +82,14 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Trigger background sync so user sees data immediately after connecting
+	go func() {
+		ctx := context.Background()
+		if err := h.bankSvc.SyncAllAccounts(ctx, userID); err != nil {
+			h.Logger.Error("background sync failed after connection finish", "user_id", userID, "error", err)
+		}
+	}()
+
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 

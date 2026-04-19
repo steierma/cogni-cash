@@ -3,16 +3,15 @@
 package ai
 
 import (
-	"bytes"
 	"context"
 	"log/slog"
 	"net/http"
 	"strings"
 
+	"cogni-cash/internal/adapter/parser/pdfutil"
 	"cogni-cash/internal/domain/entity"
 
 	"github.com/google/uuid"
-	"github.com/ledongthuc/pdf"
 )
 
 // LLMStatementParser defines the single method the LLM adapter must fulfil.
@@ -60,29 +59,20 @@ func (p *Parser) Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) 
 	}
 
 	// Text/PDF path: extract readable text, then forward as plain-text bytes
-	rawText, err := extractPDFText(fileBytes)
-	if err != nil {
+	var rawText string
+	if detected == "application/pdf" {
+		if text, err := pdfutil.ExtractText(fileBytes); err == nil {
+			rawText = text
+		}
+	}
+	if rawText == "" {
 		rawText = string(fileBytes)
 	}
+
 	if len(rawText) > 60000 {
 		rawText = rawText[:60000]
 	}
 
 	p.logger.Info("Sending extracted text to LLM for bank statement parsing", "text_length", len(rawText))
 	return p.llm.ParseBankStatementDocument(ctx, userID, "text/plain", []byte(rawText))
-}
-
-func extractPDFText(fileBytes []byte) (string, error) {
-	readerAt := bytes.NewReader(fileBytes)
-	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
-	if err != nil {
-		return "", err
-	}
-	var buf bytes.Buffer
-	b, err := r.GetPlainText()
-	if err != nil {
-		return "", err
-	}
-	buf.ReadFrom(b)
-	return buf.String(), nil
 }

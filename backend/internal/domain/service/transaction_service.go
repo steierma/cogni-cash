@@ -90,12 +90,17 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 
 	timeFormat := "2006-01"
 
-	catExpenseMap := make(map[string]float64)
-	catIncomeMap := make(map[string]float64)
-	merchantExpenseMap := make(map[string]float64)
+	catNetMap := make(map[string]float64)
+	merchantNetMap := make(map[string]float64)
 	timeSeriesMap := make(map[string]*entity.TimeSeriesPoint)
 
 	for _, tx := range txns {
+		// Net-Worth Isolation: Shared transactions from other users don't count towards my net worth
+		// unless we explicitly want to see collaborative analytics.
+		if !filter.IncludeShared && tx.UserID != filter.UserID {
+			continue
+		}
+
 		dateStr := tx.BookingDate.Format(timeFormat)
 		if _, ok := timeSeriesMap[dateStr]; !ok {
 			timeSeriesMap[dateStr] = &entity.TimeSeriesPoint{
@@ -106,80 +111,67 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 
 		catID := "uncategorized"
 		if tx.CategoryID != nil {
-			catID = tx.CategoryID.String()
+			idStr := tx.CategoryID.String()
+			// If the category is not in our active list (e.g. soft-deleted), treat it as uncategorized
+			if _, ok := nameMap[idStr]; ok {
+				catID = idStr
+			}
 		}
 
 		if tx.Amount >= 0 {
 			result.TotalIncome += tx.Amount
 			timeSeriesMap[dateStr].Income += tx.Amount
-			catIncomeMap[catID] += tx.Amount
-			timeSeriesMap[dateStr].CategoryAmounts[catID] += tx.Amount
 		} else {
 			absAmount := math.Abs(tx.Amount)
 			result.TotalExpense += absAmount
 			timeSeriesMap[dateStr].Expense += absAmount
-			catExpenseMap[catID] += absAmount
-			timeSeriesMap[dateStr].CategoryAmounts[catID] += absAmount
-
-			merchant := strings.TrimSpace(tx.Description)
-			if merchant == "" {
-				merchant = strings.TrimSpace(tx.Reference)
-			}
-			if merchant == "" {
-				merchant = "Unknown"
-			} else if len(merchant) > 40 {
-				merchant = merchant[:37] + "..."
-			}
-			merchantExpenseMap[merchant] += absAmount
 		}
+
+		// Always accumulate net amount for category and merchant
+		catNetMap[catID] += tx.Amount
+		timeSeriesMap[dateStr].CategoryAmounts[catID] += tx.Amount
+
+		merchant := strings.TrimSpace(tx.Description)
+		if merchant == "" {
+			merchant = strings.TrimSpace(tx.Reference)
+		}
+		if merchant == "" {
+			merchant = "Unknown"
+		} else if len(merchant) > 40 {
+			merchant = merchant[:37] + "..."
+		}
+		merchantNetMap[merchant] += tx.Amount
 	}
 
 	result.NetSavings = result.TotalIncome - result.TotalExpense
 
-	// Deduplicate CategoryTotals by ID
-	mergedCatMap := make(map[string]entity.CategoryTotal)
-
-	for id, amount := range catExpenseMap {
+	// Convert net maps to DTOs
+	for id, netAmount := range catNetMap {
 		color := colorMap[id]
 		name := nameMap[id]
 		if id == "uncategorized" {
 			color = "#9ca3af"
 			name = "Uncategorized"
 		}
-		mergedCatMap[id] = entity.CategoryTotal{
-			CategoryID: id,
-			Category:   name,
-			Amount:     amount,
-			Type:       "expense",
-			Color:      color,
-		}
-	}
 
-	for id, amount := range catIncomeMap {
-		if existing, ok := mergedCatMap[id]; ok {
-			// If already exists as expense, keep as expense but add to amount
-			// or decide which type to prioritize. Usually expense is what people want to track.
-			existing.Amount += amount
-			mergedCatMap[id] = existing
-		} else {
-			color := colorMap[id]
-			name := nameMap[id]
-			if id == "uncategorized" {
-				color = "#9ca3af"
-				name = "Uncategorized"
-			}
-			mergedCatMap[id] = entity.CategoryTotal{
+		// We classify as expense if net is negative, or income if net is positive
+		if netAmount < 0 {
+			result.CategoryTotals = append(result.CategoryTotals, entity.CategoryTotal{
 				CategoryID: id,
 				Category:   name,
-				Amount:     amount,
+				Amount:     math.Abs(netAmount),
+				Type:       "expense",
+				Color:      color,
+			})
+		} else if netAmount > 0 {
+			result.CategoryTotals = append(result.CategoryTotals, entity.CategoryTotal{
+				CategoryID: id,
+				Category:   name,
+				Amount:     netAmount,
 				Type:       "income",
 				Color:      color,
-			}
+			})
 		}
-	}
-
-	for _, catTotal := range mergedCatMap {
-		result.CategoryTotals = append(result.CategoryTotals, catTotal)
 	}
 
 	sort.Slice(result.CategoryTotals, func(i, j int) bool {
@@ -194,11 +186,14 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 		return result.TimeSeries[i].Date < result.TimeSeries[j].Date
 	})
 
-	for merchant, amount := range merchantExpenseMap {
-		result.TopMerchants = append(result.TopMerchants, entity.MerchantTotal{
-			Merchant: merchant,
-			Amount:   amount,
-		})
+	for merchant, netAmount := range merchantNetMap {
+		// Only include if it's a net expense for top merchants list
+		if netAmount < 0 {
+			result.TopMerchants = append(result.TopMerchants, entity.MerchantTotal{
+				Merchant: merchant,
+				Amount:   math.Abs(netAmount),
+			})
+		}
 	}
 
 	sort.Slice(result.TopMerchants, func(i, j int) bool {

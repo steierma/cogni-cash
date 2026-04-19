@@ -134,6 +134,7 @@ func (r *BankRepository) DeleteConnection(ctx context.Context, id uuid.UUID, use
 // Accounts
 
 func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.BankAccount, userID uuid.UUID) error {
+	r.Logger.Info("UpsertAccounts: starting batch operation", "count", len(accounts), "user_id", userID)
 	batch := &pgx.Batch{}
 	for _, acc := range accounts {
 		if acc.ID == uuid.Nil {
@@ -144,7 +145,7 @@ func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.B
 			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
 			FROM bank_connections
 			WHERE id = $2 AND user_id = $10
-			ON CONFLICT (provider_account_id) DO UPDATE SET
+			ON CONFLICT (connection_id, provider_account_id) DO UPDATE SET
 				balance = EXCLUDED.balance,
 				last_synced_at = EXCLUDED.last_synced_at,
 				iban = CASE WHEN EXCLUDED.iban <> '' THEN EXCLUDED.iban ELSE bank_accounts.iban END,
@@ -156,11 +157,19 @@ func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.B
 	br := r.pool.SendBatch(ctx, batch)
 	defer br.Close()
 
-	for range accounts {
-		if _, err := br.Exec(); err != nil {
+	for i := range accounts {
+		ct, err := br.Exec()
+		if err != nil {
+			r.Logger.Error("UpsertAccounts: batch item failed", "index", i, "error", err, "user_id", userID)
 			return fmt.Errorf("bank repo: upsert accounts batch: %w", err)
 		}
+		if ct.RowsAffected() == 0 {
+			r.Logger.Warn("UpsertAccounts: 0 rows affected for account", "index", i, "provider_id", accounts[i].ProviderAccountID, "connection_id", accounts[i].ConnectionID, "user_id", userID)
+		} else {
+			r.Logger.Info("UpsertAccounts: successfully upserted account", "index", i, "provider_id", accounts[i].ProviderAccountID, "rows", ct.RowsAffected(), "user_id", userID)
+		}
 	}
+	r.Logger.Info("UpsertAccounts: batch operation finished", "user_id", userID)
 	return nil
 }
 
@@ -197,7 +206,7 @@ func (r *BankRepository) GetAccountsByUserID(ctx context.Context, userID uuid.UU
 	}
 	defer rows.Close()
 
-	var accs []entity.BankAccount
+	accs := make([]entity.BankAccount, 0)
 	for rows.Next() {
 		var acc entity.BankAccount
 		var accType string
@@ -222,7 +231,7 @@ func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connecti
 	}
 	defer rows.Close()
 
-	var accs []entity.BankAccount
+	accs := make([]entity.BankAccount, 0)
 	for rows.Next() {
 		var acc entity.BankAccount
 		var accType string

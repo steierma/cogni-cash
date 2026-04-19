@@ -1,19 +1,13 @@
-// Package invoice provides a file-to-text extractor for invoice documents.
-// Supported formats: PDF (via ledongthuc/pdf), JPEG, PNG, GIF, WEBP.
-// For image files, Extract returns an empty string — the caller (InvoiceService)
-// detects this and falls back to the LLM multimodal path via CategorizeInvoiceImage.
-// For image-based PDFs or unsupported formats the caller should fall back to
-// the LLM multimodal path.
 package invoice
 
 import (
-	"bytes"
 	"context"
 	"fmt"
 	"strings"
 
+	"cogni-cash/internal/adapter/parser/pdfutil"
+
 	"github.com/google/uuid"
-	"github.com/ledongthuc/pdf"
 )
 
 // supportedImageMIMETypes lists all image MIME types accepted by the parser.
@@ -42,7 +36,7 @@ func (p *Parser) Extract(_ context.Context, _ uuid.UUID, fileBytes []byte, mimeT
 
 	// PDF: extract text directly
 	if strings.Contains(normalised, "application/pdf") {
-		return extractPDF(fileBytes)
+		return pdfutil.ExtractText(fileBytes)
 	}
 
 	// Images: return empty string — caller will use multimodal LLM
@@ -51,34 +45,4 @@ func (p *Parser) Extract(_ context.Context, _ uuid.UUID, fileBytes []byte, mimeT
 	}
 
 	return "", fmt.Errorf("invoice parser: unsupported mime type %q", mimeType)
-}
-
-// extractPDF pulls all readable text out of a PDF byte slice using ledongthuc/pdf.
-func extractPDF(fileBytes []byte) (string, error) {
-	readerAt := bytes.NewReader(fileBytes)
-	r, err := pdf.NewReader(readerAt, int64(len(fileBytes)))
-	if err != nil {
-		return "", fmt.Errorf("invoice parser: create pdf reader: %w", err)
-	}
-
-	var buf bytes.Buffer
-	totalPage := r.NumPage()
-	for pageIndex := 1; pageIndex <= totalPage; pageIndex++ {
-		p := r.Page(pageIndex)
-		if p.V.IsNull() {
-			continue
-		}
-		rows, err := p.GetTextByRow()
-		if err != nil {
-			continue // skip unreadable pages
-		}
-		for _, row := range rows {
-			for _, word := range row.Content {
-				buf.WriteString(word.S)
-				buf.WriteRune(' ')
-			}
-			buf.WriteRune('\n')
-		}
-	}
-	return strings.TrimSpace(buf.String()), nil
 }

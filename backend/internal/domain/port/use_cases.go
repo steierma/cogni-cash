@@ -48,6 +48,11 @@ type InvoiceUseCase interface {
 	Update(ctx context.Context, invoice entity.Invoice) (entity.Invoice, error)
 	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 	GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error)
+
+	// Sharing
+	ShareInvoice(ctx context.Context, invoiceID, ownerID, sharedWithID uuid.UUID, permission string) error
+	RevokeInvoiceShare(ctx context.Context, invoiceID, ownerID, sharedWithID uuid.UUID) error
+	ListInvoiceShares(ctx context.Context, invoiceID, ownerID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // BankStatementUseCase covers file import and deletion.
@@ -79,8 +84,9 @@ type ReconciliationUseCase interface {
 // SettingsUseCase covers application settings.
 type SettingsUseCase interface {
 	GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error)
+	GetAllMasked(ctx context.Context, userID uuid.UUID, isAdmin bool) (map[string]string, error)
 	Get(ctx context.Context, key string, userID uuid.UUID) (string, error)
-	UpdateMultiple(ctx context.Context, settings map[string]string, userID uuid.UUID) error
+	UpdateMultiple(ctx context.Context, settings map[string]string, userID uuid.UUID, isAdmin bool) error
 }
 
 // PayslipUseCase covers payslip import, update, and deletion.
@@ -117,6 +123,8 @@ type ForecastingUseCase interface {
 	ExcludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error
 	IncludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error
 	ListPatternExclusions(ctx context.Context, userID uuid.UUID) ([]entity.PatternExclusion, error)
+
+	CalculateCategoryAverage(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID, strategy string) (float64, error)
 }
 
 // NotificationUseCase covers email and system notifications.
@@ -135,3 +143,54 @@ type PlannedTransactionUseCase interface {
 	MatchTransactions(ctx context.Context, userID uuid.UUID, txns []entity.Transaction) error
 }
 
+// CategoryUseCase covers CRUD operations on categories and their sharing.
+type CategoryUseCase interface {
+	GetAll(ctx context.Context, userID uuid.UUID) ([]entity.Category, error)
+	GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Category, error)
+	Create(ctx context.Context, cat entity.Category) (entity.Category, error)
+	Update(ctx context.Context, cat entity.Category) (entity.Category, error)
+	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
+
+	// Sharing
+	ShareCategory(ctx context.Context, categoryID, ownerID, sharedWithID uuid.UUID, permission string) error
+	RevokeShare(ctx context.Context, categoryID, ownerID, sharedWithID uuid.UUID) error
+	ListShares(ctx context.Context, categoryID, ownerID uuid.UUID) ([]uuid.UUID, error)
+}
+
+// SharingUseCase covers the centralized sharing dashboard.
+type SharingUseCase interface {
+	GetDashboard(ctx context.Context, userID uuid.UUID) (entity.SharingDashboard, error)
+}
+
+// DocumentUseCase covers the generic Document Vault management.
+type DocumentUseCase interface {
+	Upload(ctx context.Context, req entity.DocumentUploadRequest) (entity.Document, error)
+	List(ctx context.Context, filter entity.DocumentFilter) ([]entity.Document, error)
+	GetDetail(ctx context.Context, id, userID uuid.UUID) (entity.Document, error)
+	Update(ctx context.Context, id, userID uuid.UUID, req entity.DocumentUpdateRequest) (entity.Document, error)
+	Delete(ctx context.Context, id, userID uuid.UUID) error
+	Download(ctx context.Context, id, userID uuid.UUID) (content []byte, mimeType string, fileName string, err error)
+	GetTaxYearSummary(ctx context.Context, userID uuid.UUID, year int) (entity.TaxYearSummary, error)
+}
+
+// DiscoveryUseCase covers the identification and approval of recurring subscriptions.
+type DiscoveryUseCase interface {
+	ListSubscriptions(ctx context.Context, userID uuid.UUID) ([]entity.Subscription, error)
+	GetSubscription(ctx context.Context, subID, userID uuid.UUID) (entity.Subscription, error)
+	UpdateSubscription(ctx context.Context, sub entity.Subscription) (entity.Subscription, error)
+	GetSuggestedSubscriptions(ctx context.Context, userID uuid.UUID) ([]entity.SuggestedSubscription, error)
+	ApproveSubscription(ctx context.Context, userID uuid.UUID, suggestion entity.SuggestedSubscription) (entity.Subscription, error)
+	DeclineSuggestion(ctx context.Context, userID uuid.UUID, merchantName string) error
+	GetDiscoveryFeedback(ctx context.Context, userID uuid.UUID) ([]entity.DiscoveryFeedback, error)
+	RemoveDiscoveryFeedback(ctx context.Context, userID uuid.UUID, merchantName string) error
+	AllowSuggestion(ctx context.Context, userID uuid.UUID, merchantName string) error
+	EnrichSubscription(ctx context.Context, userID, subID uuid.UUID) (entity.Subscription, error)
+	CreateSubscriptionFromTransaction(ctx context.Context, userID uuid.UUID, txnHash string, billingCycle string) (entity.Subscription, error)
+
+	// Cancellation
+	PreviewCancellation(ctx context.Context, userID, subID uuid.UUID, language string) (CancellationLetterResult, error)
+	CancelSubscription(ctx context.Context, userID, subID uuid.UUID, subject, body string) error
+	DeleteSubscription(ctx context.Context, userID, subID uuid.UUID) error
+	GetSubscriptionEvents(ctx context.Context, userID, subID uuid.UUID) ([]entity.SubscriptionEvent, error)
+	MatchTransactions(ctx context.Context, userID uuid.UUID, txns []entity.Transaction) error
+}

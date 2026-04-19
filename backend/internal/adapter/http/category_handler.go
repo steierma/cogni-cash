@@ -14,11 +14,17 @@ type categoryRequest struct {
 	Name               string `json:"name"`
 	Color              string `json:"color"`
 	IsVariableSpending bool   `json:"is_variable_spending"`
+	ForecastStrategy   string `json:"forecast_strategy"`
+}
+
+type shareCategoryRequest struct {
+	UserID     uuid.UUID `json:"user_id"`
+	Permission string    `json:"permission"` // 'view' or 'edit'
 }
 
 func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
-	if h.categoryRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "category repository not available")
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
 	userID := h.getUserID(r.Context())
@@ -27,7 +33,7 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	cats, err := h.categoryRepo.FindAll(r.Context(), userID)
+	cats, err := h.categorySvc.GetAll(r.Context(), userID)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -39,8 +45,8 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
-	if h.categoryRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "category repository not available")
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
 	userID := h.getUserID(r.Context())
@@ -57,11 +63,12 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 	if req.Color == "" {
 		req.Color = "#6366f1"
 	}
-	cat, err := h.categoryRepo.Save(r.Context(), entity.Category{
+	cat, err := h.categorySvc.Create(r.Context(), entity.Category{
 		UserID:             userID,
 		Name:               req.Name,
 		Color:              req.Color,
 		IsVariableSpending: req.IsVariableSpending,
+		ForecastStrategy:   req.ForecastStrategy,
 	})
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -71,8 +78,8 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
-	if h.categoryRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "category repository not available")
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
 	userID := h.getUserID(r.Context())
@@ -94,12 +101,13 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 	if req.Color == "" {
 		req.Color = "#6366f1"
 	}
-	cat, err := h.categoryRepo.Update(r.Context(), entity.Category{
+	cat, err := h.categorySvc.Update(r.Context(), entity.Category{
 		ID:                 id,
 		UserID:             userID,
 		Name:               req.Name,
 		Color:              req.Color,
 		IsVariableSpending: req.IsVariableSpending,
+		ForecastStrategy:   req.ForecastStrategy,
 	})
 	if err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
@@ -108,9 +116,9 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cat)
 }
 
-func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
-	if h.categoryRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "category repository not available")
+func (h *Handler) getCategoryAverage(w http.ResponseWriter, r *http.Request) {
+	if h.forecastingSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "forecasting service not available")
 		return
 	}
 	userID := h.getUserID(r.Context())
@@ -124,7 +132,38 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid category id")
 		return
 	}
-	if err := h.categoryRepo.Delete(r.Context(), id, userID); err != nil {
+
+	strategy := r.URL.Query().Get("strategy")
+	if strategy == "" {
+		strategy = "3y"
+	}
+
+	avg, err := h.forecastingSvc.CalculateCategoryAverage(r.Context(), userID, id, strategy)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]float64{"average": avg})
+}
+
+func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
+		return
+	}
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid category id")
+		return
+	}
+	if err := h.categorySvc.Delete(r.Context(), id, userID); err != nil {
 		writeError(w, http.StatusNotFound, err.Error())
 		return
 	}
@@ -132,8 +171,8 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) restoreCategory(w http.ResponseWriter, r *http.Request) {
-	if h.categoryRepo == nil {
-		writeError(w, http.StatusServiceUnavailable, "category repository not available")
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
 	userID := h.getUserID(r.Context())
@@ -149,17 +188,117 @@ func (h *Handler) restoreCategory(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Fetch the category to preserve existing name/color
-	cat, err := h.categoryRepo.FindByID(r.Context(), id, userID)
+	cat, err := h.categorySvc.GetByID(r.Context(), id, userID)
 	if err != nil {
 		writeError(w, http.StatusNotFound, "category not found")
 		return
 	}
 
 	cat.DeletedAt = nil // Clear deleted_at
-	restored, err := h.categoryRepo.Update(r.Context(), cat)
+	restored, err := h.categorySvc.Update(r.Context(), cat)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 	writeJSON(w, http.StatusOK, restored)
+}
+
+func (h *Handler) shareCategory(w http.ResponseWriter, r *http.Request) {
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
+		return
+	}
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid category id")
+		return
+	}
+
+	var req shareCategoryRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if req.Permission == "" {
+		req.Permission = "view"
+	}
+
+	err = h.categorySvc.ShareCategory(r.Context(), id, userID, req.UserID, req.Permission)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusCreated)
+}
+
+func (h *Handler) revokeCategoryShare(w http.ResponseWriter, r *http.Request) {
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
+		return
+	}
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	categoryID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid category id")
+		return
+	}
+
+	sharedWithUserID, err := uuid.Parse(chi.URLParam(r, "user_id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	err = h.categorySvc.RevokeShare(r.Context(), categoryID, userID, sharedWithUserID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listCategoryShares(w http.ResponseWriter, r *http.Request) {
+	if h.categorySvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "category service not available")
+		return
+	}
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	categoryID, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid category id")
+		return
+	}
+
+	// Verify the user has access to this category before listing its shares
+	_, err = h.categorySvc.GetByID(r.Context(), categoryID, userID)
+	if err != nil {
+		writeError(w, http.StatusNotFound, "category not found")
+		return
+	}
+
+	shares, err := h.categorySvc.ListShares(r.Context(), categoryID, userID)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	if shares == nil {
+		shares = []uuid.UUID{}
+	}
+	writeJSON(w, http.StatusOK, shares)
 }

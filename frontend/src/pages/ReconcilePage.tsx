@@ -22,14 +22,9 @@ import {
     ChevronRight,
     Wallet
 } from 'lucide-react';
-import {
-    createReconciliation,
-    fetchReconciliationSuggestions,
-    fetchTransactions,
-    fetchReconciliations,
-    deleteReconciliation
-} from '../api/client';
-import type { ReconciliationPairSuggestion, Reconciliation } from '../api/types';
+import { reconciliationService } from '../api/services/reconciliationService';
+import { transactionService } from '../api/services/transactionService';
+import type { ReconciliationPairSuggestion, Reconciliation } from "../api/types/transaction";
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 
 // Helper: translate a statement_type string into a localized label with icon
@@ -149,26 +144,26 @@ export default function ReconcilePage() {
     // --- Queries ---
     const { data: suggestions, isLoading: isLoadingSuggestions, isError: isErrorSuggestions } = useQuery({
         queryKey: ['reconciliation-suggestions', matchWindowDays],
-        queryFn: () => fetchReconciliationSuggestions(matchWindowDays),
+        queryFn: () => reconciliationService.fetchSuggestions(matchWindowDays),
         enabled: activeTab === 'suggestions'
     });
 
     const { data: unreconciledTxns, isLoading: isLoadingManual } = useQuery({
         queryKey: ['transactions', 'unreconciled'],
-        queryFn: () => fetchTransactions(undefined, true),
+        queryFn: () => transactionService.fetchTransactions(undefined, true),
         enabled: activeTab === 'manual'
     });
 
     const { data: historyList, isLoading: isLoadingHistory } = useQuery({
         queryKey: ['reconciliations'],
-        queryFn: fetchReconciliations,
+        queryFn: () => reconciliationService.fetchReconciliations(),
         enabled: activeTab === 'history'
     });
 
     // --- Mutations ---
     const reconcileBatchMutation = useMutation({
         mutationFn: async (pairs: { settlementHash: string, targetHash: string }[]) => {
-            const promises = pairs.map(p => createReconciliation(p.settlementHash, p.targetHash));
+            const promises = pairs.map(p => reconciliationService.create(p.settlementHash, p.targetHash));
             return Promise.all(promises);
         },
         onSuccess: () => {
@@ -180,7 +175,7 @@ export default function ReconcilePage() {
     });
 
     const deleteRecMutation = useMutation({
-        mutationFn: deleteReconciliation,
+        mutationFn: (id: string) => reconciliationService.delete(id),
         onSuccess: () => {
             handleSuccess(t('reconcile.successDeleted'));
         }

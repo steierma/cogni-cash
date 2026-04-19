@@ -1,21 +1,23 @@
 import * as React from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { useSearchParams } from 'react-router-dom';
+import { useSearchParams, NavLink } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import {
     BarChart3, Database, Layers, Loader2, Search, MapPin,
-    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Columns, Check, Zap
+    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Columns, Check, Zap, Link2, RefreshCcw
 } from 'lucide-react';
 
-import {
-    cancelAutoCategorize, fetchBankStatements, fetchCategories,
-    fetchTransactions, getAutoCategorizeStatus, startAutoCategorize,
-    updateTransactionCategory, fetchSettings, updateSettings,
-    markTransactionReviewed,
-    fetchPatternExclusions, excludePattern, includePattern
-} from '../api/client';
-import type { BankStatementSummary, Category, JobState, Transaction, PatternExclusion } from '../api/types';
+import { authService } from '../api/services/authService';
+import { bankService } from '../api/services/bankService';
+import { categoryService } from '../api/services/categoryService';
+import { settingsService } from '../api/services/settingsService';
+import { subscriptionService } from '../api/services/subscriptionService';
+import { transactionService } from '../api/services/transactionService';
+import type { BankStatementSummary } from "../api/types/bank";
+import type { Category } from "../api/types/category";
+import type { JobState, Transaction, PatternExclusion } from "../api/types/transaction";
+import type { User } from "../api/types/system";
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 
 import TransactionFilters, { type FilterState } from '../components/transactions/TransactionFilters';
@@ -47,6 +49,7 @@ export default function TransactionsPage() {
         to: null,
         amountMin: '',
         amountMax: '',
+        includeShared: false,
     };
 
     const initialFilters: FilterState = {
@@ -58,14 +61,16 @@ export default function TransactionsPage() {
         to: searchParams.get('to'),
         amountMin: getParam('amountMin'),
         amountMax: getParam('amountMax'),
+        includeShared: getParam('include_shared') === 'true',
     };
 
     const [applied, setApplied] = React.useState<FilterState>(initialFilters);
-    
+
     // Check if any filter is set in initial state to trigger auto-fetch
     const hasInitialFilters = Object.entries(initialFilters).some(([key, val]) => {
         if (key === 'type' && val === 'all') return false;
         if (key === 'category' && val === 'all') return false;
+        if (key === 'includeShared' && val === false) return false;
         return !!val;
     });
 
@@ -84,6 +89,7 @@ export default function TransactionsPage() {
 
     const [showVisuals, setShowVisuals] = React.useState(getParam('visuals', 'true') === 'true');
     const [includePredictions, setIncludePredictions] = React.useState(getParam('predictions', 'false') === 'true');
+    const [subModalTx, setSubModalTx] = React.useState<Transaction | null>(null);
     const [topHitsCount, setTopHitsCount] = React.useState<number>(3);
     const [toastMessage, setToastMessage] = React.useState<string | null>(null);
 
@@ -97,51 +103,57 @@ export default function TransactionsPage() {
 
     const { data: statements = [], isLoading: isLoadingStatements } = useQuery<BankStatementSummary[]>({
         queryKey: ['bank-statements'],
-        queryFn: fetchBankStatements,
+        queryFn: () => bankService.fetchStatements(),
     });
 
     const { data: allTxns = [], isLoading: isLoadingTxns, isError } = useQuery<Transaction[]>({
-        queryKey: ['transactions', applied.statement, applied.category, hideReconciled, applied.search, includePredictions],
-        queryFn: () => fetchTransactions(
+        queryKey: ['transactions', applied.statement, applied.category, hideReconciled, applied.search, includePredictions, applied.includeShared],
+        queryFn: () => transactionService.fetchTransactions(
             applied.statement || undefined,
             hideReconciled,
             applied.category !== 'all' ? applied.category : undefined,
             undefined,
             applied.search,
-            includePredictions
+            includePredictions,
+            applied.includeShared
         ),
         enabled: hasAppliedOnce,
     });
 
     const { data: categories = [] } = useQuery<Category[]>({
         queryKey: ['categories'],
-        queryFn: fetchCategories,
+        queryFn: () => categoryService.fetchCategories(),
         staleTime: 5 * 60 * 1000,
     });
 
     const { data: settings } = useQuery({
         queryKey: ['settings'],
-        queryFn: fetchSettings
+        queryFn: () => settingsService.fetchSettings()
     });
 
     const { data: jobStatus, refetch: refetchJobStatus } = useQuery<JobState>({
         queryKey: ['auto-categorize-status'],
-        queryFn: getAutoCategorizeStatus,
+        queryFn: () => transactionService.getAutoCategorizeStatus(),
         refetchInterval: (query) => query.state?.data?.is_running ? 1500 : false,
     });
 
     const { data: patternExclusions = [] } = useQuery<PatternExclusion[]>({
         queryKey: ['pattern-exclusions'],
-        queryFn: fetchPatternExclusions,
+        queryFn: () => transactionService.fetchPatternExclusions(),
+    });
+
+    const { data: me } = useQuery<User>({
+        queryKey: ['me'],
+        queryFn: () => authService.fetchMe(),
     });
 
     const updateSettingsMut = useMutation({
-        mutationFn: updateSettings,
+        mutationFn: (data: Record<string, string>) => settingsService.updateSettings(data),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] })
     });
 
     const markReviewedMutation = useMutation({
-        mutationFn: (hash: string) => markTransactionReviewed(hash),
+        mutationFn: (hash: string) => transactionService.markReviewed(hash),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['analytics'] });
@@ -149,7 +161,7 @@ export default function TransactionsPage() {
     });
 
     const excludePatternMutation = useMutation({
-        mutationFn: (matchTerm: string) => excludePattern(matchTerm),
+        mutationFn: (matchTerm: string) => transactionService.excludePattern(matchTerm),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['pattern-exclusions'] });
             qc.invalidateQueries({ queryKey: ['forecast'] });
@@ -157,7 +169,7 @@ export default function TransactionsPage() {
     });
 
     const includePatternMutation = useMutation({
-        mutationFn: (matchTerm: string) => includePattern(matchTerm),
+        mutationFn: (matchTerm: string) => transactionService.includePattern(matchTerm),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['pattern-exclusions'] });
             qc.invalidateQueries({ queryKey: ['forecast'] });
@@ -166,7 +178,7 @@ export default function TransactionsPage() {
 
     const batchMarkReviewedMutation = useMutation({
         mutationFn: async (hashes: string[]) => {
-            await Promise.all(hashes.map(hash => markTransactionReviewed(hash)));
+            await Promise.all(hashes.map(hash => transactionService.markReviewed(hash)));
         },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
@@ -242,7 +254,8 @@ export default function TransactionsPage() {
         if (applied.to) next.set('to', applied.to);
         if (applied.amountMin) next.set('amountMin', applied.amountMin);
         if (applied.amountMax) next.set('amountMax', applied.amountMax);
-        
+        if (applied.includeShared) next.set('include_shared', 'true');
+
         if (hideReconciled === false) next.set('hide_reconciled', 'false');
         if (sortKey !== 'booking_date') next.set('sortKey', sortKey);
         if (sortDir !== 'desc') next.set('sortDir', sortDir);
@@ -367,7 +380,7 @@ export default function TransactionsPage() {
     }, [filtered, topHitsCount]);
 
     const startJobMutation = useMutation({
-        mutationFn: startAutoCategorize,
+        mutationFn: () => transactionService.startAutoCategorize(),
         onSuccess: () => refetchJobStatus(),
         onError: (err: unknown) => {
             if (axios.isAxiosError(err)) {
@@ -382,12 +395,12 @@ export default function TransactionsPage() {
     });
 
     const cancelJobMutation = useMutation({
-        mutationFn: cancelAutoCategorize,
+        mutationFn: () => transactionService.cancelAutoCategorize(),
         onSuccess: () => refetchJobStatus()
     });
 
     const catMutation = useMutation({
-        mutationFn: ({ hash, categoryId }: { hash: string; categoryId: string }) => updateTransactionCategory(hash, categoryId),
+        mutationFn: ({ hash, categoryId }: { hash: string; categoryId: string }) => transactionService.updateCategory(hash, categoryId),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['bank-statements'] });
@@ -397,7 +410,7 @@ export default function TransactionsPage() {
 
     const batchCatMutation = useMutation({
         mutationFn: async ({ hashes, categoryId }: { hashes: string[]; categoryId: string }) => {
-            await Promise.all(hashes.map(hash => updateTransactionCategory(hash, categoryId)));
+            await Promise.all(hashes.map(hash => transactionService.updateCategory(hash, categoryId)));
         },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
@@ -430,7 +443,7 @@ export default function TransactionsPage() {
 
     return (
         <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                         <ArrowLeftRight className="text-indigo-600 dark:text-indigo-400" /> {t('transactions.title')}
@@ -443,6 +456,14 @@ export default function TransactionsPage() {
                 </div>
 
                 <div className="flex items-center gap-3">
+                    <NavLink
+                        to="/reconcile"
+                        className="flex items-center gap-2 px-4 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm font-medium rounded-xl hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                        <Link2 size={18} className="text-indigo-500" />
+                        {t('layout.reconcile')}
+                    </NavLink>
+
                     {toastMessage && (
                         <span className="text-sm font-medium text-indigo-600 dark:text-indigo-300 bg-indigo-50 dark:bg-indigo-900/30 px-3 py-1.5 rounded-lg border border-indigo-100 dark:border-indigo-800/50 animate-in fade-in duration-300">
                             {toastMessage}
@@ -801,6 +822,7 @@ export default function TransactionsPage() {
                 <TransactionTable
                     transactions={filtered}
                     categories={categories}
+                    currentUserId={me?.id}
                     patternExclusions={patternExclusions}
                     selectedHashes={selectedHashes}
                     onToggleSelect={toggleSelect}
@@ -817,7 +839,22 @@ export default function TransactionsPage() {
                             includePatternMutation.mutate(term);
                         }
                     }}
+                    onCreateSubscription={(tx) => setSubModalTx(tx)}
                     visibleCols={visibleCols}
+                />
+            )}
+
+            {subModalTx && (
+                <CreateFromTransactionModal 
+                    transaction={subModalTx}
+                    onClose={() => setSubModalTx(null)}
+                    categories={categories}
+                    onCreated={() => {
+                        qc.invalidateQueries({ queryKey: ['transactions'] });
+                        qc.invalidateQueries({ queryKey: ['subscriptions'] });
+                        setToastMessage("Subscription created successfully!");
+                        setTimeout(() => setToastMessage(null), 5000);
+                    }}
                 />
             )}
 
@@ -888,6 +925,97 @@ export default function TransactionsPage() {
                     </button>
                 </div>
             )}
+        </div>
+    );
+}
+
+function CreateFromTransactionModal({ transaction, onClose, onCreated, categories }: { transaction: Transaction, onClose: () => void, onCreated: () => void, categories: Category[] }) {
+    const { t } = useTranslation();
+    const [billingCycle, setBillingCycle] = React.useState('monthly');
+    const [merchantName, setMerchantName] = React.useState(transaction.counterparty_name || transaction.description);
+
+    const createMutation = useMutation({
+        mutationFn: () => subscriptionService.createFromTransaction(transaction.content_hash, billingCycle),
+        onSuccess: () => {
+            onCreated();
+            onClose();
+        }
+    });
+
+    const currentCat = categories.find(c => c.id === transaction.category_id);
+
+    return (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                    <h3 className="text-xl font-bold flex items-center gap-2">
+                        <RefreshCcw className="text-indigo-600" size={20} />
+                        {t('transactions.createSubscription')}
+                    </h3>
+                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                        <X size={20} />
+                    </button>
+                </div>
+
+                <div className="p-6 space-y-4">
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('subscriptions.merchantService')}</label>
+                        <input 
+                            type="text"
+                            value={merchantName}
+                            onChange={(e) => setMerchantName(e.target.value)}
+                            className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                            placeholder="e.g. Netflix, Spotify..."
+                        />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('subscriptions.billingCycle')}</label>
+                            <select 
+                                value={billingCycle}
+                                onChange={(e) => setBillingCycle(e.target.value)}
+                                className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                            >
+                                <option value="monthly">{t('subscriptions.cycle.monthly')}</option>
+                                <option value="quarterly">{t('subscriptions.cycle.quarterly')}</option>
+                                <option value="yearly">{t('subscriptions.cycle.yearly')}</option>
+                            </select>
+                        </div>
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('transactions.table.amount')}</label>
+                            <div className="bg-gray-100 dark:bg-gray-800/50 rounded-xl px-4 py-2 text-sm font-mono font-bold text-gray-600 dark:text-gray-400">
+                                {fmtCurrency(Math.abs(transaction.amount), transaction.currency)}
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('transactions.table.category')}</label>
+                        <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2">
+                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: currentCat?.color || '#cbd5e1' }} />
+                            <span className="text-sm font-medium">{currentCat?.name || t('transactions.table.unset')}</span>
+                        </div>
+                    </div>
+
+                    <div className="pt-4 flex gap-3">
+                        <button 
+                            onClick={onClose}
+                            className="flex-1 px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                        >
+                            {t('common.cancel')}
+                        </button>
+                        <button 
+                            onClick={() => createMutation.mutate()}
+                            disabled={createMutation.isPending}
+                            className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
+                        >
+                            {createMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Check size={16} />}
+                            {t('common.save')}
+                        </button>
+                    </div>
+                </div>
+            </div>
         </div>
     );
 }

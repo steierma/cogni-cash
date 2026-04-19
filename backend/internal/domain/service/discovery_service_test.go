@@ -618,25 +618,25 @@ func TestDiscoveryService_DiscoveryLogic_IBANGrouping(t *testing.T) {
 	// Two transactions with different descriptions but same IBAN
 	history := []entity.Transaction{
 		{
-			Description:      "Dauerauftrag/Terminueberw. Wolfgang Schmidt",
-			CounterpartyName: "Wolfgang Schmidt",
-			CounterpartyIban: "DE123456789",
+			Description:      "Dauerauftrag/Terminueberw. Max Mustermann",
+			CounterpartyName: "Max Mustermann",
+			CounterpartyIban: "DE00123456789012345678",
 			Amount:           -500.0,
 			BookingDate:      pDate("2024-01-01"),
 			ContentHash:      "h1",
 		},
 		{
 			Description:      "Miete",
-			CounterpartyName: "Wolfgang Schmidt",
-			CounterpartyIban: "DE123456789",
+			CounterpartyName: "Max Mustermann",
+			CounterpartyIban: "DE00123456789012345678",
 			Amount:           -500.0,
 			BookingDate:      pDate("2024-02-01"),
 			ContentHash:      "h2",
 		},
 		{
 			Description:      "Miete",
-			CounterpartyName: "Wolfgang Schmidt",
-			CounterpartyIban: "DE123456789",
+			CounterpartyName: "Max Mustermann",
+			CounterpartyIban: "DE00123456789012345678",
 			Amount:           -500.0,
 			BookingDate:      pDate("2024-03-01"),
 			ContentHash:      "h3",
@@ -644,15 +644,15 @@ func TestDiscoveryService_DiscoveryLogic_IBANGrouping(t *testing.T) {
 	}
 	mockBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
 
-	// AI verification mock - should be called for the preferred name "Wolfgang Schmidt"
-	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Wolfgang Schmidt", -500.0, "EUR", "monthly").Return(true, nil)
-	mockSubRepo.On("SetDiscoveryFeedback", ctx, userID, "Wolfgang Schmidt", entity.DiscoveryStatusAllowed, "AI").Return(nil)
+	// AI verification mock - should be called for the preferred name "Max Mustermann"
+	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Max Mustermann", -500.0, "EUR", "monthly").Return(true, nil)
+	mockSubRepo.On("SetDiscoveryFeedback", ctx, userID, "Max Mustermann", entity.DiscoveryStatusAllowed, "AI").Return(nil)
 
 	suggestions, err := svc.GetSuggestedSubscriptions(ctx, userID)
 
 	assert.NoError(t, err)
 	assert.Len(t, suggestions, 1, "Should have exactly one suggestion due to IBAN grouping")
-	assert.Equal(t, "Wolfgang Schmidt", suggestions[0].MerchantName, "Should prefer CounterpartyName")
+	assert.Equal(t, "Max Mustermann", suggestions[0].MerchantName, "Should prefer CounterpartyName")
 	assert.Len(t, suggestions[0].MatchingHashes, 3, "Should include all 3 transactions in the group")
 }
 

@@ -127,6 +127,7 @@ export default function ReconcilePage() {
 
     const [activeTab, setActiveTab] = useState<'suggestions' | 'manual' | 'history'>('suggestions');
     const [successMessage, setSuccessMessage] = useState<string | null>(null);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
     // --- Suggestions Tab State ---
     const [matchWindowDays, setMatchWindowDays] = useState<number>(7);
@@ -171,6 +172,11 @@ export default function ReconcilePage() {
             setSelectedManualSettlement(null);
             setSelectedManualTarget(null);
             setDeselectedHashes({});
+        },
+        onError: (err: any) => {
+            const msg = err.response?.data?.error || t('reconcile.errorFetch');
+            setErrorMessage(msg);
+            setTimeout(() => setErrorMessage(null), 5000);
         }
     });
 
@@ -314,6 +320,13 @@ export default function ReconcilePage() {
                 <div className="flex items-center gap-3 p-4 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 rounded-xl text-green-700 dark:text-green-400">
                     <CheckCircle2 size={20} />
                     <p className="text-sm font-medium">{successMessage}</p>
+                </div>
+            )}
+
+            {errorMessage && (
+                <div className="flex items-center gap-3 p-4 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl text-red-700 dark:text-red-400">
+                    <AlertCircle size={20} />
+                    <p className="text-sm font-medium">{errorMessage}</p>
                 </div>
             )}
 

@@ -35,13 +35,24 @@ type UserUseCase interface {
 	CreateUser(ctx context.Context, req entity.User, plainPassword string) (entity.User, error)
 	UpdateUser(ctx context.Context, idStr string, updates entity.User) (entity.User, error)
 	DeleteUser(ctx context.Context, idStr string) error
+	GetAdminID(ctx context.Context) (uuid.UUID, error)
+}
+
+type ImportOverrides struct {
+	VendorName *string
+	Amount     *float64
+	Currency   *string
+	IssuedAt   *time.Time
+	CategoryID *uuid.UUID
+	Splits     []entity.InvoiceSplit
 }
 
 // InvoiceUseCase is the full driving-side port for invoice management.
 // It covers file import (with duplicate detection), raw-text categorization,
 // manual CRUD, and original-file download.
 type InvoiceUseCase interface {
-	ImportFromFile(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, categoryID *uuid.UUID) (entity.Invoice, error)
+	ImportFromFile(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, overrides ImportOverrides) (entity.Invoice, error)
+	ImportManual(ctx context.Context, userID uuid.UUID, invoice entity.Invoice) (entity.Invoice, error)
 	CategorizeDocument(ctx context.Context, userID uuid.UUID, rawText string) (entity.Invoice, error)
 	GetAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error)
 	GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error)
@@ -103,7 +114,7 @@ type PayslipUseCase interface {
 type BankUseCase interface {
 	// Connections
 	GetInstitutions(ctx context.Context, userID uuid.UUID, countryCode string, isSandbox bool) ([]entity.BankInstitution, error)
-	CreateConnection(ctx context.Context, userID uuid.UUID, institutionID string, institutionName string, country string, redirectURL string, isSandbox bool) (*entity.BankConnection, error)
+	CreateConnection(ctx context.Context, userID uuid.UUID, institutionID string, institutionName string, country string, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error)
 	FinishConnection(ctx context.Context, userID uuid.UUID, requisitionID string, code string) error
 	GetConnections(ctx context.Context, userID uuid.UUID) ([]entity.BankConnection, error)
 	DeleteConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
@@ -185,7 +196,7 @@ type DiscoveryUseCase interface {
 	RemoveDiscoveryFeedback(ctx context.Context, userID uuid.UUID, merchantName string) error
 	AllowSuggestion(ctx context.Context, userID uuid.UUID, merchantName string) error
 	EnrichSubscription(ctx context.Context, userID, subID uuid.UUID) (entity.Subscription, error)
-	CreateSubscriptionFromTransaction(ctx context.Context, userID uuid.UUID, txnHash string, billingCycle string) (entity.Subscription, error)
+	CreateSubscriptionFromTransaction(ctx context.Context, userID uuid.UUID, txnHash string, merchantName, billingCycle string, billingInterval int) (entity.Subscription, error)
 
 	// Cancellation
 	PreviewCancellation(ctx context.Context, userID, subID uuid.UUID, language string) (CancellationLetterResult, error)
@@ -193,4 +204,8 @@ type DiscoveryUseCase interface {
 	DeleteSubscription(ctx context.Context, userID, subID uuid.UUID) error
 	GetSubscriptionEvents(ctx context.Context, userID, subID uuid.UUID) ([]entity.SubscriptionEvent, error)
 	MatchTransactions(ctx context.Context, userID uuid.UUID, txns []entity.Transaction) error
+
+	// Manual Linking
+	LinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error
+	UnlinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error
 }

@@ -16,6 +16,7 @@ interface Props {
 export default function PlannedTransactionModal({ isOpen, onClose, onSave, initialData }: Props) {
     const { t } = useTranslation();
     const [amount, setAmount] = useState<string>('');
+    const [currency, setCurrency] = useState<string>('EUR');
     const [date, setDate] = useState<string>('');
     const [description, setDescription] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('');
@@ -33,6 +34,7 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
         if (isOpen) {
             if (initialData) {
                 setAmount(initialData.amount.toString());
+                setCurrency(initialData.currency || 'EUR');
                 setDate(initialData.date.split('T')[0]);
                 setDescription(initialData.description);
                 setCategoryId(initialData.category_id || '');
@@ -40,6 +42,7 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                 setEndDate(initialData.end_date ? initialData.end_date.split('T')[0] : '');
             } else {
                 setAmount('');
+                setCurrency('EUR');
                 setDate(new Date().toISOString().split('T')[0]);
                 setDescription('');
                 setCategoryId('');
@@ -55,6 +58,7 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
         try {
             const payload: any = {
                 amount: parseFloat(amount),
+                currency,
                 date: new Date(date).toISOString(),
                 description,
                 category_id: categoryId || null,
@@ -106,14 +110,27 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
                                 {t('transactions.form.amount')} <span className="text-red-500">*</span>
                             </label>
-                            <input
-                                type="number"
-                                required
-                                step="0.01"
-                                value={amount}
-                                onChange={e => setAmount(e.target.value)}
-                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white"
-                            />
+                            <div className="flex gap-2">
+                                <input
+                                    type="number"
+                                    required
+                                    step="0.01"
+                                    value={amount}
+                                    onChange={e => setAmount(e.target.value)}
+                                    className="flex-1 min-w-0 px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white"
+                                />
+                                <select
+                                    value={currency}
+                                    onChange={e => setCurrency(e.target.value)}
+                                    className="w-24 px-2 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white font-mono text-sm"
+                                >
+                                    <option value="EUR">EUR</option>
+                                    <option value="USD">USD</option>
+                                    <option value="GBP">GBP</option>
+                                    <option value="CHF">CHF</option>
+                                    <option value="PLN">PLN</option>
+                                </select>
+                            </div>
                         </div>
                         <div>
                             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">

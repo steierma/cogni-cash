@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import {
     KeyRound, CheckCircle2, AlertCircle, Settings, Server, Database,
     Save, Palette, Globe, ChevronDown, ChevronRight, MessageSquareCode,
-    Landmark, Info, Mail, Bot, Zap, Monitor, Layers, Smartphone, Plus, Trash2, Copy, Clock, CalendarClock
+    Landmark, Info, Mail, Bot, Zap, Monitor, Layers, Smartphone, Plus, Trash2, Copy, Clock, CalendarClock, Loader2
 } from 'lucide-react';
 import { authService } from '../api/services/authService';
 import { settingsService } from '../api/services/settingsService';
@@ -127,6 +127,59 @@ JSON Schema:
 Draft the letter in the requested language ({{LANGUAGE}}).`;
 
 // Helper component for the expandable prompt accordions
+const LogLevelControl = ({ t }: { t: any }) => {
+    const queryClient = useQueryClient();
+    const { data: logData, isLoading, error } = useQuery({
+        queryKey: ['logLevel'],
+        queryFn: () => settingsService.fetchLogLevel(),
+        retry: 1, // Don't retry indefinitely if it fails
+    });
+
+    const mutation = useMutation({
+        mutationFn: (level: string) => settingsService.updateLogLevel(level),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['logLevel'] });
+        },
+    });
+
+    if (isLoading) return <div className="text-[10px] text-gray-500 animate-pulse bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md">Loading logs...</div>;
+    
+    if (error) {
+        return (
+            <div className="flex items-center gap-1 text-[10px] text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-md border border-red-100 dark:border-red-900/50">
+                <AlertCircle size={10} />
+                Err: {(error as any).response?.status || 'API'}
+            </div>
+        );
+    }
+
+    const levels = ['DEBUG', 'INFO', 'WARN', 'ERROR'];
+
+    return (
+        <div className="flex items-center gap-2">
+            <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-tight">{t('settings.logLevel') || "Log Level"}:</span>
+            <div className="flex bg-white dark:bg-gray-950 border border-gray-100 dark:border-gray-800 rounded-lg p-0.5 shadow-inner">
+                {levels.map(lvl => (
+                    <button
+                        key={lvl}
+                        type="button"
+                        onClick={() => mutation.mutate(lvl)}
+                        disabled={mutation.isPending}
+                        className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all duration-200 ${
+                            logData?.level === lvl 
+                                ? 'bg-indigo-600 text-white shadow-md scale-105 z-10' 
+                                : 'text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900'
+                        }`}
+                    >
+                        {lvl}
+                    </button>
+                ))}
+            </div>
+            {mutation.isPending && <Loader2 size={12} className="animate-spin text-indigo-500" />}
+        </div>
+    );
+};
+
 const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t }: any) => {
     const [isOpen, setIsOpen] = useState(false);
 
@@ -312,9 +365,12 @@ export default function SettingsPage() {
             {/* SYSTEM STATUS CARD (ADMIN ONLY) */}
             {isAdmin && (
                 <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                    <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
-                        <Server size={20} className="text-gray-500 dark:text-gray-400" />
-                        {t('settings.systemStatus')}
+                    <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                            <Server size={20} className="text-gray-500 dark:text-gray-400" />
+                            {t('settings.systemStatus')}
+                        </div>
+                        <LogLevelControl t={t} />
                     </h2>
                     <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
                         <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
@@ -732,6 +788,22 @@ export default function SettingsPage() {
                                 </select>
                             </div>
 
+                            <div>
+                                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
+                                    <Database size={16} className="text-gray-400"/> {t('settings.baseCurrency') || "Base Display Currency"}
+                                </label>
+                                <select
+                                    value={settingsParams['BASE_DISPLAY_CURRENCY'] || 'EUR'}
+                                    onChange={(e) => handleSettingChange('BASE_DISPLAY_CURRENCY', e.target.value)}
+                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                >
+                                    <option value="EUR">EUR (€)</option>
+                                    <option value="USD">USD ($)</option>
+                                    <option value="GBP">GBP (£)</option>
+                                    <option value="CHF">CHF (Fr.)</option>
+                                    <option value="PLN">PLN (zł)</option>
+                                </select>
+                            </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
                                     <Palette size={16} className="text-gray-400"/> {t('settings.theme')}

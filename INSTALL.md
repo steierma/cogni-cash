@@ -331,9 +331,10 @@ All variables live in `backend/.env`. Docker Compose reads it automatically via 
 To enable real-time bank synchronization, the administrator must register an application with Enable Banking.
 1.  Register at [enablebanking.com](https://enablebanking.com).
 2.  Provide your `ENABLE_BANKING_APP_ID` in `backend/.env`.
-3.  Place your private RSA key in the root directory as `enable-banking-prod.pem`.
-4.  **HTTPS Mandatory:** Ensure your instance is accessible via **HTTPS**. Enable Banking requires an encrypted redirect URL for all production bank links. For local-only setups, you can use a **`hosts` file** override (e.g. `cognicash.local`) on your computer as long as your browser can resolve the name and access your instance via HTTPS.
-5.  Restart the application to enable the "Bank Connections" feature for all users.
+3.  **Account Configuration:** Ensure you have authorized the specific bank accounts (or the sandbox account) in the Enable Banking dashboard. Without this, the connection will succeed but return **zero accounts** to CogniCash.
+4.  Place your private RSA key in the root directory as `enable-banking-prod.pem`.
+5.  **HTTPS Mandatory:** Ensure your instance is accessible via **HTTPS**. Enable Banking requires an encrypted redirect URL for all production bank links. For local-only setups, you can use a **`hosts` file** override (e.g. `cognicash.local`) on your computer as long as your browser can resolve the name and access your instance via HTTPS.
+6.  Restart the application to enable the "Bank Connections" feature for all users.
 
 ---
 

@@ -38,7 +38,9 @@ func NewServer(addr string, handler *Handler) *Server {
 	// Default development policy: allow localhost and local network ranges with reflection
 	allowOriginFunc = func(r *http.Request, origin string) bool {
 		if strings.HasPrefix(origin, "http://localhost:") ||
+			strings.HasPrefix(origin, "https://localhost") ||
 			strings.HasPrefix(origin, "http://127.0.0.1:") ||
+			strings.HasPrefix(origin, "https://127.0.0.1") ||
 			strings.HasPrefix(origin, "http://192.168.") ||
 			strings.HasPrefix(origin, "http://10.") ||
 			strings.HasPrefix(origin, "http://172.") {

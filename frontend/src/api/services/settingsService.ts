@@ -13,6 +13,13 @@ export const settingsService = {
     sendTestEmail: (to: string): Promise<void> =>
         api.post('settings/test-email/', { to }).then(() => undefined),
 
+    // Log Level
+    fetchLogLevel: (): Promise<{ level: string }> =>
+        api.get<{ level: string }>('system/log-level/').then(r => r.data),
+
+    updateLogLevel: (level: string): Promise<{ level: string }> =>
+        api.put<{ level: string }>('system/log-level/', { level }).then(r => r.data),
+
     // Bridge Tokens
     fetchBridgeTokens: (): Promise<any[]> =>
         api.get<any[]>('bridge-tokens/').then(r => r.data ?? []),

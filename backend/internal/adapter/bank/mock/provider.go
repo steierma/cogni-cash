@@ -24,7 +24,7 @@ func (m *MockBankProvider) GetInstitutions(ctx context.Context, userID uuid.UUID
 	}, nil
 }
 
-func (m *MockBankProvider) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error) {
+func (m *MockBankProvider) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
 	return &entity.BankConnection{
 		ID:              uuid.New(),
 		UserID:          userID,

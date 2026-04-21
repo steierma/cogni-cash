@@ -204,6 +204,9 @@ func (m *mockBankStmtRepo) MarkTransactionReviewed(_ context.Context, _ string, 
 func (m *mockBankStmtRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string, _ bool, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockBankStmtRepo) UpdateTransactionBaseAmount(_ context.Context, _ string, _ float64, _ string, _ uuid.UUID) error {
+	return nil
+}
 
 func (m *mockBankStmtRepo) LinkTransactionToStatement(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
@@ -241,7 +244,7 @@ func TestSettingsAccessControl(t *testing.T) {
 	dummyPinger := func(ctx context.Context) error { return nil }
 
 	runReq := func(authSvc *service.AuthService, token string) int {
-		handler := apphttp.NewHandler(authSvc, nil, nil, &realMockSettingsSvc{}, nil, setupLogger(), "memory", "localhost", dummyPinger)
+		handler := apphttp.NewHandler(authSvc, nil, nil, &realMockSettingsSvc{}, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil)
 		userSvc := service.NewUserService(authSvc.GetRepo_ForTest().(port.UserRepository), setupLogger())
 		handler.WithUserService(userSvc)
 
@@ -281,7 +284,7 @@ func (m *realMockSettingsSvc) GetAllMasked(ctx context.Context, userID uuid.UUID
 
 func TestHealthCheck(t *testing.T) {
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(nil, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger)
+	handler := apphttp.NewHandler(nil, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil)
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
 
@@ -303,7 +306,7 @@ func TestHealthCheck(t *testing.T) {
 func TestChangePassword(t *testing.T) {
 	authSvc, token, _ := setupTestAuth(t)
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger)
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
@@ -339,15 +342,15 @@ func TestGetTransactionAnalytics(t *testing.T) {
 
 	repo := &mockBankStmtRepo{
 		txns: []entity.Transaction{
-			{UserID: userID, BookingDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), Amount: -50, CategoryID: &cat1, Description: "Supermarket"},
-			{UserID: userID, BookingDate: time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), Amount: 100, CategoryID: &cat2, Description: "Employer"},
+			{UserID: userID, BookingDate: time.Date(2026, 1, 15, 0, 0, 0, 0, time.UTC), Amount: -50, BaseAmount: -50, CategoryID: &cat1, Description: "Supermarket"},
+			{UserID: userID, BookingDate: time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC), Amount: 100, BaseAmount: 100, CategoryID: &cat2, Description: "Employer"},
 		},
 	}
 
 	txSvc := service.NewTransactionService(repo, nil, nil, nil, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithTransactionService(txSvc)
 
 	r := chi.NewRouter()
@@ -406,7 +409,7 @@ func TestListCategories_Empty(t *testing.T) {
 	catSvc := service.NewCategoryService(mockRepo, mockSharing, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryService(catSvc)
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).WithCategoryService(catSvc)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
@@ -438,7 +441,7 @@ func TestCreateCategory(t *testing.T) {
 	catSvc := service.NewCategoryService(mockRepo, mockSharing, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).WithCategoryService(catSvc)
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).WithCategoryService(catSvc)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
@@ -469,7 +472,7 @@ func TestDeleteBankStatement(t *testing.T) {
 	svc := service.NewBankStatementService(repo, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, svc, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, svc, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithBankStatementRepository(repo)
 
 	r := chi.NewRouter()
@@ -553,6 +556,9 @@ func (m *mockPayslipRepo) GetOriginalFile(_ context.Context, _ string, _ uuid.UU
 func (m *mockPayslipRepo) GetSummary(_ context.Context, _ uuid.UUID) (entity.PayslipSummary, error) {
 	return entity.PayslipSummary{}, nil
 }
+func (m *mockPayslipRepo) UpdateBaseAmount(ctx context.Context, id string, baseGross, baseNet, basePayout float64, currency string, userID uuid.UUID) error {
+	return nil
+}
 
 func TestUpdatePayslip_WithBonuses(t *testing.T) {
 	authSvc, token, _ := setupTestAuth(t)
@@ -575,7 +581,7 @@ func TestUpdatePayslip_WithBonuses(t *testing.T) {
 	payslipSvc := service.NewPayslipService(repo, nil, nil, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithPayslipService(payslipSvc).
 		WithPayslipRepository(repo)
 
@@ -654,7 +660,7 @@ func TestGetPayslip_IncludesBonuses(t *testing.T) {
 	_ = repo.Save(context.Background(), &p)
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithPayslipRepository(repo).
 		WithPayslipService(repo)
 
@@ -692,7 +698,7 @@ func TestImportPayslipsBatch(t *testing.T) {
 	payslipSvc := service.NewPayslipService(repo, staticParser, aiParser, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithPayslipService(payslipSvc).
 		WithPayslipRepository(repo)
 
@@ -774,7 +780,7 @@ func TestGetSharingDashboard_Success(t *testing.T) {
 
 	mockSvc := &mockSharingSvc{dashboard: expectedDash}
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithSharingService(mockSvc)
 
 	r := chi.NewRouter()
@@ -804,7 +810,7 @@ func TestGetSharingDashboard_ServiceUnavailable(t *testing.T) {
 	authSvc, token, _ := setupTestAuth(t)
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger)
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil)
 
 	r := chi.NewRouter()
 	handler.RegisterRoutes(r)
@@ -825,7 +831,7 @@ func TestGetSharingDashboard_InternalServerError(t *testing.T) {
 
 	mockSvc := &mockSharingSvc{err: errors.New("database connection failed")}
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithSharingService(mockSvc)
 
 	r := chi.NewRouter()
@@ -873,7 +879,7 @@ func TestGetReconciliationSuggestions(t *testing.T) {
 	}
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithReconciliationService(mockSvc)
 
 	r := chi.NewRouter()
@@ -912,7 +918,7 @@ func TestReconciliationRouteAlias(t *testing.T) {
 	}
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithReconciliationService(mockSvc)
 
 	r := chi.NewRouter()
@@ -972,7 +978,7 @@ func TestCreatePlannedTransaction(t *testing.T) {
 
 	mockSvc := &mockPlannedTxSvc{}
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithPlannedTransactionService(mockSvc)
 
 	r := chi.NewRouter()
@@ -1008,7 +1014,7 @@ func TestGetSystemInfo(t *testing.T) {
 	userSvc := service.NewUserService(userRepo, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "postgres", "db.internal", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "postgres", "db.internal", dummyPinger, context.Background(), nil).
 		WithUserService(userSvc)
 
 	r := chi.NewRouter()
@@ -1078,7 +1084,7 @@ func TestGetForecast(t *testing.T) {
 
 	mockSvc := &mockForecastingSvc{}
 	dummyPinger := func(ctx context.Context) error { return nil }
-	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger).
+	handler := apphttp.NewHandler(authSvc, nil, nil, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
 		WithForecastingService(mockSvc)
 
 	r := chi.NewRouter()

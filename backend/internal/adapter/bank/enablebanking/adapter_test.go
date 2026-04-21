@@ -20,7 +20,7 @@ import (
 
 func setupTestAdapter(t *testing.T, handler http.HandlerFunc) (*Adapter, *httptest.Server) {
 	server := httptest.NewServer(handler)
-	
+
 	// Generate a small RSA key for tests
 	privKey, err := rsa.GenerateKey(rand.Reader, 1024)
 	if err != nil {
@@ -115,20 +115,20 @@ func TestAdapter_FetchTransactions(t *testing.T) {
 	handler := func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/accounts/"+accID+"/transactions" {
 			assert.Contains(t, r.URL.RawQuery, "date_from="+dateFrom.Format("2006-01-02"))
-			
+
 			resp := map[string]interface{}{
 				"transactions": []map[string]interface{}{
 					{
-						"transaction_id": "tx-1",
-						"booking_date":   "2026-04-10",
-						"status":         "BOOK",
+						"transaction_id":         "tx-1",
+						"booking_date":           "2026-04-10",
+						"status":                 "BOOK",
 						"credit_debit_indicator": "DBIT",
 						"transaction_amount": map[string]string{
 							"amount":   "50.00",
 							"currency": "EUR",
 						},
 						"remittance_information_unstructured": "Test Payment",
-						"creditor_name": "Merchant A",
+						"creditor_name":                       "Merchant A",
 					},
 					{
 						"transaction_id": "tx-pending",

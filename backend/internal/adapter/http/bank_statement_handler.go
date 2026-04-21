@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"cogni-cash/internal/domain/entity"
@@ -153,7 +154,11 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 			if errors.Is(err, entity.ErrDuplicate) {
 				results = append(results, importResult{Filename: fileHeader.Filename, Status: "duplicate"})
 			} else {
-				results = append(results, importResult{Filename: fileHeader.Filename, Status: "error", Error: err.Error()})
+				results = append(results, importResult{
+					Filename: fileHeader.Filename,
+					Status:   "error",
+					Error:    mapImportError(err),
+				})
 			}
 			continue
 		}
@@ -551,4 +556,24 @@ func (h *Handler) parseTransactionFilter(r *http.Request) entity.TransactionFilt
 	}
 
 	return f
+}
+
+func mapImportError(err error) string {
+	errStr := strings.ToLower(err.Error())
+	switch {
+	case strings.Contains(errStr, "unsupported format"):
+		return "unsupported_format"
+	case strings.Contains(errStr, "no suitable parser"):
+		return "no_parser_found"
+	case strings.Contains(errStr, "validation failed: invalid statement: missing iban"):
+		return "missing_iban"
+	case strings.Contains(errStr, "validation failed: invalid statement: missing statement date"):
+		return "missing_date"
+	case strings.Contains(errStr, "validation failed: invalid statement: zero transactions"):
+		return "no_transactions"
+	case strings.Contains(errStr, "corrupted") || strings.Contains(errStr, "failed to read"):
+		return "corrupted_file"
+	default:
+		return "internal_error"
+	}
 }

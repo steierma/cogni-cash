@@ -67,6 +67,19 @@ func (r *SubscriptionRepository) Create(ctx context.Context, sub entity.Subscrip
 	sub.CreatedAt = time.Now()
 	sub.UpdatedAt = time.Now()
 
+	if sub.MatchingHashes == nil {
+		sub.MatchingHashes = []string{}
+	}
+	if sub.IgnoredHashes == nil {
+		sub.IgnoredHashes = []string{}
+	}
+	if sub.LinkedMandates == nil {
+		sub.LinkedMandates = []string{}
+	}
+	if sub.LinkedIbans == nil {
+		sub.LinkedIbans = []string{}
+	}
+
 	r.subscriptions[sub.ID] = sub
 	return sub, nil
 }
@@ -81,11 +94,24 @@ func (r *SubscriptionRepository) CreateWithBackfill(ctx context.Context, sub ent
 	sub.CreatedAt = time.Now()
 	sub.UpdatedAt = time.Now()
 
+	if sub.MatchingHashes == nil {
+		sub.MatchingHashes = []string{}
+	}
+	if sub.IgnoredHashes == nil {
+		sub.IgnoredHashes = []string{}
+	}
+	if sub.LinkedMandates == nil {
+		sub.LinkedMandates = []string{}
+	}
+	if sub.LinkedIbans == nil {
+		sub.LinkedIbans = []string{}
+	}
+
 	r.subscriptions[sub.ID] = sub
 
-	// For memory adapter, backfilling transactions requires cross-repository interaction 
+	// For memory adapter, backfilling transactions requires cross-repository interaction
 	// which is typically complex in an in-memory setup without a shared state or transaction boundary.
-	// We'll return the subscription for now. In a real memory implementation for testing, 
+	// We'll return the subscription for now. In a real memory implementation for testing,
 	// it might need access to the BankStatementRepository.
 	return sub, nil
 }

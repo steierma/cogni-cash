@@ -75,9 +75,9 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 		batch.Queue(`
 			INSERT INTO transactions
 			        (id, user_id, bank_statement_id, booking_date, valuta_date,
-			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
+			         description, location, amount, currency, base_amount, base_currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
 			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, skip_forecasting, is_payslip_verified, subscription_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21, $22)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21, $22, $23, $24)
 			ON CONFLICT (content_hash, user_id) 
 			DO UPDATE SET
 				counterparty_name = EXCLUDED.counterparty_name,
@@ -94,6 +94,8 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			loc,
 			t.Amount,
 			t.Currency,
+			t.BaseAmount,
+			t.BaseCurrency,
 			string(t.Type),
 			t.Reference,
 			t.CategoryID,
@@ -140,9 +142,9 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 		batch.Queue(`
 			INSERT INTO transactions
 			        (id, user_id, bank_account_id, booking_date, valuta_date,
-			         description, location, amount, currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
+			         description, location, amount, currency, base_amount, base_currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
 			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, skip_forecasting, is_payslip_verified, subscription_id)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21, $22)
+			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21, $22, $23, $24)
 			ON CONFLICT (content_hash, user_id) 
 			DO UPDATE SET
 				counterparty_name = EXCLUDED.counterparty_name,
@@ -159,6 +161,8 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			loc,
 			t.Amount,
 			t.Currency,
+			t.BaseAmount,
+			t.BaseCurrency,
 			string(t.Type),
 			t.Reference,
 			t.CategoryID,
@@ -191,7 +195,7 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 
 	query := `
 	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
-	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
+	               t.currency, t.base_amount, t.base_currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
 	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.skip_forecasting, t.is_payslip_verified,
 	               (t.user_id != $1) as is_shared,
@@ -305,7 +309,7 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error) {
 	rows, err := r.pool.Query(ctx, `
 	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
-	               t.currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
+	               t.currency, t.base_amount, t.base_currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
 	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.skip_forecasting, t.is_payslip_verified,
 	               (EXISTS(SELECT 1 FROM shared_categories WHERE category_id = t.category_id)) as is_shared,
@@ -335,7 +339,7 @@ func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID u
 // and loadTransactions to avoid duplicating the nullable-column logic.
 func scanTransaction(row scanner) (entity.Transaction, error) {
 	var t entity.Transaction
-	var desc, loc, currency, txType, ref, stmtType *string
+	var desc, loc, currency, baseCurrency, txType, ref, stmtType *string
 	var cpName, cpIban, bankTxCode, mandateRef *string
 
 	if err := row.Scan(
@@ -347,6 +351,8 @@ func scanTransaction(row scanner) (entity.Transaction, error) {
 		&loc,
 		&t.Amount,
 		&currency,
+		&t.BaseAmount,
+		&baseCurrency,
 		&txType,
 		&ref,
 		&t.CategoryID,
@@ -376,6 +382,9 @@ func scanTransaction(row scanner) (entity.Transaction, error) {
 	}
 	if currency != nil {
 		t.Currency = *currency
+	}
+	if baseCurrency != nil {
+		t.BaseCurrency = *baseCurrency
 	}
 	if ref != nil {
 		t.Reference = *ref
@@ -715,6 +724,13 @@ func (r *BankStatementRepository) UpdateTransactionSkipForecasting(ctx context.C
 	_, err := r.pool.Exec(ctx, `
 		UPDATE transactions SET skip_forecasting = $1
 		WHERE content_hash = $2 AND user_id = $3`, skip, hash, userID)
+	return err
+}
+
+func (r *BankStatementRepository) UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, `
+		UPDATE transactions SET base_amount = $1, base_currency = $2
+		WHERE content_hash = $3 AND user_id = $4`, baseAmount, baseCurrency, hash, userID)
 	return err
 }
 

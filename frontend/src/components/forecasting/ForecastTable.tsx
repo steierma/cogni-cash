@@ -149,7 +149,14 @@ export default function ForecastTable({
                                     )}
                                     {visibleCols.amount && (
                                         <td className={`px-6 py-4 text-right font-mono font-bold ${isExcluded ? 'text-gray-400 line-through' : p.amount >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-gray-900 dark:text-gray-100'}`}>
-                                            {fmtCurrency(p.amount, p.currency)}
+                                            <div className="flex flex-col items-end">
+                                                <span>{fmtCurrency(p.amount, p.currency)}</span>
+                                                {p.base_currency && p.base_currency !== p.currency && p.base_amount !== 0 && (
+                                                    <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal">
+                                                        {fmtCurrency(p.base_amount, p.base_currency)}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                     )}
                                     <td className="px-6 py-4 text-right">

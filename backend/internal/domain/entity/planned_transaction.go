@@ -20,6 +20,9 @@ type PlannedTransaction struct {
 	ID                   uuid.UUID                `json:"id"`
 	UserID               uuid.UUID                `json:"user_id"`
 	Amount               float64                  `json:"amount"`
+	Currency             string                   `json:"currency"`
+	BaseAmount           float64                  `json:"base_amount"`   // Snapshotted converted amount
+	BaseCurrency         string                   `json:"base_currency"` // Snapshotted base currency
 	Date                 time.Time                `json:"date"`
 	Description          string                   `json:"description"`
 	CategoryID           *uuid.UUID               `json:"category_id"`

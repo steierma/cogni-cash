@@ -8,6 +8,7 @@ import (
 	"cogni-cash/internal/domain/port"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/mock"
 )
 
 type mockCategoryRepo struct {
@@ -81,4 +82,21 @@ func (m *mockCategoryRepo) FindMatchingCategoryWithThreshold(_ context.Context, 
 
 func (m *mockCategoryRepo) GetCategorizationExamples(_ context.Context, _ uuid.UUID, _ int) ([]entity.CategorizationExample, error) {
 	return nil, nil
+}
+
+type mockSettingsRepo struct {
+	mock.Mock
+}
+
+func (m *mockSettingsRepo) Get(ctx context.Context, key string, userID uuid.UUID) (string, error) {
+	args := m.Called(ctx, key, userID)
+	return args.String(0), args.Error(1)
+}
+func (m *mockSettingsRepo) GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
+	args := m.Called(ctx, userID)
+	return args.Get(0).(map[string]string), args.Error(1)
+}
+func (m *mockSettingsRepo) Set(ctx context.Context, key, value string, userID uuid.UUID, isSensitive bool) error {
+	args := m.Called(ctx, key, value, userID, isSensitive)
+	return args.Error(0)
 }

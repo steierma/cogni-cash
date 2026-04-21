@@ -48,6 +48,9 @@ func (m *mockForecastingRepo) MarkTransactionReviewed(_ context.Context, _ strin
 func (m *mockForecastingRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string, _ bool, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockForecastingRepo) UpdateTransactionBaseAmount(_ context.Context, _ string, _ float64, _ string, _ uuid.UUID) error {
+	return nil
+}
 func (m *mockForecastingRepo) GetCategorizationExamples(_ context.Context, _ uuid.UUID, _ int) ([]entity.CategorizationExample, error) {
 	return nil, nil
 }
@@ -82,6 +85,9 @@ func (m *mockPayslipRepo) FindByID(_ context.Context, _ string, _ uuid.UUID) (en
 	return entity.Payslip{}, nil
 }
 func (m *mockPayslipRepo) Update(_ context.Context, _ *entity.Payslip) error     { return nil }
+func (m *mockPayslipRepo) UpdateBaseAmount(_ context.Context, _ string, _, _, _ float64, _ string, _ uuid.UUID) error {
+	return nil
+}
 func (m *mockPayslipRepo) Delete(_ context.Context, _ string, _ uuid.UUID) error { return nil }
 func (m *mockPayslipRepo) GetOriginalFile(_ context.Context, _ string, _ uuid.UUID) ([]byte, string, string, error) {
 	return nil, "", "", nil
@@ -90,50 +96,50 @@ func (m *mockPayslipRepo) GetSummary(_ context.Context, _ uuid.UUID) (entity.Pay
 	return entity.PayslipSummary{}, nil
 }
 
-type mockBankRepo struct {
+type mockForecastingBankRepo struct {
 	accounts []entity.BankAccount
 }
 
-func (m *mockBankRepo) CreateConnection(_ context.Context, _ *entity.BankConnection) error {
+func (m *mockForecastingBankRepo) CreateConnection(_ context.Context, _ *entity.BankConnection) error {
 	return nil
 }
-func (m *mockBankRepo) GetConnection(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*entity.BankConnection, error) {
+func (m *mockForecastingBankRepo) GetConnection(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*entity.BankConnection, error) {
 	return nil, nil
 }
-func (m *mockBankRepo) GetConnectionByRequisition(_ context.Context, _ string, _ uuid.UUID) (*entity.BankConnection, error) {
+func (m *mockForecastingBankRepo) GetConnectionByRequisition(_ context.Context, _ string, _ uuid.UUID) (*entity.BankConnection, error) {
 	return nil, nil
 }
-func (m *mockBankRepo) GetConnectionsByUserID(_ context.Context, _ uuid.UUID) ([]entity.BankConnection, error) {
+func (m *mockForecastingBankRepo) GetConnectionsByUserID(_ context.Context, _ uuid.UUID) ([]entity.BankConnection, error) {
 	return nil, nil
 }
-func (m *mockBankRepo) UpdateConnectionStatus(_ context.Context, _ uuid.UUID, _ entity.ConnectionStatus, _ uuid.UUID) error {
+func (m *mockForecastingBankRepo) UpdateConnectionStatus(_ context.Context, _ uuid.UUID, _ entity.ConnectionStatus, _ uuid.UUID) error {
 	return nil
 }
-func (m *mockBankRepo) UpdateRequisitionID(_ context.Context, _ uuid.UUID, _ string, _ uuid.UUID) error {
+func (m *mockForecastingBankRepo) UpdateRequisitionID(_ context.Context, _ uuid.UUID, _ string, _ uuid.UUID) error {
 	return nil
 }
-func (m *mockBankRepo) DeleteConnection(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+func (m *mockForecastingBankRepo) DeleteConnection(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
-func (m *mockBankRepo) UpsertAccounts(_ context.Context, _ []entity.BankAccount, _ uuid.UUID) error {
+func (m *mockForecastingBankRepo) UpsertAccounts(_ context.Context, _ []entity.BankAccount, _ uuid.UUID) error {
 	return nil
 }
-func (m *mockBankRepo) GetAccountsByUserID(_ context.Context, _ uuid.UUID) ([]entity.BankAccount, error) {
+func (m *mockForecastingBankRepo) GetAccountsByUserID(_ context.Context, _ uuid.UUID) ([]entity.BankAccount, error) {
 	return m.accounts, nil
 }
-func (m *mockBankRepo) GetAccountByID(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*entity.BankAccount, error) {
+func (m *mockForecastingBankRepo) GetAccountByID(_ context.Context, _ uuid.UUID, _ uuid.UUID) (*entity.BankAccount, error) {
 	return nil, nil
 }
-func (m *mockBankRepo) GetAccountsByConnectionID(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]entity.BankAccount, error) {
+func (m *mockForecastingBankRepo) GetAccountsByConnectionID(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]entity.BankAccount, error) {
 	return nil, nil
 }
-func (m *mockBankRepo) GetAccountByProviderID(_ context.Context, _ string, _ uuid.UUID) (*entity.BankAccount, error) {
+func (m *mockForecastingBankRepo) GetAccountByProviderID(_ context.Context, _ string, _ uuid.UUID) (*entity.BankAccount, error) {
 	return nil, nil
 }
-func (m *mockBankRepo) UpdateAccountBalance(_ context.Context, _ uuid.UUID, _ float64, _ interface{}, _ *string, _ uuid.UUID) error {
+func (m *mockForecastingBankRepo) UpdateAccountBalance(_ context.Context, _ uuid.UUID, _ float64, _ interface{}, _ *string, _ uuid.UUID) error {
 	return nil
 }
-func (m *mockBankRepo) UpdateAccountType(_ context.Context, _ uuid.UUID, _ entity.StatementType, _ uuid.UUID) error {
+func (m *mockForecastingBankRepo) UpdateAccountType(_ context.Context, _ uuid.UUID, _ entity.StatementType, _ uuid.UUID) error {
 	return nil
 }
 
@@ -150,19 +156,21 @@ func TestForecastingService_VariableSpending(t *testing.T) {
 		{
 			Description: "Groceries 1",
 			Amount:      -300.0,
+			BaseAmount:  -300.0,
 			BookingDate: now.AddDate(0, -2, -15), // ~1.5 months ago
 			CategoryID:  &catID,
 		},
 		{
 			Description: "Groceries 2",
 			Amount:      -500.0,
+			BaseAmount:  -500.0,
 			BookingDate: now.AddDate(0, -1, -5), // ~1 month ago
 			CategoryID:  &catID,
 		},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{
+	bankRepo := &mockForecastingBankRepo{
 		accounts: []entity.BankAccount{
 			{Balance: 1000.0},
 		},
@@ -176,7 +184,7 @@ func TestForecastingService_VariableSpending(t *testing.T) {
 		},
 	}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
 
 	from := now
 	to := now.AddDate(0, 1, 0) // Forecast 1 month ahead
@@ -250,45 +258,51 @@ func TestForecastingService_GetCashFlowForecast(t *testing.T) {
 		{
 			Description: "Rent Payment",
 			Amount:      -1200.0,
+			BaseAmount:  -1200.0,
 			BookingDate: now.AddDate(0, -3, 0),
 		},
 		{
 			Description: "Rent Payment",
 			Amount:      -1200.0,
+			BaseAmount:  -1200.0,
 			BookingDate: now.AddDate(0, -2, 0),
 		},
 		{
 			Description: "Rent Payment",
 			Amount:      -1200.0,
+			BaseAmount:  -1200.0,
 			BookingDate: now.AddDate(0, -1, 0),
 		},
 		// Salary: Recurring
 		{
 			Description: "Salary",
 			Amount:      3000.0,
+			BaseAmount:  3000.0,
 			BookingDate: now.AddDate(0, -3, 0),
 		},
 		{
 			Description: "Salary",
 			Amount:      3000.0,
+			BaseAmount:  3000.0,
 			BookingDate: now.AddDate(0, -2, 0),
 		},
 		{
 			Description: "Salary",
 			Amount:      3000.0,
+			BaseAmount:  3000.0,
 			BookingDate: now.AddDate(0, -1, 0),
 		},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{
+	bankRepo := &mockForecastingBankRepo{
 		accounts: []entity.BankAccount{
 			{Balance: 5000.0},
 		},
 	}
 	catRepo := &mockCategoryRepo{saved: []entity.Category{}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
 
 	from := now
 	to := now.AddDate(0, 2, 0) // Forecast 2 months ahead
@@ -328,20 +342,26 @@ func TestForecastingService_BonusForecasting(t *testing.T) {
 			PeriodMonthNum: 11,
 			PeriodYear:     now.Year() - 2,
 			GrossPay:       5000.0,
+			BaseGrossPay:   5000.0,
 			NetPay:         3000.0,
+			BaseNetPay:     3000.0,
 			PayoutAmount:   3000.0,
+			BasePayoutAmount: 3000.0,
 			Bonuses: []entity.Bonus{
-				{Description: "Christmas Bonus", Amount: 2000.0},
+				{Description: "Christmas Bonus", Amount: 2000.0, BaseAmount: 2000.0},
 			},
 		},
 		{
 			PeriodMonthNum: 11,
 			PeriodYear:     now.Year() - 1,
 			GrossPay:       5000.0,
+			BaseGrossPay:   5000.0,
 			NetPay:         3000.0,
+			BaseNetPay:     3000.0,
 			PayoutAmount:   3000.0,
+			BasePayoutAmount: 3000.0,
 			Bonuses: []entity.Bonus{
-				{Description: "Christmas Bonus", Amount: 2000.0},
+				{Description: "Christmas Bonus", Amount: 2000.0, BaseAmount: 2000.0},
 			},
 		},
 	}
@@ -354,6 +374,7 @@ func TestForecastingService_BonusForecasting(t *testing.T) {
 			BookingDate: time.Date(now.Year()-2, 11, 28, 0, 0, 0, 0, time.UTC),
 			Description: "Employer Salary Payout",
 			Amount:      3000.0,
+			BaseAmount:  3000.0,
 		},
 		{
 			ID:          uuid.New(),
@@ -361,11 +382,12 @@ func TestForecastingService_BonusForecasting(t *testing.T) {
 			BookingDate: time.Date(now.Year()-1, 11, 28, 0, 0, 0, 0, time.UTC),
 			Description: "Employer Salary Payout",
 			Amount:      3000.0,
+			BaseAmount:  3000.0,
 		},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{
+	bankRepo := &mockForecastingBankRepo{
 		accounts: []entity.BankAccount{
 			{Balance: 1000.0},
 		},
@@ -373,7 +395,7 @@ func TestForecastingService_BonusForecasting(t *testing.T) {
 	catRepo := &mockCategoryRepo{saved: []entity.Category{}}
 	payslipRepo := &mockPayslipRepo{payslips: payslips}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, payslipRepo, nil, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, payslipRepo, nil, &mockExclusionRepo{}, nil, nil, nil)
 
 	// Range covering November of current year
 	from := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
@@ -439,7 +461,7 @@ func TestForecastingService_RecurringPlannedTransactions(t *testing.T) {
 	now := time.Now()
 
 	repo := &mockForecastingRepo{}
-	bankRepo := &mockBankRepo{}
+	bankRepo := &mockForecastingBankRepo{}
 	catRepo := &mockCategoryRepo{saved: []entity.Category{}}
 
 	// 1. Recurring Monthly: Rent
@@ -447,6 +469,7 @@ func TestForecastingService_RecurringPlannedTransactions(t *testing.T) {
 		ID:             uuid.New(),
 		UserID:         userID,
 		Amount:         -1200.0,
+		BaseAmount:     -1200.0,
 		Date:           time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC),
 		Description:    "Monthly Rent",
 		Status:         entity.PlannedTransactionStatusPending,
@@ -454,7 +477,7 @@ func TestForecastingService_RecurringPlannedTransactions(t *testing.T) {
 	}
 
 	ptRepo := &mockPlannedTransactionRepo{planned: []entity.PlannedTransaction{pt}}
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil, nil, nil)
 
 	// Forecast covering 3 months
 	from := pt.Date
@@ -481,9 +504,9 @@ func TestForecastingService_SoftSuppression(t *testing.T) {
 
 	// 1. Auto-detected pattern for "Salary" (3000.0)
 	txns := []entity.Transaction{
-		{Description: "Salary", Amount: 3000.0, BookingDate: now.AddDate(0, -3, 0), CategoryID: &catID},
-		{Description: "Salary", Amount: 3000.0, BookingDate: now.AddDate(0, -2, 0), CategoryID: &catID},
-		{Description: "Salary", Amount: 3000.0, BookingDate: now.AddDate(0, -1, 0), CategoryID: &catID},
+		{Description: "Salary", Amount: 3000.0, BaseAmount: 3000.0, BookingDate: now.AddDate(0, -3, 0), CategoryID: &catID},
+		{Description: "Salary", Amount: 3000.0, BaseAmount: 3000.0, BookingDate: now.AddDate(0, -2, 0), CategoryID: &catID},
+		{Description: "Salary", Amount: 3000.0, BaseAmount: 3000.0, BookingDate: now.AddDate(0, -1, 0), CategoryID: &catID},
 	}
 
 	// 2. Manual planned transaction for "Salary" (3000.0) in the same category
@@ -492,6 +515,7 @@ func TestForecastingService_SoftSuppression(t *testing.T) {
 		ID:             uuid.New(),
 		UserID:         userID,
 		Amount:         3000.0,
+		BaseAmount:     3000.0,
 		Date:           now.AddDate(0, 0, 1), // Tomorrow, very close to "now"
 		Description:    "Manual Salary Forecast",
 		Status:         entity.PlannedTransactionStatusPending,
@@ -500,13 +524,13 @@ func TestForecastingService_SoftSuppression(t *testing.T) {
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{}
+	bankRepo := &mockForecastingBankRepo{}
 	catRepo := &mockCategoryRepo{saved: []entity.Category{
 		{ID: catID, Name: "Income"},
 	}}
 	ptRepo := &mockPlannedTransactionRepo{planned: []entity.PlannedTransaction{pt}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil, nil, nil)
 
 	from := now
 	to := now.AddDate(0, 1, 0)
@@ -537,13 +561,14 @@ func TestForecastingService_WithPlannedTransactions(t *testing.T) {
 	now := time.Now()
 
 	repo := &mockForecastingRepo{}
-	bankRepo := &mockBankRepo{}
+	bankRepo := &mockForecastingBankRepo{}
 	catRepo := &mockCategoryRepo{saved: []entity.Category{}}
 
 	pt := entity.PlannedTransaction{
 		ID:          uuid.New(),
 		UserID:      userID,
 		Amount:      -150.0,
+		BaseAmount:  -150.0,
 		Date:        now.AddDate(0, 0, 5), // 5 days from now
 		Description: "Planned Bill",
 		Status:      entity.PlannedTransactionStatusPending,
@@ -551,7 +576,7 @@ func TestForecastingService_WithPlannedTransactions(t *testing.T) {
 
 	ptRepo := &mockPlannedTransactionRepo{planned: []entity.PlannedTransaction{pt}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil, nil, nil)
 
 	from := now
 	to := now.AddDate(0, 1, 0)
@@ -591,18 +616,21 @@ func TestForecastingService_ForecastStrategies(t *testing.T) {
 		{
 			Description: "Recent 1",
 			Amount:      -100.0,
+			BaseAmount:  -100.0,
 			BookingDate: now.AddDate(0, -1, 0), // 1 month ago
 			CategoryID:  &catID3m,
 		},
 		{
 			Description: "Recent 2",
 			Amount:      -100.0,
+			BaseAmount:  -100.0,
 			BookingDate: now.AddDate(0, -2, 0), // 2 months ago
 			CategoryID:  &catID3m,
 		},
 		{
 			Description: "Old 1",
 			Amount:      -500.0,
+			BaseAmount:  -500.0,
 			BookingDate: now.AddDate(0, -4, 0), // 4 months ago -> Should be IGNORED for 3m
 			CategoryID:  &catID3m,
 		},
@@ -611,12 +639,14 @@ func TestForecastingService_ForecastStrategies(t *testing.T) {
 		{
 			Description: "Recent 1",
 			Amount:      -100.0,
+			BaseAmount:  -100.0,
 			BookingDate: now.AddDate(0, -1, 0),
 			CategoryID:  &catIDAll,
 		},
 		{
 			Description: "Old 1",
 			Amount:      -500.0,
+			BaseAmount:  -500.0,
 			BookingDate: now.AddDate(0, -4, 0), // Should be INCLUDED for 'all'
 			CategoryID:  &catIDAll,
 		},
@@ -625,19 +655,21 @@ func TestForecastingService_ForecastStrategies(t *testing.T) {
 		{
 			Description: "Recent 1",
 			Amount:      -100.0,
+			BaseAmount:  -100.0,
 			BookingDate: now.AddDate(0, -1, 0),
 			CategoryID:  &catID3y,
 		},
 		{
 			Description: "Ancient",
 			Amount:      -1000.0,
+			BaseAmount:  -1000.0,
 			BookingDate: now.AddDate(-4, 0, 0), // 4 years ago -> Should be IGNORED for 3y
 			CategoryID:  &catID3y,
 		},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{
+	bankRepo := &mockForecastingBankRepo{
 		accounts: []entity.BankAccount{
 			{Balance: 1000.0},
 		},
@@ -666,7 +698,7 @@ func TestForecastingService_ForecastStrategies(t *testing.T) {
 		},
 	}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
 
 	// Forecast for the next month
 	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, 1, 0)
@@ -726,31 +758,35 @@ func TestForecastingService_CalculateCategoryAverage(t *testing.T) {
 		// Transaction in current month
 		{
 			Amount:      -100.0,
+			BaseAmount:  -100.0,
 			BookingDate: now.AddDate(0, 0, -2),
 			CategoryID:  &catID,
 		},
 		// Transaction in Month -1
 		{
 			Amount:      -200.0,
+			BaseAmount:  -200.0,
 			BookingDate: now.AddDate(0, -1, -2),
 			CategoryID:  &catID,
 		},
 		// Transaction in Month -3 (safely outside 3m strategy window which is exactly 3 months ago from now)
 		{
 			Amount:      -400.0,
+			BaseAmount:  -400.0,
 			BookingDate: now.AddDate(0, -3, -5),
 			CategoryID:  &catID,
 		},
 		// Transaction in Month -13 (outside 1y)
 		{
 			Amount:      -1200.0,
+			BaseAmount:  -1200.0,
 			BookingDate: now.AddDate(-1, -1, 0),
 			CategoryID:  &catID,
 		},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	svc := service.NewForecastingService(repo, &mockBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -798,7 +834,7 @@ func TestForecastingService_CalculateCategoryAverage(t *testing.T) {
 
 	t.Run("Empty history returns 0", func(t *testing.T) {
 		emptyRepo := &mockForecastingRepo{txns: []entity.Transaction{}}
-		svcEmpty := service.NewForecastingService(emptyRepo, &mockBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil)
+		svcEmpty := service.NewForecastingService(emptyRepo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
 		got, err := svcEmpty.CalculateCategoryAverage(context.Background(), userID, catID, "3m")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -815,13 +851,13 @@ func TestForecastingService_CalculateCategoryAverage_Grouping(t *testing.T) {
 	catID := uuid.New()
 
 	txns := []entity.Transaction{
-		{Amount: -100.0, BookingDate: now.AddDate(0, 0, -2), CategoryID: &catID},
-		{Amount: -50.0, BookingDate: now.AddDate(0, 0, -3), CategoryID: &catID},
-		{Amount: -200.0, BookingDate: now.AddDate(0, -1, -2), CategoryID: &catID},
+		{Amount: -100.0, BaseAmount: -100.0, BookingDate: now.AddDate(0, 0, -2), CategoryID: &catID},
+		{Amount: -50.0, BaseAmount: -50.0, BookingDate: now.AddDate(0, 0, -3), CategoryID: &catID},
+		{Amount: -200.0, BaseAmount: -200.0, BookingDate: now.AddDate(0, -1, -2), CategoryID: &catID},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	svc := service.NewForecastingService(repo, &mockBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil)
+	svc := service.NewForecastingService(repo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
 
 	got, err := svc.CalculateCategoryAverage(context.Background(), userID, catID, "3m")
 	if err != nil {

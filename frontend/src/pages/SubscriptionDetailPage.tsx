@@ -22,7 +22,11 @@ import {
     Edit3,
     Save,
     X,
-    Sparkles
+    Sparkles,
+    Link as LinkIcon,
+    Unlink,
+    Plus,
+    Search
 } from 'lucide-react';
 import { subscriptionService } from '../api/services/subscriptionService';
 import { transactionService } from '../api/services/transactionService';
@@ -40,12 +44,14 @@ export default function SubscriptionDetailPage() {
     const { t, i18n } = useTranslation();
     const queryClient = useQueryClient();
     const [showCancelModal, setShowCancelModal] = useState(false);
+    const [showLinkModal, setShowLinkModal] = useState(false);
     const [cancellationDraft, setCancellationDraft] = useState<CancellationLetterResult | null>(null);
     const [isEditing, setIsEditing] = useState(false);
     const [editForm, setEditForm] = useState({
         merchant_name: '',
         amount: 0,
         billing_cycle: 'monthly' as 'monthly' | 'yearly',
+        billing_interval: 1,
         status: 'active' as SubscriptionStatus,
         customer_number: '',
         contact_email: '',
@@ -110,6 +116,24 @@ export default function SubscriptionDetailPage() {
         }
     });
 
+    const unlinkMutation = useMutation({
+        mutationFn: (txnHash: string) => subscriptionService.unlinkTransaction(id!, txnHash),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['subscription', id] });
+            queryClient.invalidateQueries({ queryKey: ['subscriptionTransactions', id] });
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        }
+    });
+
+    const linkMutation = useMutation({
+        mutationFn: (txnHash: string) => subscriptionService.linkTransaction(id!, txnHash),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['subscription', id] });
+            queryClient.invalidateQueries({ queryKey: ['subscriptionTransactions', id] });
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        }
+    });
+
     const [searchParams, setSearchParams] = useSearchParams();
     const [showEnrichedBadge, setShowEnrichedBadge] = useState(false);
 
@@ -149,6 +173,7 @@ export default function SubscriptionDetailPage() {
             merchant_name: subscription.merchant_name,
             amount: subscription.amount,
             billing_cycle: subscription.billing_cycle as 'monthly' | 'yearly',
+            billing_interval: subscription.billing_interval,
             status: subscription.status,
             customer_number: subscription.customer_number || '',
             contact_email: subscription.contact_email || '',
@@ -217,7 +242,12 @@ export default function SubscriptionDetailPage() {
                             <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-gray-500 dark:text-gray-400">
                                 <div className="flex items-center gap-2">
                                     <CreditCard size={14} />
-                                    {fmtCurrency(subscription.amount)} / {subscription.billing_cycle}
+                                    {fmtCurrency(subscription.amount)} / {subscription.billing_cycle === 'monthly' ? t('forecasting.interval.monthly') : t('forecasting.interval.yearly')}
+                                    {subscription.billing_interval > 1 && (
+                                        <span className="text-xs text-indigo-500 font-medium ml-1">
+                                            ({fmtCurrency(subscription.billing_cycle === 'yearly' ? (subscription.amount / (12 * subscription.billing_interval)) : (subscription.amount / subscription.billing_interval))} / {t('forecasting.interval.monthly')})
+                                        </span>
+                                    )}
                                 </div>
                                 <div className="h-1 w-1 rounded-full bg-gray-300 dark:bg-gray-700 hidden md:block" />
                                 <div className="flex items-center gap-2">
@@ -300,6 +330,24 @@ export default function SubscriptionDetailPage() {
                                         </select>
                                     </div>
                                     <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">
+                                            {t('subscriptions.billingIntervalLabel')}
+                                        </label>
+                                        <div className="flex items-center gap-3">
+                                            <input
+                                                type="number"
+                                                min="1"
+                                                max="12"
+                                                value={editForm.billing_interval}
+                                                onChange={(e) => setEditForm({ ...editForm, billing_interval: parseInt(e.target.value) || 1 })}
+                                                className="w-24 p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 font-bold"
+                                            />
+                                            <span className="text-sm font-bold text-gray-500 dark:text-gray-400">
+                                                {editForm.billing_cycle === 'monthly' ? t('common.months') : t('common.years')}
+                                            </span>
+                                        </div>
+                                    </div>
+                                    <div className="space-y-1">
                                         <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">{t('subscriptions.statusLabel')}</label>
                                         <select
                                             value={editForm.status}
@@ -307,19 +355,26 @@ export default function SubscriptionDetailPage() {
                                             className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 font-bold appearance-none"
                                         >
                                             <option value="active">{t('subscriptions.status.active')}</option>
-                                            <option value="canceled">{t('subscriptions.status.canceledPast')}</option>
+                                            <option value="cancelled">{t('subscriptions.status.cancelledPast')}</option>
                                             <option value="paused">{t('subscriptions.status.paused')}</option>
                                         </select>
                                     </div>
                                 </div>
                             ) : (
                                 <>
-                                    <InfoItem 
-                                        icon={<Calendar size={18} />} 
-                                        label={t('subscriptions.billingCycle')} 
-                                        value={`${subscription.billing_cycle}${subscription.billing_interval > 1 ? ` ${t('subscriptions.everyXMonths', { count: subscription.billing_interval })}` : ''}`} 
-                                    />
-                                    <InfoItem 
+                                    <InfoItem
+                                        icon={<Calendar size={18} />}
+                                        label={t('subscriptions.billingCycle')}
+                                        value={
+                                           subscription.billing_interval > 1
+                                               ? (subscription.billing_cycle === 'monthly'
+                                                   ? t('subscriptions.everyXMonths', { count: subscription.billing_interval })
+                                                   : t('subscriptions.everyXYears', { count: subscription.billing_interval }))
+                                               : (subscription.billing_cycle === 'monthly'
+                                                   ? t('forecasting.interval.monthly')
+                                                   : t('forecasting.interval.yearly'))
+                                        }
+                                    />                                    <InfoItem 
                                         icon={<Shield size={18} />} 
                                         label={t('subscriptions.noticePeriod')} 
                                         value={`${subscription.notice_period_days} ${t('common.days')}`} 
@@ -486,22 +541,49 @@ export default function SubscriptionDetailPage() {
                                 <History size={18} className="text-gray-400" />
                                 {t('subscriptions.paymentHistory')}
                             </h3>
-                            <span className="text-xs font-bold text-gray-400 bg-gray-50 dark:bg-gray-800 px-2.5 py-1 rounded-full uppercase tracking-widest">
-                                {transactions.length} {t('common.all')}
-                            </span>
+                            <div className="flex items-center gap-3">
+                                <button
+                                    onClick={() => setShowLinkModal(true)}
+                                    className="p-2 rounded-xl bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-100 dark:border-indigo-800/50 hover:bg-indigo-100 dark:hover:bg-indigo-900/30 transition-all shadow-sm"
+                                    title={t('subscriptions.linkTransaction')}
+                                >
+                                    <Plus size={18} />
+                                </button>
+                                <span className="text-xs font-bold text-gray-400 bg-gray-50 dark:bg-gray-800 px-2.5 py-1 rounded-full uppercase tracking-widest">
+                                    {transactions.length} {t('common.all')}
+                                </span>
+                            </div>
                         </div>
                         <div className="divide-y divide-gray-100 dark:divide-gray-800">
-                            {transactions.map(tx => (
-                                <div key={tx.id} className="p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                                    <div className="space-y-0.5">
-                                        <p className="text-sm font-bold text-gray-900 dark:text-white">{fmtDate(tx.booking_date)}</p>
-                                        <p className="text-xs text-gray-500 dark:text-gray-400 truncate max-w-[200px] md:max-w-md">{tx.description}</p>
-                                    </div>
-                                    <p className="font-mono font-bold text-gray-900 dark:text-white">
-                                        {fmtCurrency(tx.amount)}
-                                    </p>
+                            {transactions.length === 0 ? (
+                                <div className="p-12 text-center text-gray-400 italic">
+                                    {t('common.noData')}
                                 </div>
-                            ))}
+                            ) : (
+                                transactions.map(tx => (
+                                    <div key={tx.id} className="group p-4 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                        <div className="flex items-center gap-4 flex-1 overflow-hidden">
+                                            <div className="space-y-0.5 min-w-0">
+                                                <p className="text-sm font-bold text-gray-900 dark:text-white">{fmtDate(tx.booking_date)}</p>
+                                                <p className="text-xs text-gray-500 dark:text-gray-400 truncate pr-4">{tx.description}</p>
+                                            </div>
+                                        </div>
+                                        <div className="flex items-center gap-4">
+                                            <p className="font-mono font-bold text-gray-900 dark:text-white">
+                                                {fmtCurrency(tx.amount)}
+                                            </p>
+                                            <button
+                                                onClick={() => unlinkMutation.mutate(tx.content_hash)}
+                                                disabled={unlinkMutation.isPending}
+                                                className="p-1.5 rounded-lg text-gray-400 hover:text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20 transition-all md:opacity-0 group-hover:opacity-100 disabled:opacity-0"
+                                                title={t('subscriptions.unlinkTransaction')}
+                                            >
+                                                <Unlink size={16} />
+                                            </button>
+                                        </div>
+                                    </div>
+                                ))
+                            )}
                         </div>
                     </div>
                 </div>
@@ -519,7 +601,7 @@ export default function SubscriptionDetailPage() {
                         </p>
                         <button 
                             onClick={() => { setShowCancelModal(true); previewMutation.mutate(); }}
-                            disabled={subscription.status === 'canceled' || subscription.status === 'cancellation_pending'}
+                            disabled={subscription.status === 'cancelled' || subscription.status === 'cancellation_pending'}
                             className="w-full bg-white text-indigo-600 py-3 rounded-2xl font-bold flex items-center justify-center gap-2 hover:bg-indigo-50 transition-colors disabled:opacity-50"
                         >
                             <XCircle size={18} />
@@ -648,6 +730,128 @@ export default function SubscriptionDetailPage() {
                     </div>
                 </div>
             )}
+
+            {/* Link Transaction Modal */}
+            {showLinkModal && (
+                <LinkTransactionModal 
+                    onClose={() => setShowLinkModal(false)}
+                    onLink={(hash) => {
+                        linkMutation.mutate(hash);
+                        setShowLinkModal(false);
+                    }}
+                />
+            )}
+        </div>
+    );
+}
+
+function LinkTransactionModal({ onClose, onLink }: { onClose: () => void, onLink: (hash: string) => void }) {
+    const { t } = useTranslation();
+    const [searchTerm, setSearchTerm] = useState('');
+    
+    // Fetch transactions that are NOT already linked to any subscription
+    const { data: unlinkedTxns = [], isLoading } = useQuery({
+        queryKey: ['unlinkedTransactions', searchTerm],
+        queryFn: () => transactionService.fetchTransactions(
+            undefined, // search
+            false,     // onlyReviewed
+            undefined, // fromDate
+            undefined, // toDate
+            undefined, // categoryID
+            false,     // isReconciled
+            false,     // skipForecasting
+            'null' as any, // HACK: We need a way to filter by subscription_id IS NULL. 
+            // Looking at the backend, it might not support 'null' filter explicitly in SearchTransactions yet.
+            // But let's assume we filter on client side or use a broad search.
+        ),
+        enabled: true
+    });
+
+    // Client-side filter for debit transactions without subscription
+    const filteredTxns = unlinkedTxns
+        .filter(tx => tx.amount < 0 && !tx.subscription_id)
+        .filter(tx => 
+            tx.description.toLowerCase().includes(searchTerm.toLowerCase()) || 
+            tx.counterparty_name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+            tx.amount.toString().includes(searchTerm)
+        )
+        .sort((a, b) => new Date(b.booking_date).getTime() - new Date(a.booking_date).getTime())
+        .slice(0, 50);
+
+    return (
+        <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
+            <div className="absolute inset-0 bg-gray-900/60 backdrop-blur-md" onClick={onClose} />
+            <div className="relative bg-white dark:bg-gray-900 rounded-[2rem] w-full max-w-2xl max-h-[90dvh] flex flex-col shadow-2xl animate-in zoom-in-95 duration-200 border border-gray-200 dark:border-gray-800">
+                <div className="p-8 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                    <div className="space-y-1">
+                        <h2 className="text-2xl font-bold text-gray-900 dark:text-white">{t('subscriptions.linkTransaction')}</h2>
+                        <p className="text-sm text-gray-500 dark:text-gray-400">{t('subscriptions.linkModalSubtitle')}</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors">
+                        <XCircle size={24} />
+                    </button>
+                </div>
+
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800">
+                    <div className="relative">
+                        <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
+                        <input
+                            type="text"
+                            placeholder={t('common.search')}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-12 pr-4 py-3 bg-gray-50 dark:bg-gray-800 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 font-medium"
+                            autoFocus
+                        />
+                    </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-2">
+                    {isLoading ? (
+                        <div className="flex justify-center py-20">
+                            <RefreshCcw className="animate-spin text-indigo-500" size={32} />
+                        </div>
+                    ) : filteredTxns.length === 0 ? (
+                        <div className="text-center py-20 text-gray-400 italic">
+                            {t('common.noData')}
+                        </div>
+                    ) : (
+                        filteredTxns.map(tx => (
+                            <div key={tx.id} className="p-4 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-indigo-500 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10 transition-all flex items-center justify-between group">
+                                <div className="space-y-1 min-w-0">
+                                    <div className="flex items-center gap-2">
+                                        <p className="text-sm font-bold text-gray-900 dark:text-white">{fmtDate(tx.booking_date)}</p>
+                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                                            {tx.statement_type}
+                                        </span>
+                                    </div>
+                                    <p className="text-sm text-gray-600 dark:text-gray-400 truncate max-w-md">{tx.description}</p>
+                                </div>
+                                <div className="flex items-center gap-4 shrink-0">
+                                    <p className="font-mono font-bold text-gray-900 dark:text-white">
+                                        {fmtCurrency(tx.amount)}
+                                    </p>
+                                    <button
+                                        onClick={() => onLink(tx.content_hash)}
+                                        className="p-2.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-400 hover:text-indigo-600 hover:border-indigo-500 transition-all shadow-sm group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600"
+                                    >
+                                        <LinkIcon size={18} />
+                                    </button>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+
+                <div className="p-6 border-t border-gray-100 dark:border-gray-800">
+                    <button 
+                        onClick={onClose}
+                        className="w-full px-6 py-3 rounded-xl font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                    >
+                        {t('common.close')}
+                    </button>
+                </div>
+            </div>
         </div>
     );
 }
@@ -688,7 +892,7 @@ function StatusBadge({ status }: { status: string }) {
                     <Clock size={12} /> {t('subscriptions.status.cancellation_pending')}
                 </span>
             );
-        case 'canceled':
+        case 'cancelled':
             return (
                 <span className="inline-flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full text-xs font-bold border border-gray-100 dark:border-gray-700">
                     <XCircle size={12} /> {t('subscriptions.status.cancelled')}

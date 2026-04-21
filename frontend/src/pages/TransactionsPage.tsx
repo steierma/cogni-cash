@@ -5,18 +5,19 @@ import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import {
     BarChart3, Database, Layers, Loader2, Search, MapPin,
-    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Columns, Check, Zap, Link2, RefreshCcw
+    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Columns, Check, Zap, Link2, RefreshCcw, Link as LinkIcon
 } from 'lucide-react';
 
 import { authService } from '../api/services/authService';
 import { bankService } from '../api/services/bankService';
 import { categoryService } from '../api/services/categoryService';
 import { settingsService } from '../api/services/settingsService';
-import { subscriptionService } from '../api/services/subscriptionService';
 import { transactionService } from '../api/services/transactionService';
+import { subscriptionService } from '../api/services/subscriptionService';
 import type { BankStatementSummary } from "../api/types/bank";
 import type { Category } from "../api/types/category";
 import type { JobState, Transaction, PatternExclusion } from "../api/types/transaction";
+import type { Subscription } from "../api/types/subscription";
 import type { User } from "../api/types/system";
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 
@@ -90,6 +91,7 @@ export default function TransactionsPage() {
     const [showVisuals, setShowVisuals] = React.useState(getParam('visuals', 'true') === 'true');
     const [includePredictions, setIncludePredictions] = React.useState(getParam('predictions', 'false') === 'true');
     const [subModalTx, setSubModalTx] = React.useState<Transaction | null>(null);
+    const [linkModalTx, setLinkModalTx] = React.useState<Transaction | null>(null);
     const [topHitsCount, setTopHitsCount] = React.useState<number>(3);
     const [toastMessage, setToastMessage] = React.useState<string | null>(null);
 
@@ -104,6 +106,11 @@ export default function TransactionsPage() {
     const { data: statements = [], isLoading: isLoadingStatements } = useQuery<BankStatementSummary[]>({
         queryKey: ['bank-statements'],
         queryFn: () => bankService.fetchStatements(),
+    });
+
+    const { data: subscriptions = [] } = useQuery<Subscription[]>({
+        queryKey: ['subscriptions'],
+        queryFn: () => subscriptionService.fetchSubscriptions(),
     });
 
     const { data: allTxns = [], isLoading: isLoadingTxns, isError } = useQuery<Transaction[]>({
@@ -145,6 +152,28 @@ export default function TransactionsPage() {
     const { data: me } = useQuery<User>({
         queryKey: ['me'],
         queryFn: () => authService.fetchMe(),
+    });
+
+    const linkMutation = useMutation({
+        mutationFn: ({ subID, txnHash }: { subID: string, txnHash: string }) => 
+            subscriptionService.linkTransaction(subID, txnHash),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['transactions'] });
+            qc.invalidateQueries({ queryKey: ['subscriptions'] });
+            setToastMessage("Linked successfully!");
+            setTimeout(() => setToastMessage(null), 3000);
+        }
+    });
+
+    const unlinkMutation = useMutation({
+        mutationFn: (tx: Transaction) => 
+            subscriptionService.unlinkTransaction(tx.subscription_id!, tx.content_hash),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['transactions'] });
+            qc.invalidateQueries({ queryKey: ['subscriptions'] });
+            setToastMessage("Unlinked successfully!");
+            setTimeout(() => setToastMessage(null), 3000);
+        }
     });
 
     const updateSettingsMut = useMutation({
@@ -822,6 +851,7 @@ export default function TransactionsPage() {
                 <TransactionTable
                     transactions={filtered}
                     categories={categories}
+                    subscriptions={subscriptions}
                     currentUserId={me?.id}
                     patternExclusions={patternExclusions}
                     selectedHashes={selectedHashes}
@@ -840,6 +870,12 @@ export default function TransactionsPage() {
                         }
                     }}
                     onCreateSubscription={(tx) => setSubModalTx(tx)}
+                    onLinkSubscription={(tx) => setLinkModalTx(tx)}
+                    onUnlinkSubscription={(tx) => {
+                        if (window.confirm(t('subscriptions.unlinkConfirm', { merchant: subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name }))) {
+                            unlinkMutation.mutate(tx);
+                        }
+                    }}
                     visibleCols={visibleCols}
                 />
             )}
@@ -854,6 +890,18 @@ export default function TransactionsPage() {
                         qc.invalidateQueries({ queryKey: ['subscriptions'] });
                         setToastMessage("Subscription created successfully!");
                         setTimeout(() => setToastMessage(null), 5000);
+                    }}
+                />
+            )}
+
+            {linkModalTx && (
+                <LinkToSubscriptionModal 
+                    transaction={linkModalTx}
+                    subscriptions={subscriptions}
+                    onClose={() => setLinkModalTx(null)}
+                    onLink={(subID) => {
+                        linkMutation.mutate({ subID, txnHash: linkModalTx.content_hash });
+                        setLinkModalTx(null);
                     }}
                 />
             )}
@@ -929,13 +977,102 @@ export default function TransactionsPage() {
     );
 }
 
+function LinkToSubscriptionModal({ 
+    transaction, 
+    subscriptions, 
+    onClose, 
+    onLink 
+}: { 
+    transaction: Transaction, 
+    subscriptions: Subscription[], 
+    onClose: () => void, 
+    onLink: (subID: string) => void 
+}) {
+    const { t } = useTranslation();
+    const [searchTerm, setSearchTerm] = React.useState('');
+
+    const filtered = subscriptions
+        .filter(s => s.merchant_name.toLowerCase().includes(searchTerm.toLowerCase()))
+        .sort((a, b) => a.merchant_name.localeCompare(b.merchant_name));
+
+    return (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl shadow-2xl w-full max-w-md overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                    <div className="space-y-1">
+                        <h3 className="text-xl font-bold flex items-center gap-2">
+                            <LinkIcon className="text-indigo-600" size={20} />
+                            {t('subscriptions.linkTransaction')}
+                        </h3>
+                        <p className="text-xs text-gray-500">{transaction.description}</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                        <X size={20} />
+                    </button>
+                </div>
+
+                <div className="p-4 border-b border-gray-100 dark:border-gray-800">
+                    <div className="relative">
+                        <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={16} />
+                        <input
+                            type="text"
+                            placeholder={t('common.search')}
+                            value={searchTerm}
+                            onChange={(e) => setSearchTerm(e.target.value)}
+                            className="w-full pl-10 pr-4 py-2 bg-gray-50 dark:bg-gray-800 border-none rounded-xl text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
+                            autoFocus
+                        />
+                    </div>
+                </div>
+
+                <div className="max-h-[300px] overflow-y-auto p-2 space-y-1">
+                    {filtered.length === 0 ? (
+                        <p className="text-center py-8 text-sm text-gray-400 italic">{t('common.noData')}</p>
+                    ) : (
+                        filtered.map(sub => (
+                            <button
+                                key={sub.id}
+                                onClick={() => onLink(sub.id)}
+                                className="w-full p-3 rounded-xl hover:bg-indigo-50 dark:hover:bg-indigo-900/20 text-left transition-all group flex items-center justify-between"
+                            >
+                                <div className="space-y-0.5">
+                                    <p className="text-sm font-bold text-gray-900 dark:text-white group-hover:text-indigo-600 dark:group-hover:text-indigo-400">{sub.merchant_name}</p>
+                                    <p className="text-xs text-gray-500">{fmtCurrency(sub.amount)} / {sub.billing_cycle}</p>
+                                </div>
+                                <div className="p-2 rounded-lg bg-gray-50 dark:bg-gray-800 group-hover:bg-indigo-600 group-hover:text-white transition-colors">
+                                    <LinkIcon size={14} />
+                                </div>
+                            </button>
+                        ))
+                    )}
+                </div>
+
+                <div className="p-4 border-t border-gray-100 dark:border-gray-800">
+                    <button 
+                        onClick={onClose}
+                        className="w-full px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                    >
+                        {t('common.close')}
+                    </button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 function CreateFromTransactionModal({ transaction, onClose, onCreated, categories }: { transaction: Transaction, onClose: () => void, onCreated: () => void, categories: Category[] }) {
     const { t } = useTranslation();
     const [billingCycle, setBillingCycle] = React.useState('monthly');
+    const [billingInterval, setBillingInterval] = React.useState(1);
     const [merchantName, setMerchantName] = React.useState(transaction.counterparty_name || transaction.description);
 
     const createMutation = useMutation({
-        mutationFn: () => subscriptionService.createFromTransaction(transaction.content_hash, billingCycle),
+        mutationFn: () => axios.post('/api/v1/subscriptions/from-transaction/', { 
+            transaction_hash: transaction.content_hash, 
+            billing_cycle: billingCycle,
+            billing_interval: billingInterval,
+            merchant_name: merchantName
+        }),
         onSuccess: () => {
             onCreated();
             onClose();
@@ -960,7 +1097,7 @@ function CreateFromTransactionModal({ transaction, onClose, onCreated, categorie
                 <div className="p-6 space-y-4">
                     <div className="space-y-1.5">
                         <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('subscriptions.merchantService')}</label>
-                        <input 
+                        <input
                             type="text"
                             value={merchantName}
                             onChange={(e) => setMerchantName(e.target.value)}
@@ -972,34 +1109,62 @@ function CreateFromTransactionModal({ transaction, onClose, onCreated, categorie
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
                             <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('subscriptions.billingCycle')}</label>
-                            <select 
+                            <select
                                 value={billingCycle}
-                                onChange={(e) => setBillingCycle(e.target.value)}
+                                onChange={(e) => {
+                                    const val = e.target.value;
+                                    setBillingCycle(val);
+                                    if (val === 'quarterly') {
+                                        setBillingCycle('monthly');
+                                        setBillingInterval(3);
+                                    } else if (val === 'half-yearly') {
+                                        setBillingCycle('monthly');
+                                        setBillingInterval(6);
+                                    } else {
+                                        setBillingInterval(1);
+                                    }
+                                }}
                                 className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none"
                             >
-                                <option value="monthly">{t('subscriptions.cycle.monthly')}</option>
+                                <option value="monthly">{t('forecasting.interval.monthly')}</option>
                                 <option value="quarterly">{t('subscriptions.cycle.quarterly')}</option>
-                                <option value="yearly">{t('subscriptions.cycle.yearly')}</option>
+                                <option value="half-yearly">{t('subscriptions.cycle.half_yearly')}</option>
+                                <option value="yearly">{t('forecasting.interval.yearly')}</option>
                             </select>
                         </div>
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('subscriptions.billingIntervalLabel')}</label>
+                            <div className="flex items-center gap-2">
+                                <input
+                                    type="number"
+                                    min="1"
+                                    max="24"
+                                    value={billingInterval}
+                                    onChange={(e) => setBillingInterval(parseInt(e.target.value) || 1)}
+                                    className="w-full bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2 text-sm focus:ring-2 focus:ring-indigo-500 outline-none font-bold"
+                                />
+                                <span className="text-[10px] font-bold text-gray-400 uppercase">{billingCycle === 'monthly' ? t('common.months') : t('common.years')}</span>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1.5">
                             <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('transactions.table.amount')}</label>
                             <div className="bg-gray-100 dark:bg-gray-800/50 rounded-xl px-4 py-2 text-sm font-mono font-bold text-gray-600 dark:text-gray-400">
                                 {fmtCurrency(Math.abs(transaction.amount), transaction.currency)}
                             </div>
                         </div>
-                    </div>
-
-                    <div className="space-y-1.5">
-                        <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('transactions.table.category')}</label>
-                        <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2">
-                            <div className="w-3 h-3 rounded-full" style={{ backgroundColor: currentCat?.color || '#cbd5e1' }} />
-                            <span className="text-sm font-medium">{currentCat?.name || t('transactions.table.unset')}</span>
+                        <div className="space-y-1.5">
+                            <label className="text-xs font-bold text-gray-400 uppercase tracking-widest">{t('transactions.table.category')}</label>
+                            <div className="flex items-center gap-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl px-4 py-2">
+                                <div className="w-3 h-3 rounded-full" style={{ backgroundColor: currentCat?.color || '#cbd5e1' }} />
+                                <span className="text-sm font-medium truncate">{currentCat?.name || t('transactions.table.unset')}</span>
+                            </div>
                         </div>
                     </div>
 
-                    <div className="pt-4 flex gap-3">
-                        <button 
+                    <div className="pt-4 flex gap-3">                        <button 
                             onClick={onClose}
                             className="flex-1 px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                         >

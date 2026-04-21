@@ -17,14 +17,18 @@ type Payslip struct {
 
 	PeriodMonthNum int    `json:"period_month_num"`
 	PeriodYear     int    `json:"period_year"`
-	EmployerName   string `json:"employer_name"`
-	TaxClass       string `json:"tax_class,omitempty"`
-	TaxID          string `json:"tax_id,omitempty"`
+	EmployerName   string    `json:"employer_name"`
+	TaxClass       string    `json:"tax_class,omitempty"`
+	TaxID          string    `json:"tax_id,omitempty"`
+	Currency       string    `json:"currency"`
 
 	// Internationalized financial fields
 	GrossPay         float64 `json:"gross_pay"`
+	BaseGrossPay     float64 `json:"base_gross_pay"`
 	NetPay           float64 `json:"net_pay"`
+	BaseNetPay       float64 `json:"base_net_pay"`
 	PayoutAmount     float64 `json:"payout_amount"`
+	BasePayoutAmount float64 `json:"base_payout_amount"`
 	CustomDeductions float64 `json:"custom_deductions"`
 
 	Bonuses   []Bonus   `json:"bonuses"`
@@ -35,6 +39,7 @@ type Payslip struct {
 type Bonus struct {
 	Description string  `json:"description"`
 	Amount      float64 `json:"amount"`
+	BaseAmount  float64 `json:"base_amount"`
 }
 
 // PayslipFilter defines optional filters for listing payslips.

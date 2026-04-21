@@ -25,10 +25,22 @@ type ForecastingService struct {
 	payslipRepo  port.PayslipRepository
 	ptRepo       port.PlannedTransactionRepository
 	forecastRepo port.ForecastingRepository
+	settingsRepo port.SettingsRepository
+	ratePort     port.CurrencyExchangeRatePort
 	Logger       *slog.Logger
 }
 
-func NewForecastingService(repo port.BankStatementRepository, bankRepo port.BankRepository, catRepo port.CategoryRepository, payslipRepo port.PayslipRepository, ptRepo port.PlannedTransactionRepository, forecastRepo port.ForecastingRepository, logger *slog.Logger) *ForecastingService {
+func NewForecastingService(
+	repo port.BankStatementRepository,
+	bankRepo port.BankRepository,
+	catRepo port.CategoryRepository,
+	payslipRepo port.PayslipRepository,
+	ptRepo port.PlannedTransactionRepository,
+	forecastRepo port.ForecastingRepository,
+	settingsRepo port.SettingsRepository,
+	ratePort port.CurrencyExchangeRatePort,
+	logger *slog.Logger,
+) *ForecastingService {
 	if logger == nil {
 		logger = slog.Default()
 	}
@@ -39,6 +51,8 @@ func NewForecastingService(repo port.BankStatementRepository, bankRepo port.Bank
 		payslipRepo:  payslipRepo,
 		ptRepo:       ptRepo,
 		forecastRepo: forecastRepo,
+		settingsRepo: settingsRepo,
+		ratePort:     ratePort,
 		Logger:       logger,
 	}
 }
@@ -71,7 +85,7 @@ func (s *ForecastingService) normalizeHistory(ctx context.Context, userID uuid.U
 	var normalized []entity.Transaction
 	for _, tx := range history {
 		// Only look at income transactions that could be salary
-		if tx.Amount <= 0 {
+		if tx.BaseAmount <= 0 {
 			normalized = append(normalized, tx)
 			continue
 		}
@@ -84,9 +98,10 @@ func (s *ForecastingService) normalizeHistory(ctx context.Context, userID uuid.U
 		}
 
 		// 3. Matching logic: Is this bank transaction the payout for this payslip?
-		// We use PayoutAmount because that is what actually hits the bank (after all deductions).
+		// We use BasePayoutAmount and BaseAmount because that is what actually hits the bank (after all deductions)
+		// and allows for cross-currency matching.
 		// We allow a small tolerance (e.g. ±2.00) for rounding or minor fee differences.
-		if math.Abs(tx.Amount-ps.PayoutAmount) > 2.0 {
+		if math.Abs(tx.BaseAmount-ps.BasePayoutAmount) > 2.0 {
 			normalized = append(normalized, tx)
 			continue
 		}
@@ -100,26 +115,32 @@ func (s *ForecastingService) normalizeHistory(ctx context.Context, userID uuid.U
 		}
 
 		// Calculate net factor for this specific payslip to split gross bonuses accurately.
-		// We use NetPay / GrossPay as the "tax ratio" to find the approximate net component of the bonus.
-		netFactor := ps.NetPay / ps.GrossPay
+		// We use BaseNetPay / BaseGrossPay as the "tax ratio" to find the approximate net component of the bonus.
+		netFactor := ps.BaseNetPay / ps.BaseGrossPay
 		bonusNetTotal := 0.0
 
 		for _, b := range ps.Bonuses {
-			netBonus := b.Amount * netFactor
+			netBonus := b.BaseAmount * netFactor
 			bonusNetTotal += netBonus
 
 			// Create a virtual transaction for the bonus
 			bonusTx := tx
 			bonusTx.ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s-vbonus-%s-%s", userID, b.Description, tx.ID)))
 			bonusTx.Description = fmt.Sprintf("Bonus: %s", b.Description)
-			bonusTx.Amount = netBonus
+			bonusTx.Amount = b.Amount * netFactor // Keep original amount for completeness
+			bonusTx.BaseAmount = netBonus
 			bonusTx.IsPayslipVerified = true
 			normalized = append(normalized, bonusTx)
 		}
 
 		// The remaining amount is the "Base Salary"
 		baseSalaryTx := tx
-		baseSalaryTx.Amount = tx.Amount - bonusNetTotal
+		baseSalaryTx.BaseAmount = tx.BaseAmount - bonusNetTotal
+		if tx.BaseAmount != 0 {
+			baseSalaryTx.Amount = tx.Amount - (bonusNetTotal * (tx.Amount / tx.BaseAmount))
+		} else {
+			baseSalaryTx.Amount = tx.Amount
+		}
 		baseSalaryTx.IsPayslipVerified = true
 		normalized = append(normalized, baseSalaryTx)
 	}
@@ -190,6 +211,14 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 	budgetPredictions := s.calculateVariableBudgets(userID, history, varCats, fromDate, toDate)
 	predictions = append(predictions, budgetPredictions...)
 
+	// 5b. Determine base currency for multi-currency handling (moved up for planned transactions)
+	baseCurrency := "EUR"
+	if s.settingsRepo != nil {
+		if val, _ := s.settingsRepo.Get(ctx, "BASE_DISPLAY_CURRENCY", userID); val != "" {
+			baseCurrency = val
+		}
+	}
+
 	// 5c. Add Planned Transactions
 	if s.ptRepo != nil {
 		plannedTransactions, err := s.ptRepo.FindByUserID(ctx, userID)
@@ -197,10 +226,26 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 			s.Logger.Warn("Could not fetch planned transactions for forecasting", "error", err)
 		} else {
 			for _, pt := range plannedTransactions {
-				// Only process Pending or Matched (if we want to project from history, but here we focus on pending/active)
-				// Actually, we only project from Pending ones as they are the "Rolling Head".
+				// Only process Pending or Matched
 				if pt.Status != entity.PlannedTransactionStatusPending {
 					continue
+				}
+
+				// Calculate Base Amount dynamically for accurate superseding and forecasting
+				baseAmt := pt.BaseAmount
+				if baseAmt == 0 {
+					if pt.Currency == baseCurrency {
+						baseAmt = pt.Amount
+					} else if s.ratePort != nil {
+						rate, err := s.ratePort.GetRate(ctx, pt.Currency, baseCurrency, time.Now())
+						if err == nil {
+							baseAmt = pt.Amount * rate
+						} else {
+							baseAmt = pt.Amount // Fallback
+						}
+					} else {
+						baseAmt = pt.Amount // Fallback
+					}
 				}
 
 				// Soft Suppression: Check if this manual planned transaction overlaps with an auto-detected pattern
@@ -212,13 +257,12 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 					}
 
 					if pt.CategoryID != nil && pred.CategoryID != nil && *pt.CategoryID == *pred.CategoryID {
-						// Amount similarity (±20%, min 50.0)
-						amtDiff := math.Abs(pt.Amount - pred.Amount)
-						maxAllowed := math.Max(math.Abs(pred.Amount)*0.20, 50.0)
+						// Amount similarity (±20%, min 50.0) based on base amounts
+						amtDiff := math.Abs(baseAmt - pred.BaseAmount)
+						maxAllowed := math.Max(math.Abs(pred.BaseAmount)*0.20, 50.0)
 
 						if amtDiff <= maxAllowed {
 							// Date proximity: Must be within the same month and roughly same day (±7 days)
-							// Or for recurring, just same month is often enough if amount matches
 							dayDiff := math.Abs(pt.Date.Sub(pred.BookingDate).Hours() / 24)
 							if dayDiff <= 7 || (pt.Date.Month() == pred.BookingDate.Month() && pt.Date.Year() == pred.BookingDate.Year()) {
 								isSuperseded = true
@@ -245,6 +289,9 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 								ID:              id,
 								Description:     desc,
 								Amount:          pt.Amount,
+								Currency:        pt.Currency,
+								BaseAmount:      baseAmt,
+								BaseCurrency:    baseCurrency,
 								BookingDate:     current,
 								ValutaDate:      current,
 								CategoryID:      pt.CategoryID,
@@ -280,14 +327,28 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 		}
 	}
 
-	// 6. Get current balance
-	accounts, err := s.bankRepo.GetAccountsByUserID(ctx, userID)
-	if err != nil {
-		s.Logger.Warn("Could not fetch bank accounts for balance forecast", "error", err)
+	// 6. Get current balance (convert to base currency)
+	accounts := []entity.BankAccount{}
+	if s.bankRepo != nil {
+		var err error
+		accounts, err = s.bankRepo.GetAccountsByUserID(ctx, userID)
+		if err != nil {
+			s.Logger.Warn("Could not fetch bank accounts for balance forecast", "error", err)
+		}
 	}
 	currentBalance := 0.0
 	for _, acc := range accounts {
-		currentBalance += acc.Balance
+		if acc.Currency != baseCurrency && s.ratePort != nil {
+			rate, err := s.ratePort.GetRate(ctx, acc.Currency, baseCurrency, time.Now())
+			if err != nil {
+				s.Logger.Error("Could not fetch rate for account balance conversion", "acc", acc.ID, "error", err)
+				currentBalance += acc.Balance // Fallback: sum raw (incorrect but better than 0)
+			} else {
+				currentBalance += acc.Balance * rate
+			}
+		} else {
+			currentBalance += acc.Balance
+		}
 	}
 
 	// 7. Build time series (passing all predictions; buildTimeSeries will handle the SkipForecasting flag)
@@ -464,7 +525,7 @@ func (s *ForecastingService) CalculateCategoryAverage(ctx context.Context, userI
 			continue
 		}
 		monthKey := tx.BookingDate.Format("2006-01")
-		monthlyTotals[monthKey] += tx.Amount
+		monthlyTotals[monthKey] += tx.BaseAmount
 	}
 
 	if len(monthlyTotals) == 0 {
@@ -535,7 +596,7 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 		if _, ok := catMonthlyTotals[catID]; !ok {
 			catMonthlyTotals[catID] = make(map[string]float64)
 		}
-		catMonthlyTotals[catID][monthKey] += tx.Amount
+		catMonthlyTotals[catID][monthKey] += tx.BaseAmount
 	}
 
 	catAverages := make(map[uuid.UUID]float64)
@@ -568,11 +629,6 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 			if curr.Year() == now.Year() && curr.Month() == now.Month() {
 				monthSpent := 0.0
 				monthKey := now.Format("2006-01")
-				// We ALWAYS use current month's real total, regardless of strategy limit,
-				// to ensure accurate "remaining budget" calculation.
-				// However, catMonthlyTotals only contains data within the strategy window.
-				// If current month is outside the window (unlikely for 3m+), we'd need to fetch it.
-				// But current month is ALWAYS within the window for 3m, 6m, 12m, 3y, all.
 				if months, ok := catMonthlyTotals[catID]; ok {
 					monthSpent = months[monthKey]
 				}
@@ -605,6 +661,7 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 					ID:           id,
 					Description:  fmt.Sprintf("Variable Budget: %s", cat.Name),
 					Amount:       remainingBudget,
+					BaseAmount:   remainingBudget, // Multi-currency fix added here
 					BookingDate:  targetDate,
 					ValutaDate:   targetDate,
 					CategoryID:   &catID,
@@ -658,6 +715,7 @@ func (s *ForecastingService) projectFuture(userID uuid.UUID, recurring []recurri
 				pred.BookingDate = current
 				pred.ValutaDate = current
 				pred.IsPrediction = true
+				// Note: template already has BaseAmount and BaseCurrency populated from history
 				predictions = append(predictions, pred)
 			}
 		}
@@ -690,14 +748,14 @@ func (s *ForecastingService) buildTimeSeries(startBalance float64, predictions [
 					continue
 				}
 
-				if tx.Amount > 0 {
-					dayIncome += tx.Amount
+				if tx.BaseAmount > 0 {
+					dayIncome += tx.BaseAmount
 				} else {
-					dayExpense += math.Abs(tx.Amount)
+					dayExpense += math.Abs(tx.BaseAmount)
 				}
-				balance += tx.Amount
+				balance += tx.BaseAmount
 				if tx.CategoryID != nil {
-					catAmounts[tx.CategoryID.String()] += tx.Amount
+					catAmounts[tx.CategoryID.String()] += tx.BaseAmount
 				}
 			}
 		}

@@ -20,32 +20,32 @@ func TestForecastingService_QuarterlyPattern(t *testing.T) {
 		{
 			UserID:      userID,
 			Description: "Quarterly Insurance",
-			Amount:      -300.0,
+			Amount: -300.0, BaseAmount: -300.0,
 			BookingDate: now.AddDate(0, -9, 0),
 			ContentHash: "ins-1",
 		},
 		{
 			UserID:      userID,
 			Description: "Quarterly Insurance",
-			Amount:      -300.0,
+			Amount: -300.0, BaseAmount: -300.0,
 			BookingDate: now.AddDate(0, -6, 0),
 			ContentHash: "ins-2",
 		},
 		{
 			UserID:      userID,
 			Description: "Quarterly Insurance",
-			Amount:      -300.0,
+			Amount: -300.0, BaseAmount: -300.0,
 			BookingDate: now.AddDate(0, -3, 0),
 			ContentHash: "ins-3",
 		},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
+	bankRepo := &mockForecastingBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
 	catRepo := &mockCategoryRepo{}
 	exRepo := &mockExclusionRepo{}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, exRepo, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, exRepo, nil, nil, nil)
 
 	// 2. Generate forecast
 	from := now

@@ -345,7 +345,20 @@ dev-memory:
 	)
 
 dev:
-	cd $(BACKEND_DIR) && go run ./cmd/dev
+	@echo ">>> Ensuring Database is up..."
+	@docker compose up -d postgres
+	@echo ">>> Cleaning up existing processes on :8080 and :5173..."
+	@lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+	@lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+	@echo ">>> Starting Local Dev Stack (Postgres in Docker + Local Backend & Frontend)..."
+	@( \
+		(cd $(BACKEND_DIR) && export $$(grep -v '^#' .env | xargs) && DATABASE_HOST=127.0.0.1 air) & \
+		(cd $(FRONTEND_DIR) && npm run dev) & \
+		(sleep 5 && \
+		  (open http://localhost:5173 || xdg-open http://localhost:5173 || start http://localhost:5173) \
+		) & \
+		wait \
+	)
 
 backend-run:
 	cd $(BACKEND_DIR) && export $$(grep -v '^#' .env | xargs) && \

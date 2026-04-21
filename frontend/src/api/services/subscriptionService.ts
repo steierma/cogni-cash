@@ -55,6 +55,12 @@ export const subscriptionService = {
     fetchSubscriptionEvents: (id: string): Promise<SubscriptionEvent[]> =>
         api.get<SubscriptionEvent[]>(`subscriptions/${id}/events/`).then(r => r.data ?? []),
 
+    linkTransaction: (subID: string, txnHash: string): Promise<void> =>
+        api.post(`subscriptions/${subID}/transactions/${txnHash}/link/`).then(() => undefined),
+
+    unlinkTransaction: (subID: string, txnHash: string): Promise<void> =>
+        api.delete(`subscriptions/${subID}/transactions/${txnHash}/unlink/`).then(() => undefined),
+
     createFromTransaction: (transactionHash: string, billingCycle: string): Promise<Subscription> =>
         api.post<Subscription>('subscriptions/from-transaction/', { 
             transaction_hash: transactionHash, 

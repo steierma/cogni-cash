@@ -2,7 +2,6 @@ package http
 
 import (
 	"cogni-cash/internal/domain/entity"
-	"context"
 	"encoding/json"
 	"net/http"
 
@@ -51,7 +50,11 @@ func (h *Handler) createBankConnection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	conn, err := h.bankSvc.CreateConnection(r.Context(), userID, req.InstitutionID, req.InstitutionName, req.Country, req.RedirectURL, req.Sandbox)
+
+	ip := h.getClientIP(r)
+	ua := r.Header.Get("User-Agent")
+
+	conn, err := h.bankSvc.CreateConnection(r.Context(), userID, req.InstitutionID, req.InstitutionName, req.Country, req.RedirectURL, req.Sandbox, ip, ua)
 	if err != nil {
 		h.Logger.Error("failed to create bank connection", "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to initiate bank link")
@@ -83,12 +86,15 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Trigger background sync so user sees data immediately after connecting
-	go func() {
-		ctx := context.Background()
-		if err := h.bankSvc.SyncAllAccounts(ctx, userID); err != nil {
-			h.Logger.Error("background sync failed after connection finish", "user_id", userID, "error", err)
-		}
-	}()
+	if h.WaitGroup != nil {
+		h.WaitGroup.Add(1)
+		go func() {
+			defer h.WaitGroup.Done()
+			if err := h.bankSvc.SyncAllAccounts(h.AppCtx, userID); err != nil {
+				h.Logger.Error("background sync failed after connection finish", "user_id", userID, "error", err)
+			}
+		}()
+	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
@@ -138,12 +144,15 @@ func (h *Handler) syncAllBankAccounts(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	go func() {
-		ctx := context.Background() // Fresh context for background task
-		if err := h.bankSvc.SyncAllAccounts(ctx, userID); err != nil {
-			h.Logger.Error("background sync failed", "user_id", userID, "error", err)
-		}
-	}()
+	if h.WaitGroup != nil {
+		h.WaitGroup.Add(1)
+		go func() {
+			defer h.WaitGroup.Done()
+			if err := h.bankSvc.SyncAllAccounts(h.AppCtx, userID); err != nil {
+				h.Logger.Error("background sync failed", "user_id", userID, "error", err)
+			}
+		}()
+	}
 
 	writeJSON(w, http.StatusAccepted, map[string]string{"message": "sync started in background"})
 }

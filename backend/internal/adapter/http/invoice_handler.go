@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"cogni-cash/internal/domain/entity"
+	"cogni-cash/internal/domain/port"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
@@ -39,12 +40,23 @@ var extToMIME = map[string]string{
 // ── request / response types ─────────────────────────────────────────────────
 
 type updateInvoiceRequest struct {
-	VendorName  string     `json:"vendor_name"`
-	CategoryID  *uuid.UUID `json:"category_id"`
-	Amount      float64    `json:"amount"`
-	Currency    string     `json:"currency"`
-	IssuedAt    *time.Time `json:"issued_at"`
-	Description *string    `json:"description"` // pointer so empty-string clears the field
+	VendorName  string                `json:"vendor_name"`
+	CategoryID  *uuid.UUID            `json:"category_id"`
+	Amount      float64               `json:"amount"`
+	Currency    string                `json:"currency"`
+	IssuedAt    *time.Time            `json:"issued_at"`
+	Description *string               `json:"description"` // pointer so empty-string clears the field
+	Splits      []entity.InvoiceSplit `json:"splits"`
+}
+
+type importManualRequest struct {
+	VendorName  string                `json:"vendor_name"`
+	CategoryID  *uuid.UUID            `json:"category_id"`
+	Amount      float64               `json:"amount"`
+	Currency    string                `json:"currency"`
+	IssuedAt    time.Time             `json:"issued_at"`
+	Description string                `json:"description"`
+	Splits      []entity.InvoiceSplit `json:"splits"`
 }
 
 type shareInvoiceRequest struct {
@@ -266,18 +278,38 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Optional: caller-specified category override
-	var categoryID *uuid.UUID
-	if catStr := r.FormValue("category_id"); catStr != "" {
-		parsed, err := uuid.Parse(catStr)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "invalid category_id")
+	// ── Manual Overrides ──
+	var overrides port.ImportOverrides
+
+	if v := r.FormValue("vendor_name"); v != "" {
+		overrides.VendorName = &v
+	}
+	if v := r.FormValue("amount"); v != "" {
+		if amt, err := strconv.ParseFloat(v, 64); err == nil {
+			overrides.Amount = &amt
+		}
+	}
+	if v := r.FormValue("currency"); v != "" {
+		overrides.Currency = &v
+	}
+	if v := r.FormValue("issued_at"); v != "" {
+		if t, err := time.Parse("2006-01-02", v); err == nil {
+			overrides.IssuedAt = &t
+		}
+	}
+	if v := r.FormValue("category_id"); v != "" && v != "null" {
+		if id, err := uuid.Parse(v); err == nil {
+			overrides.CategoryID = &id
+		}
+	}
+	if v := r.FormValue("splits"); v != "" {
+		if err := json.Unmarshal([]byte(v), &overrides.Splits); err != nil {
+			writeError(w, http.StatusBadRequest, "invalid splits format (JSON expected)")
 			return
 		}
-		categoryID = &parsed
 	}
 
-	invoice, err := h.invoiceSvc.ImportFromFile(r.Context(), userID, header.Filename, mimeType, fileBytes, categoryID)
+	invoice, err := h.invoiceSvc.ImportFromFile(r.Context(), userID, header.Filename, mimeType, fileBytes, overrides)
 	if err != nil {
 		if errors.Is(err, entity.ErrInvoiceDuplicate) {
 			writeError(w, http.StatusConflict, "invoice already imported (duplicate)")
@@ -288,6 +320,41 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusCreated, invoice)
+}
+
+// POST /api/v1/invoices/ (manual import without file)
+func (h *Handler) importManual(w http.ResponseWriter, r *http.Request) {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	var req importManualRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		h.Logger.Warn("importManual failed: invalid JSON body", "user_id", userID, "error", err)
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err.Error()))
+		return
+	}
+
+	invoice := entity.Invoice{
+		ID:          uuid.New(),
+		UserID:      userID,
+		Vendor:      entity.Vendor{ID: uuid.New(), Name: req.VendorName},
+		CategoryID:  req.CategoryID,
+		Amount:      req.Amount,
+		Currency:    req.Currency,
+		IssuedAt:    req.IssuedAt,
+		Description: req.Description,
+		Splits:      req.Splits,
+	}
+
+	saved, err := h.invoiceSvc.ImportManual(r.Context(), userID, invoice)
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+	writeJSON(w, http.StatusCreated, saved)
 }
 
 // PUT /api/v1/invoices/{id}
@@ -306,7 +373,8 @@ func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
 
 	var req updateInvoiceRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		h.Logger.Warn("updateInvoice failed: invalid JSON body", "invoice_id", id, "error", err)
+		writeError(w, http.StatusBadRequest, fmt.Sprintf("invalid request body: %s", err.Error()))
 		return
 	}
 
@@ -341,6 +409,12 @@ func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
 	// a pointer to any string (including "") means "set to this value".
 	if req.Description != nil {
 		updated.Description = *req.Description
+	}
+
+	// Always overwrite splits if they are supplied in the request.
+	// We check for nil so that clients who don't support splits yet don't wipe them.
+	if req.Splits != nil {
+		updated.Splits = req.Splits
 	}
 
 	saved, err := h.invoiceSvc.Update(r.Context(), updated)

@@ -45,10 +45,10 @@ func (s *BankService) GetInstitutions(ctx context.Context, userID uuid.UUID, cou
 	return s.provider.GetInstitutions(ctx, userID, countryCode, isSandbox)
 }
 
-func (s *BankService) CreateConnection(ctx context.Context, userID uuid.UUID, institutionID string, institutionName string, country string, redirectURL string, isSandbox bool) (*entity.BankConnection, error) {
+func (s *BankService) CreateConnection(ctx context.Context, userID uuid.UUID, institutionID string, institutionName string, country string, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
 	referenceID := uuid.New().String()
 	s.logger.Info("Initiating new bank connection", "institution_id", institutionID, "institution_name", institutionName, "country", country, "user_id", userID)
-	conn, err := s.provider.CreateRequisition(ctx, userID, institutionID, institutionName, country, redirectURL, referenceID, isSandbox)
+	conn, err := s.provider.CreateRequisition(ctx, userID, institutionID, institutionName, country, redirectURL, referenceID, isSandbox, ip, userAgent)
 	if err != nil {
 		return nil, err
 	}
@@ -60,6 +60,8 @@ func (s *BankService) CreateConnection(ctx context.Context, userID uuid.UUID, in
 	}
 	conn.Provider = provider
 	conn.UserID = userID
+
+	s.logger.Info("Bank connection details", "auth_link", conn.AuthLink, "requisition_id", conn.RequisitionID, "user_id", userID)
 
 	if err := s.repo.CreateConnection(ctx, conn); err != nil {
 		return nil, err
@@ -116,6 +118,13 @@ func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, re
 		s.logger.Info("Fetched accounts for connection", "count", len(accounts), "connection_id", conn.ID, "user_id", conn.UserID)
 		for i := range accounts {
 			accounts[i].ConnectionID = conn.ID
+			s.logger.Info("Account to upsert",
+				"provider_account_id", accounts[i].ProviderAccountID,
+				"iban", accounts[i].IBAN,
+				"name", accounts[i].Name,
+				"currency", accounts[i].Currency,
+				"type", accounts[i].AccountType,
+			)
 		}
 		s.logger.Info("upserting accounts to database", "count", len(accounts), "connection_id", conn.ID, "user_id", userID)
 		if err := s.repo.UpsertAccounts(ctx, accounts, userID); err != nil {
@@ -227,6 +236,12 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 	s.logger.Info("Syncing all accounts with lookback", "days", historyDays, "from", dateFrom.Format("2006-01-02"), "user_id", userID)
 
 	for _, conn := range conns {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
 		if conn.Status != entity.StatusLinked {
 			s.logger.Info("Skipping connection in status", "connection_id", conn.ID, "status", conn.Status, "user_id", userID)
 			continue
@@ -242,6 +257,12 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 		s.logger.Info("Found accounts for connection", "count", len(accs), "connection_id", conn.ID, "user_id", userID)
 
 		for _, acc := range accs {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			default:
+			}
+
 			s.logger.Info("Syncing account", "account_id", acc.ID, "provider_id", acc.ProviderAccountID, "user_id", userID)
 			txns, balance, err := s.provider.FetchTransactions(ctx, userID, acc.ProviderAccountID, &dateFrom, nil)
 			if err != nil {

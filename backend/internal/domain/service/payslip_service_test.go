@@ -60,6 +60,9 @@ func (m *mockPayslipRepoForPayslipSvc) FindAll(_ context.Context, filter entity.
 func (m *mockPayslipRepoForPayslipSvc) FindByID(_ context.Context, _ string, _ uuid.UUID) (entity.Payslip, error) {
 	return entity.Payslip{}, nil
 }
+func (m *mockPayslipRepoForPayslipSvc) UpdateBaseAmount(_ context.Context, _ string, _, _, _ float64, _ string, _ uuid.UUID) error {
+	return nil
+}
 func (m *mockPayslipRepoForPayslipSvc) GetOriginalFile(_ context.Context, _ string, _ uuid.UUID) ([]byte, string, string, error) {
 	return nil, "", "", nil
 }

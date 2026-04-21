@@ -53,21 +53,28 @@ func normalizeDescription(desc string) string {
 	return strings.TrimSpace(d)
 }
 func getIntervalFromDays(days float64, tolerance float64) int {
-	// Monthly: ~30 days
-	if days >= 30-tolerance && days <= 30+tolerance {
-		return 1
+	// We want to detect if the gap is roughly a multiple of 1 month (approx 30 days).
+	// This handles missing months in the middle of a sequence.
+	
+	if days < 20 { // Too short for any recurring interval we care about
+		return 0
 	}
-	// Quarterly: ~91 days
-	if days >= 91-tolerance && days <= 91+tolerance {
-		return 3
+
+	// Helper to check if a value is within tolerance of a target
+	isClose := func(val, target, tol float64) bool {
+		return val >= target-tol && val <= target+tol
 	}
-	// Half-yearly: ~182 days
-	if days >= 182-tolerance && days <= 182+tolerance {
-		return 6
+
+	// 1. Monthly (or multiple thereof: Quarterly=3, Half-Yearly=6, Yearly=12)
+	for m := 1; m <= 12; m++ {
+		target := float64(m) * 30.44 // Average month length
+		// Increase tolerance for longer gaps
+		effectiveTol := tolerance + (float64(m) * 0.5) 
+		
+		if isClose(days, target, effectiveTol) {
+			return m
+		}
 	}
-	// Yearly: ~365 days
-	if days >= 365-tolerance && days <= 365+tolerance {
-		return 12
-	}
+
 	return 0
 }

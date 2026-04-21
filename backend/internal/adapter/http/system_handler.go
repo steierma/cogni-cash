@@ -3,8 +3,10 @@ package http
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -154,4 +156,61 @@ func (h *Handler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Test email sent successfully"})
+}
+
+func (h *Handler) getLogLevel(w http.ResponseWriter, _ *http.Request) {
+	if h.LogLevel == nil {
+		writeError(w, http.StatusServiceUnavailable, "log level control not available")
+		return
+	}
+
+	level := strings.ToUpper(h.LogLevel.Level().String())
+	writeJSON(w, http.StatusOK, map[string]string{"level": level})
+}
+
+func (h *Handler) updateLogLevel(w http.ResponseWriter, r *http.Request) {
+	if h.LogLevel == nil {
+		writeError(w, http.StatusServiceUnavailable, "log level control not available")
+		return
+	}
+
+	var payload struct {
+		Level string `json:"level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	var newLevel slog.Level
+	switch strings.ToUpper(payload.Level) {
+	case "DEBUG":
+		newLevel = slog.LevelDebug
+	case "INFO":
+		newLevel = slog.LevelInfo
+	case "WARN":
+		newLevel = slog.LevelWarn
+	case "ERROR":
+		newLevel = slog.LevelError
+	default:
+		writeError(w, http.StatusBadRequest, "invalid log level: "+payload.Level)
+		return
+	}
+
+	h.LogLevel.Set(newLevel)
+	h.Logger.Info("Log level changed dynamically", "new_level", newLevel.String())
+
+	// Persistence: Update in settings if settingsSvc is available
+	if h.settingsSvc != nil {
+		userID := h.getUserID(r.Context())
+		if userID != uuid.Nil {
+			// Find admin ID to save it globally (for all users)
+			adminID, err := h.userSvc.GetAdminID(r.Context())
+			if err == nil {
+				_ = h.settingsSvc.UpdateMultiple(r.Context(), map[string]string{"log_level": payload.Level}, adminID, true)
+			}
+		}
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"level": newLevel.String()})
 }

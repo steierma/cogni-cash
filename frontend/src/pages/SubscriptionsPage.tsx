@@ -32,13 +32,14 @@ export default function SubscriptionsPage() {
     const queryClient = useQueryClient();
     const navigate = useNavigate();
     const [search, setSearch] = useState('');
+    const [toastMessage, setToastMessage] = useState<string | null>(null);
 
     const { data: subscriptions = [], isLoading: isLoadingSubs } = useQuery<Subscription[]>({
         queryKey: ['subscriptions'],
         queryFn: subscriptionService.fetchSubscriptions
     });
 
-    const { data: suggested = [] } = useQuery<SuggestedSubscription[]>({
+    const { data: suggested = [], isLoading: isLoadingSuggested } = useQuery<SuggestedSubscription[]>({
         queryKey: ['suggestedSubscriptions'],
         queryFn: subscriptionService.fetchSuggestedSubscriptions
     });
@@ -61,6 +62,8 @@ export default function SubscriptionsPage() {
             queryClient.invalidateQueries({ queryKey: ['subscriptions'] });
             queryClient.invalidateQueries({ queryKey: ['suggestedSubscriptions'] });
             queryClient.invalidateQueries({ queryKey: ['transactions'] });
+            setToastMessage(t('subscriptions.approveSuccessAsync'));
+            setTimeout(() => setToastMessage(null), 5000);
         }
     });
 
@@ -104,16 +107,25 @@ export default function SubscriptionsPage() {
     };
 
     const totalMonthly = subscriptions
-        .filter(s => s.status === 'active')
+        .filter(s => s.status === 'active' || s.status === 'cancellation_pending')
         .reduce((acc, s) => {
             const amount = s.amount;
-            if (s.billing_cycle === 'yearly') return acc + (amount / 12);
-            return acc + (amount / (s.billing_interval || 1));
+            const interval = s.billing_interval || 1;
+            
+            if (s.billing_cycle === 'yearly') {
+                // Paid every X years -> (amount / 12) / X
+                return acc + (amount / (12 * interval));
+            }
+            // Paid every X months (e.g. 3 for quarterly) -> amount / X
+            return acc + (amount / interval);
         }, 0);
 
     const filteredSubs = subscriptions.filter(s => 
         s.merchant_name.toLowerCase().includes(search.toLowerCase())
     );
+
+    const activeGroup = filteredSubs.filter(s => s.status !== 'cancelled');
+    const cancelledGroup = filteredSubs.filter(s => s.status === 'cancelled');
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
@@ -129,6 +141,13 @@ export default function SubscriptionsPage() {
                 </div>
 
                 <div className="flex items-center gap-4">
+                    {toastMessage && (
+                        <div className="flex items-center gap-2 px-4 py-2 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800/50 text-indigo-700 dark:text-indigo-300 text-sm font-bold rounded-2xl shadow-sm animate-in fade-in slide-in-from-right-4 duration-300">
+                            <Sparkles size={16} className="animate-pulse" />
+                            {toastMessage}
+                        </div>
+                    )}
+                    
                     <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex items-center gap-4 min-w-[200px]">
                         <div className="h-12 w-12 rounded-xl bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400 shrink-0">
                             <TrendingUp size={24} />
@@ -141,8 +160,23 @@ export default function SubscriptionsPage() {
                 </div>
             </div>
 
+            <DiscoverySettings />
+
             {/* Discovery Inbox */}
-            {suggested.length > 0 && (
+            {isLoadingSuggested && (
+                <div className="bg-indigo-600 rounded-3xl p-6 md:p-8 text-white shadow-xl shadow-indigo-500/20 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 -mt-8 -mr-8 h-64 w-64 bg-white/10 rounded-full blur-3xl pointer-events-none" />
+                    <div className="relative z-10 flex flex-col items-center justify-center py-12 space-y-4">
+                        <div className="h-12 w-12 border-4 border-white/20 border-t-white rounded-full animate-spin" />
+                        <div className="text-center space-y-1">
+                            <p className="text-xl font-bold">{t('subscriptions.discoveryLoading')}</p>
+                            <p className="text-indigo-100 text-sm">{t('subscriptions.discoverySubtitle')}</p>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {!isLoadingSuggested && suggested.length > 0 && (
                 <div className="bg-indigo-600 rounded-3xl p-6 md:p-8 text-white shadow-xl shadow-indigo-500/20 relative">
                     <div className="absolute top-0 right-0 -mt-8 -mr-8 h-64 w-64 bg-white/10 rounded-full blur-3xl pointer-events-none" />
                     
@@ -223,12 +257,10 @@ export default function SubscriptionsPage() {
                 </div>
             )}
 
-            <DiscoverySettings />
-
             {/* Active Subscriptions List */}
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl shadow-sm overflow-hidden">
                 <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
-                    <h3 className="text-xl font-bold">{t('subscriptions.trackedSubscriptions')}</h3>
+                    <h3 className="text-xl font-bold">{t('subscriptions.activeAndPausedSubscriptions')}</h3>
                     
                     <div className="relative">
                         <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" size={18} />
@@ -255,7 +287,7 @@ export default function SubscriptionsPage() {
                             </tr>
                         </thead>
                         <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
-                            {filteredSubs.map((s) => (
+                            {activeGroup.map((s) => (
                                 <tr 
                                     key={s.id} 
                                     onClick={() => navigate(`/subscriptions/${s.id}`)}
@@ -331,7 +363,7 @@ export default function SubscriptionsPage() {
                                     </td>
                                 </tr>
                             ))}
-                            {filteredSubs.length === 0 && !isLoadingSubs && (
+                            {activeGroup.length === 0 && !isLoadingSubs && (
                                 <tr>
                                     <td colSpan={6} className="px-6 py-20 text-center">
                                         <div className="max-w-xs mx-auto space-y-4">
@@ -350,6 +382,90 @@ export default function SubscriptionsPage() {
                     </table>
                 </div>
             </div>
+
+            {/* cancelled Subscriptions List */}
+            {cancelledGroup.length > 0 && (
+                <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl shadow-sm overflow-hidden opacity-75">
+                    <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex flex-col md:flex-row md:items-center justify-between gap-4">
+                        <h3 className="text-xl font-bold text-gray-500">{t('subscriptions.cancelledSubscriptions')}</h3>
+                    </div>
+
+                    <div className="overflow-x-auto">
+                        <table className="w-full text-left">
+                            <thead>
+                                <tr className="text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest border-b border-gray-100 dark:border-gray-800">
+                                    <th className="px-6 py-4">{t('subscriptions.merchantService')}</th>
+                                    <th className="px-6 py-4">{t('subscriptions.statusHeader')}</th>
+                                    <th className="px-6 py-4">{t('subscriptions.billing')}</th>
+                                    <th className="px-6 py-4">{t('subscriptions.amountHeader')}</th>
+                                    <th className="px-6 py-4">{t('subscriptions.nextPayment')}</th>
+                                    <th className="px-6 py-4 text-right">{t('common.actions')}</th>
+                                </tr>
+                            </thead>
+                            <tbody className="divide-y divide-gray-100 dark:divide-gray-800">
+                                {cancelledGroup.map((s) => (
+                                    <tr 
+                                        key={s.id} 
+                                        onClick={() => navigate(`/subscriptions/${s.id}`)}
+                                        className="group hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors cursor-pointer"
+                                    >
+                                        <td className="px-6 py-5">
+                                            <div className="flex items-center gap-4">
+                                                <div className="h-12 w-12 rounded-2xl bg-gray-100 dark:bg-gray-800 flex items-center justify-center font-bold text-gray-400 shrink-0 transition-colors">
+                                                    {s.merchant_name.charAt(0)}
+                                                </div>
+                                                <div className="space-y-0.5">
+                                                    <div className="font-bold text-gray-500 dark:text-gray-400 flex items-center gap-2">
+                                                        {s.merchant_name}
+                                                    </div>
+                                                    <p className="text-sm text-gray-400 dark:text-gray-500">
+                                                        {categories.find((c: Category) => c.id === s.category_id)?.name || t('common.uncategorized')}
+                                                    </p>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-5">
+                                            <StatusBadge status={s.status} />
+                                        </td>
+                                        <td className="px-6 py-5">
+                                            <p className="text-sm font-medium capitalize text-gray-400">
+                                                {s.billing_cycle}
+                                                {s.billing_interval > 1 && ` ${t('subscriptions.everyXMonths', { count: s.billing_interval })}`}
+                                            </p>
+                                        </td>
+                                        <td className="px-6 py-5">
+                                            <div className="font-bold text-gray-400 dark:text-gray-500">
+                                                {fmtCurrency(s.amount)}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-5">
+                                            <div className="flex items-center gap-2 text-sm text-gray-400 dark:text-gray-500">
+                                                <Clock size={14} />
+                                                {s.next_occurrence ? fmtDate(s.next_occurrence) : '—'}
+                                            </div>
+                                        </td>
+                                        <td className="px-6 py-5 text-right">
+                                            <div className="flex items-center justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                                                <button 
+                                                    onClick={(e) => handleDelete(e, s.id, s.merchant_name)}
+                                                    disabled={deleteMutation.isPending}
+                                                    className="p-2 rounded-lg hover:bg-white dark:hover:bg-gray-700 shadow-sm border border-transparent hover:border-gray-200 dark:hover:border-gray-600 text-gray-400 hover:text-red-600 transition-all"
+                                                    title={t('subscriptions.deleteTitle')}
+                                                >
+                                                    <Trash2 size={18} />
+                                                </button>
+                                                <button className="p-2 rounded-lg hover:bg-white dark:hover:bg-gray-700 shadow-sm border border-transparent hover:border-gray-200 dark:hover:border-gray-600 text-gray-400 transition-all">
+                                                    <ChevronRight size={18} />
+                                                </button>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                ))}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            )}
 
             {/* Ignored Patterns List */}
             {declined.length > 0 && (
@@ -410,10 +526,16 @@ function StatusBadge({ status }: { status: string }) {
                     <Clock size={12} /> {t('subscriptions.status.cancellation_pending')}
                 </span>
             );
-        case 'canceled':
+        case 'cancelled':
             return (
                 <span className="inline-flex items-center gap-1.5 bg-gray-50 dark:bg-gray-800 text-gray-500 dark:text-gray-400 px-3 py-1 rounded-full text-xs font-bold border border-gray-100 dark:border-gray-700">
                     <XCircle size={12} /> {t('subscriptions.status.cancelled')}
+                </span>
+            );
+        case 'paused':
+            return (
+                <span className="inline-flex items-center gap-1.5 bg-blue-50 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 px-3 py-1 rounded-full text-xs font-bold border border-blue-100 dark:border-blue-800/50">
+                    <Clock size={12} /> {t('subscriptions.status.paused')}
                 </span>
             );
         default:

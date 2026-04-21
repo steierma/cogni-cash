@@ -29,6 +29,7 @@ export function PayslipForm({ initialData, onSubmit, isPending, submitLabel, sho
             employer_name: formData.get('employer_name') as string,
             tax_class: formData.get('tax_class') as string,
             tax_id: formData.get('tax_id') as string,
+            currency: formData.get('currency') as string,
             gross_pay: Number(formData.get('gross_pay')),
             net_pay: Number(formData.get('net_pay')),
             payout_amount: Number(formData.get('payout_amount')),
@@ -36,7 +37,11 @@ export function PayslipForm({ initialData, onSubmit, isPending, submitLabel, sho
         };
         data.bonuses = editBonuses
             .filter(b => b.description.trim() && b.amount.trim())
-            .map(b => ({ description: b.description, amount: Number(b.amount) }));
+            .map(b => ({
+                description: b.description,
+                amount: Number(b.amount),
+                base_amount: Number(b.amount) // Initial fallback, backend will update if needed
+            }));
         
         onSubmit(data);
     };
@@ -65,6 +70,16 @@ export function PayslipForm({ initialData, onSubmit, isPending, submitLabel, sho
                         <div>
                             <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('payslips.modals.taxId')}</label>
                             <input name="tax_id" defaultValue={initialData.tax_id} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none" />
+                        </div>
+                        <div>
+                            <label className="block text-xs font-medium text-gray-500 dark:text-gray-400 uppercase tracking-wider mb-1">{t('invoices.currency')}</label>
+                            <select name="currency" defaultValue={initialData.currency || 'EUR'} className="w-full px-3 py-2 text-sm border rounded-lg dark:bg-gray-800 dark:border-gray-700 focus:ring-2 focus:ring-indigo-500 outline-none font-mono">
+                                <option value="EUR">EUR</option>
+                                <option value="USD">USD</option>
+                                <option value="GBP">GBP</option>
+                                <option value="CHF">CHF</option>
+                                <option value="PLN">PLN</option>
+                            </select>
                         </div>
                     </div>
 

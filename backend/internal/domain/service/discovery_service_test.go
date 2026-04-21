@@ -174,64 +174,67 @@ func (m *mockSubscriptionRepo) DeleteDiscoveryFeedback(ctx context.Context, user
 	return m.Called(ctx, userID, merchantName).Error(0)
 }
 
-type mockBankStmtRepo struct {
+type mockDiscoveryBankStmtRepo struct {
 	mock.Mock
 }
 
-func (m *mockBankStmtRepo) Save(ctx context.Context, stmt entity.BankStatement) error {
+func (m *mockDiscoveryBankStmtRepo) Save(ctx context.Context, stmt entity.BankStatement) error {
 	return m.Called(ctx, stmt).Error(0)
 }
-func (m *mockBankStmtRepo) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.BankStatement, error) {
+func (m *mockDiscoveryBankStmtRepo) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.BankStatement, error) {
 	args := m.Called(ctx, id, userID)
 	return args.Get(0).(entity.BankStatement), args.Error(1)
 }
-func (m *mockBankStmtRepo) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.BankStatement, error) {
+func (m *mockDiscoveryBankStmtRepo) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.BankStatement, error) {
 	args := m.Called(ctx, userID)
 	return args.Get(0).([]entity.BankStatement), args.Error(1)
 }
-func (m *mockBankStmtRepo) FindSummaries(ctx context.Context, userID uuid.UUID) ([]entity.BankStatementSummary, error) {
+func (m *mockDiscoveryBankStmtRepo) FindSummaries(ctx context.Context, userID uuid.UUID) ([]entity.BankStatementSummary, error) {
 	args := m.Called(ctx, userID)
 	return args.Get(0).([]entity.BankStatementSummary), args.Error(1)
 }
-func (m *mockBankStmtRepo) FindTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
+func (m *mockDiscoveryBankStmtRepo) FindTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
 	args := m.Called(ctx, filter)
 	return args.Get(0).([]entity.Transaction), args.Error(1)
 }
-func (m *mockBankStmtRepo) SearchTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
+func (m *mockDiscoveryBankStmtRepo) SearchTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
 	args := m.Called(ctx, filter)
 	return args.Get(0).([]entity.Transaction), args.Error(1)
 }
-func (m *mockBankStmtRepo) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+func (m *mockDiscoveryBankStmtRepo) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	return m.Called(ctx, id, userID).Error(0)
 }
-func (m *mockBankStmtRepo) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
+func (m *mockDiscoveryBankStmtRepo) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	return m.Called(ctx, hash, categoryID, userID).Error(0)
 }
-func (m *mockBankStmtRepo) UpdateTransactionSubscription(ctx context.Context, hash string, subID *uuid.UUID, userID uuid.UUID) error {
+func (m *mockDiscoveryBankStmtRepo) UpdateTransactionSubscription(ctx context.Context, hash string, subID *uuid.UUID, userID uuid.UUID) error {
 	return m.Called(ctx, hash, subID, userID).Error(0)
 }
-func (m *mockBankStmtRepo) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
+func (m *mockDiscoveryBankStmtRepo) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	return m.Called(ctx, hash, userID).Error(0)
 }
-func (m *mockBankStmtRepo) MarkTransactionReconciled(ctx context.Context, hash string, reconID uuid.UUID, userID uuid.UUID) error {
+func (m *mockDiscoveryBankStmtRepo) MarkTransactionReconciled(ctx context.Context, hash string, reconID uuid.UUID, userID uuid.UUID) error {
 	return m.Called(ctx, hash, reconID, userID).Error(0)
 }
-func (m *mockBankStmtRepo) LinkTransactionToStatement(ctx context.Context, id uuid.UUID, stmtID uuid.UUID, userID uuid.UUID) error {
+func (m *mockDiscoveryBankStmtRepo) LinkTransactionToStatement(ctx context.Context, id uuid.UUID, stmtID uuid.UUID, userID uuid.UUID) error {
 	return m.Called(ctx, id, stmtID, userID).Error(0)
 }
-func (m *mockBankStmtRepo) CreateTransactions(ctx context.Context, txns []entity.Transaction) error {
+func (m *mockDiscoveryBankStmtRepo) CreateTransactions(ctx context.Context, txns []entity.Transaction) error {
 	return m.Called(ctx, txns).Error(0)
 }
-func (m *mockBankStmtRepo) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, count int) ([]entity.CategorizationExample, error) {
+func (m *mockDiscoveryBankStmtRepo) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, count int) ([]entity.CategorizationExample, error) {
 	args := m.Called(ctx, userID, count)
 	return args.Get(0).([]entity.CategorizationExample), args.Error(1)
 }
-func (m *mockBankStmtRepo) FindMatchingCategory(ctx context.Context, userID uuid.UUID, txn port.TransactionToCategorize) (*uuid.UUID, error) {
+func (m *mockDiscoveryBankStmtRepo) FindMatchingCategory(ctx context.Context, userID uuid.UUID, txn port.TransactionToCategorize) (*uuid.UUID, error) {
 	args := m.Called(ctx, userID, txn)
 	return args.Get(0).(*uuid.UUID), args.Error(1)
 }
-func (m *mockBankStmtRepo) UpdateTransactionSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
+func (m *mockDiscoveryBankStmtRepo) UpdateTransactionSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
 	return m.Called(ctx, hash, skip, userID).Error(0)
+}
+func (m *mockDiscoveryBankStmtRepo) UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
+	return m.Called(ctx, hash, baseAmount, baseCurrency, userID).Error(0)
 }
 
 // --- Tests ---
@@ -243,14 +246,14 @@ func TestDiscoveryService_EnrichSubscription(t *testing.T) {
 
 	t.Run("successful enrichment", func(t *testing.T) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 		mockUserRepoForDiscovery := new(mockUserRepoForDiscovery)
 		mockLLM := new(mockEnricher)
 		mockLetterGen := new(mockLetterGen)
 		mockEmail := new(mockEmailProviderForDiscovery)
 		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
 
 		existingSub := entity.Subscription{
 			ID:           subID,
@@ -264,7 +267,7 @@ func TestDiscoveryService_EnrichSubscription(t *testing.T) {
 		linkedTxns := []entity.Transaction{
 			{Description: "Netflix.com", Amount: -17.99, Reference: "SUB-123"},
 		}
-		mockBankStmtRepo.On("FindTransactions", ctx, mock.MatchedBy(func(f entity.TransactionFilter) bool {
+		mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.MatchedBy(func(f entity.TransactionFilter) bool {
 			return f.SubscriptionID != nil && *f.SubscriptionID == subID
 		})).Return(linkedTxns, nil)
 
@@ -279,8 +282,8 @@ func TestDiscoveryService_EnrichSubscription(t *testing.T) {
 			Return(enrichmentResult, nil)
 
 		mockSubRepo.On("Update", ctx, mock.MatchedBy(func(s entity.Subscription) bool {
-			return s.MerchantName == "Netflix Inc." && 
-				s.CustomerNumber != nil && *s.CustomerNumber == "C-12345" && 
+			return s.MerchantName == "Netflix Inc." &&
+				s.CustomerNumber != nil && *s.CustomerNumber == "C-12345" &&
 				s.Notes != nil && *s.Notes == "Streaming service"
 		})).Return(entity.Subscription{MerchantName: "Netflix Inc."}, nil)
 
@@ -298,14 +301,14 @@ func TestDiscoveryService_EnrichSubscription(t *testing.T) {
 
 	t.Run("subscription not found", func(t *testing.T) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 		mockUserRepoForDiscovery := new(mockUserRepoForDiscovery)
 		mockLLM := new(mockEnricher)
 		mockLetterGen := new(mockLetterGen)
 		mockEmail := new(mockEmailProviderForDiscovery)
 		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
 
 		mockSubRepo.On("GetByID", ctx, subID, userID).Return(entity.Subscription{}, errors.New("not found"))
 
@@ -322,14 +325,14 @@ func TestDiscoveryService_CancelSubscription(t *testing.T) {
 
 	t.Run("successful cancellation", func(t *testing.T) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 		mockUserRepoForDiscovery := new(mockUserRepoForDiscovery)
 		mockLLM := new(mockEnricher)
 		mockLetterGen := new(mockLetterGen)
 		mockEmail := new(mockEmailProviderForDiscovery)
 		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
 
 		email := "support@netflix.com"
 		sub := entity.Subscription{
@@ -357,14 +360,14 @@ func TestDiscoveryService_CancelSubscription(t *testing.T) {
 
 	t.Run("missing contact email", func(t *testing.T) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 		mockUserRepoForDiscovery := new(mockUserRepoForDiscovery)
 		mockLLM := new(mockEnricher)
 		mockLetterGen := new(mockLetterGen)
 		mockEmail := new(mockEmailProviderForDiscovery)
 		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
 
 		sub := entity.Subscription{
 			ID:           subID,
@@ -389,14 +392,14 @@ func TestDiscoveryService_DeleteSubscription(t *testing.T) {
 
 	t.Run("successful deletion", func(t *testing.T) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 		mockUserRepoForDiscovery := new(mockUserRepoForDiscovery)
 		mockLLM := new(mockEnricher)
 		mockLetterGen := new(mockLetterGen)
 		mockEmail := new(mockEmailProviderForDiscovery)
 		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
 
 		mockSubRepo.On("Delete", ctx, subID, userID).Return(nil)
 
@@ -408,14 +411,14 @@ func TestDiscoveryService_DeleteSubscription(t *testing.T) {
 
 	t.Run("repository error", func(t *testing.T) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 		mockUserRepoForDiscovery := new(mockUserRepoForDiscovery)
 		mockLLM := new(mockEnricher)
 		mockLetterGen := new(mockLetterGen)
 		mockEmail := new(mockEmailProviderForDiscovery)
 		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, mockUserRepoForDiscovery, mockSettingsRepo, mockLLM, mockLetterGen, mockEmail, slog.Default())
 
 		mockSubRepo.On("Delete", ctx, subID, userID).Return(errors.New("delete failed"))
 
@@ -430,45 +433,53 @@ func TestDiscoveryService_ApproveSubscription(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
 
-	t.Run("successful approval logs creation event and backfills broad history", func(t *testing.T) {
+	t.Run("successful approval logs creation event, backfills, and enriches", func(t *testing.T) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, nil, nil, nil, nil, nil, slog.Default())
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
+		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
+		mockLLM := new(mockEnricher)
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+
+		mockSettingsRepo.On("Get", ctx, "subscription_discovery_amount_tolerance", userID).Return("0.1", nil)
 
 		suggestion := entity.SuggestedSubscription{
 			MerchantName:    "Netflix",
-			EstimatedAmount: 17.99,
+			EstimatedAmount: -17.99,
 			Currency:        "EUR",
 			MatchingHashes:  []string{"hash1"},
 		}
 
+		subID := uuid.New()
+		createdSub := entity.Subscription{ID: subID, UserID: userID, MerchantName: "Netflix", Amount: -17.99}
+
 		// Mock broad history finding an extra unlinked transaction
-		// "Lastschrift Netflix" and "Netflix" both normalize to "netflix"
 		history := []entity.Transaction{
 			{ContentHash: "hash1", Description: "Netflix", Amount: -17.99, SubscriptionID: nil},
 			{ContentHash: "hash-extra", Description: "Lastschrift Netflix", Amount: -17.99, SubscriptionID: nil},
-			{ContentHash: "hash-ignore-credit", Description: "Netflix", Amount: 17.99, SubscriptionID: nil}, // Credit, should ignore
+			{ContentHash: "hash-ignore-credit", Description: "Netflix", Amount: 17.99, SubscriptionID: nil},
 		}
-		mockBankStmtRepo.On("FindTransactions", ctx, mock.MatchedBy(func(f entity.TransactionFilter) bool {
-			return f.UserID == userID
-		})).Return(history, nil)
+		mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.MatchedBy(func(f entity.TransactionFilter) bool {
+			return f.UserID == userID && f.SubscriptionID == nil
+		})).Return(history, nil).Once()
 
 		// CreateWithBackfill should now receive BOTH hashes
 		mockSubRepo.On("CreateWithBackfill", ctx, mock.MatchedBy(func(s entity.Subscription) bool {
-			return s.MerchantName == "Netflix" && s.Amount == 17.99
+			return s.MerchantName == "Netflix" && s.Amount == -17.99
 		}), mock.MatchedBy(func(hashes []string) bool {
 			return len(hashes) == 2 && hashes[0] == "hash1" && hashes[1] == "hash-extra"
-		})).Return(entity.Subscription{ID: uuid.New(), MerchantName: "Netflix"}, nil)
+		})).Return(createdSub, nil)
 
 		mockSubRepo.On("LogEvent", ctx, mock.MatchedBy(func(e entity.SubscriptionEvent) bool {
 			return e.EventType == "subscription_created" && e.Title == "Subscription Tracked"
 		})).Return(nil)
 
-		_, err := svc.ApproveSubscription(ctx, userID, suggestion)
+		result, err := svc.ApproveSubscription(ctx, userID, suggestion)
 
 		assert.NoError(t, err)
+		assert.Equal(t, "Netflix", result.MerchantName)
 		mockSubRepo.AssertExpectations(t)
-		mockBankStmtRepo.AssertExpectations(t)
+		mockDiscoveryBankStmtRepo.AssertExpectations(t)
+		mockLLM.AssertExpectations(t)
 	})
 }
 
@@ -494,7 +505,7 @@ func TestDiscoveryService_UpdateSubscription(t *testing.T) {
 			UserID:       userID,
 			MerchantName: "New Name",
 			Amount:       15.0,
-			Status:       "canceled",
+			Status:       "cancelled",
 		}
 
 		mockSubRepo.On("GetByID", ctx, subID, userID).Return(currentSub, nil).Once()
@@ -502,13 +513,13 @@ func TestDiscoveryService_UpdateSubscription(t *testing.T) {
 			return ev.SubscriptionID == subID && ev.EventType == "status_changed"
 		})).Return(nil).Once()
 		mockSubRepo.On("Update", ctx, mock.MatchedBy(func(s entity.Subscription) bool {
-			return s.MerchantName == "New Name" && s.Status == "canceled" && s.Amount == 15.0
+			return s.MerchantName == "New Name" && s.Status == "cancelled" && s.Amount == 15.0
 		})).Return(updateData, nil).Once()
 
 		updated, err := svc.UpdateSubscription(ctx, updateData)
 
 		assert.NoError(t, err)
-		assert.Equal(t, "canceled", string(updated.Status))
+		assert.Equal(t, "cancelled", string(updated.Status))
 		mockSubRepo.AssertExpectations(t)
 	})
 }
@@ -517,13 +528,13 @@ func TestDiscoveryService_DiscoveryLogic(t *testing.T) {
 	ctx := context.Background()
 	userID := uuid.New()
 
-	setup := func() (*mockSubscriptionRepo, *mockBankStmtRepo, *mockEnricher, *mockSettingsRepoForDiscovery, *service.DiscoveryService) {
+	setup := func() (*mockSubscriptionRepo, *mockDiscoveryBankStmtRepo, *mockEnricher, *mockSettingsRepoForDiscovery, *service.DiscoveryService) {
 		mockSubRepo := new(mockSubscriptionRepo)
-		mockBankStmtRepo := new(mockBankStmtRepo)
+		mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 		mockLLM := new(mockEnricher)
 		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-		svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+		svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
 
 		mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{}, nil)
 
@@ -536,11 +547,11 @@ func TestDiscoveryService_DiscoveryLogic(t *testing.T) {
 			{Description: "Netflix.com", Amount: -15.99, BookingDate: pDate("2024-02-01")},
 			{Description: "Netflix.com", Amount: -15.99, BookingDate: pDate("2024-03-01")},
 		}
-		mockBankStmtRepo.On("FindTransactions", ctx, mock.MatchedBy(func(f entity.TransactionFilter) bool {
+		mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.MatchedBy(func(f entity.TransactionFilter) bool {
 			return f.UserID == userID
 		})).Return(history, nil)
 
-		return mockSubRepo, mockBankStmtRepo, mockLLM, mockSettingsRepo, svc
+		return mockSubRepo, mockDiscoveryBankStmtRepo, mockLLM, mockSettingsRepo, svc
 	}
 
 	t.Run("bypasses AI if whitelisted", func(t *testing.T) {
@@ -601,11 +612,11 @@ func TestDiscoveryService_DiscoveryLogic_IBANGrouping(t *testing.T) {
 	userID := uuid.New()
 
 	mockSubRepo := new(mockSubscriptionRepo)
-	mockBankStmtRepo := new(mockBankStmtRepo)
+	mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 	mockLLM := new(mockEnricher)
 	mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 	mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-	svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+	svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
 
 	mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{}, nil)
 	mockSubRepo.On("GetDiscoveryFeedback", ctx, userID).Return([]entity.DiscoveryFeedback{}, nil)
@@ -642,7 +653,7 @@ func TestDiscoveryService_DiscoveryLogic_IBANGrouping(t *testing.T) {
 			ContentHash:      "h3",
 		},
 	}
-	mockBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
+	mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
 
 	// AI verification mock - should be called for the preferred name "Max Mustermann"
 	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Max Mustermann", -500.0, "EUR", "monthly").Return(true, nil)
@@ -661,11 +672,11 @@ func TestDiscoveryService_DiscoveryLogic_FuzzyAmountGrouping(t *testing.T) {
 	userID := uuid.New()
 
 	mockSubRepo := new(mockSubscriptionRepo)
-	mockBankStmtRepo := new(mockBankStmtRepo)
+	mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
 	mockLLM := new(mockEnricher)
 	mockSettingsRepo := new(mockSettingsRepoForDiscovery)
 	mockDiscoverySettings(mockSettingsRepo, ctx, userID)
-	svc := service.NewDiscoveryService(mockBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+	svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
 
 	mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{}, nil)
 	mockSubRepo.On("GetDiscoveryFeedback", ctx, userID).Return([]entity.DiscoveryFeedback{}, nil)
@@ -699,7 +710,7 @@ func TestDiscoveryService_DiscoveryLogic_FuzzyAmountGrouping(t *testing.T) {
 			ContentHash:      "h3",
 		},
 	}
-	mockBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
+	mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
 
 	// AI verification mock
 	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Barmenia", -52.0, "EUR", "monthly").Return(true, nil)
@@ -712,4 +723,242 @@ func TestDiscoveryService_DiscoveryLogic_FuzzyAmountGrouping(t *testing.T) {
 	assert.Equal(t, "Barmenia", suggestions[0].MerchantName)
 	assert.Equal(t, -52.0, suggestions[0].EstimatedAmount, "Should keep the most recent amount")
 	assert.Len(t, suggestions[0].MatchingHashes, 3, "Should include all 3 transactions in the group")
+}
+
+func TestDiscoveryService_DiscoveryLogic_MultipleSubscriptionsSameMerchant(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+
+	mockSubRepo := new(mockSubscriptionRepo)
+	mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
+	mockLLM := new(mockEnricher)
+	mockSettingsRepo := new(mockSettingsRepoForDiscovery)
+
+	// Mock settings
+	mockSettingsRepo.On("Get", ctx, "subscription_lookback_years", userID).Return("3", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_amount_tolerance", userID).Return("0.1", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_min_transactions_generic", userID).Return("3", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_date_tolerance", userID).Return("3", nil)
+
+	svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+
+	mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{}, nil)
+	mockSubRepo.On("GetDiscoveryFeedback", ctx, userID).Return([]entity.DiscoveryFeedback{}, nil)
+
+	pDate := func(s string) time.Time {
+		t, _ := time.Parse("2006-01-02", s)
+		return t
+	}
+
+	// Two distinct sequences for Barmenia with very different amounts
+	history := []entity.Transaction{
+		// Sequence 1: 50.00 EUR
+		{Description: "Barmenia Vertrag 1", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-01-01"), ContentHash: "h1_1"},
+		{Description: "Barmenia Vertrag 1", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-02-01"), ContentHash: "h1_2"},
+		{Description: "Barmenia Vertrag 1", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-03-01"), ContentHash: "h1_3"},
+
+		// Sequence 2: 150.00 EUR
+		{Description: "Barmenia Vertrag 2", CounterpartyName: "Barmenia", Amount: -150.00, BookingDate: pDate("2024-01-05"), ContentHash: "h2_1"},
+		{Description: "Barmenia Vertrag 2", CounterpartyName: "Barmenia", Amount: -150.00, BookingDate: pDate("2024-02-05"), ContentHash: "h2_2"},
+		{Description: "Barmenia Vertrag 2", CounterpartyName: "Barmenia", Amount: -150.00, BookingDate: pDate("2024-03-05"), ContentHash: "h2_3"},
+	}
+	mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
+
+	// AI verification mock - should be called for both if they are distinct
+	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Barmenia", -50.0, "EUR", "monthly").Return(true, nil)
+	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Barmenia", -150.0, "EUR", "monthly").Return(true, nil)
+
+	mockSubRepo.On("SetDiscoveryFeedback", ctx, userID, "Barmenia", entity.DiscoveryStatusAllowed, "AI").Return(nil)
+
+	suggestions, err := svc.GetSuggestedSubscriptions(ctx, userID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(suggestions), "Should have TWO suggestions for Barmenia since they have different amounts")
+}
+
+func TestDiscoveryService_DiscoveryLogic_MultipleSubscriptionsSameMerchantSameAmount(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+
+	mockSubRepo := new(mockSubscriptionRepo)
+	mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
+	mockLLM := new(mockEnricher)
+	mockSettingsRepo := new(mockSettingsRepoForDiscovery)
+
+	// Mock settings
+	mockSettingsRepo.On("Get", ctx, "subscription_lookback_years", userID).Return("3", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_amount_tolerance", userID).Return("0.1", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_min_transactions_generic", userID).Return("3", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_date_tolerance", userID).Return("3", nil)
+
+	svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+
+	mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{}, nil)
+	mockSubRepo.On("GetDiscoveryFeedback", ctx, userID).Return([]entity.DiscoveryFeedback{}, nil)
+
+	pDate := func(s string) time.Time {
+		t, _ := time.Parse("2006-01-02", s)
+		return t
+	}
+
+	// Two distinct sequences for Barmenia with SAME amounts but DIFFERENT contract numbers in description
+	history := []entity.Transaction{
+		// Sequence 1: Vertrag 123
+		{Description: "Barmenia Vertrag 123", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-01-01"), ContentHash: "h1_1"},
+		{Description: "Barmenia Vertrag 123", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-02-01"), ContentHash: "h1_2"},
+		{Description: "Barmenia Vertrag 123", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-03-01"), ContentHash: "h1_3"},
+
+		// Sequence 2: Vertrag 456
+		{Description: "Barmenia Vertrag 456", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-01-01"), ContentHash: "h2_1"},
+		{Description: "Barmenia Vertrag 456", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-02-01"), ContentHash: "h2_2"},
+		{Description: "Barmenia Vertrag 456", CounterpartyName: "Barmenia", Amount: -50.00, BookingDate: pDate("2024-03-01"), ContentHash: "h2_3"},
+	}
+	mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
+
+	// AI verification mock
+	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Barmenia", -50.0, "EUR", "monthly").Return(true, nil)
+
+	mockSubRepo.On("SetDiscoveryFeedback", ctx, userID, "Barmenia", entity.DiscoveryStatusAllowed, "AI").Return(nil)
+
+	suggestions, err := svc.GetSuggestedSubscriptions(ctx, userID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 2, len(suggestions), "Should have TWO suggestions for Barmenia since they have different contract numbers even if amount is same")
+}
+
+func TestDiscoveryService_DiscoveryLogic_MergingSimilarDescriptions(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+
+	mockSubRepo := new(mockSubscriptionRepo)
+	mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
+	mockLLM := new(mockEnricher)
+	mockSettingsRepo := new(mockSettingsRepoForDiscovery)
+
+	// Mock settings
+	mockSettingsRepo.On("Get", ctx, "subscription_lookback_years", userID).Return("3", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_amount_tolerance", userID).Return("0.1", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_min_transactions_generic", userID).Return("3", nil)
+	mockSettingsRepo.On("Get", ctx, "subscription_discovery_date_tolerance", userID).Return("3", nil)
+
+	svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+
+	mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{}, nil)
+	mockSubRepo.On("GetDiscoveryFeedback", ctx, userID).Return([]entity.DiscoveryFeedback{}, nil)
+
+	pDate := func(s string) time.Time {
+		t, _ := time.Parse("2006-01-02", s)
+		return t
+	}
+
+	history := []entity.Transaction{
+		{Description: "Netflix", CounterpartyName: "Netflix", Amount: -17.99, BookingDate: pDate("2024-01-01"), ContentHash: "n1_1"},
+		{Description: "Netflix", CounterpartyName: "Netflix", Amount: -17.99, BookingDate: pDate("2024-02-01"), ContentHash: "n1_2"},
+		{Description: "Netflix", CounterpartyName: "Netflix", Amount: -17.99, BookingDate: pDate("2024-03-01"), ContentHash: "n1_3"},
+
+		{Description: "Lastschrift Netflix", CounterpartyName: "Netflix", Amount: -17.99, BookingDate: pDate("2024-01-05"), ContentHash: "n2_1"},
+		{Description: "Lastschrift Netflix", CounterpartyName: "Netflix", Amount: -17.99, BookingDate: pDate("2024-02-05"), ContentHash: "n2_2"},
+		{Description: "Lastschrift Netflix", CounterpartyName: "Netflix", Amount: -17.99, BookingDate: pDate("2024-03-05"), ContentHash: "n2_3"},
+	}
+	mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
+
+	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Netflix", -17.99, "EUR", "monthly").Return(true, nil)
+	mockSubRepo.On("SetDiscoveryFeedback", ctx, userID, "Netflix", entity.DiscoveryStatusAllowed, "AI").Return(nil)
+
+	suggestions, err := svc.GetSuggestedSubscriptions(ctx, userID)
+
+	assert.NoError(t, err)
+	assert.Equal(t, 1, len(suggestions), "Should merge Netflix suggestions because they normalize to the same name and description")
+}
+
+func TestDiscoveryService_DiscoveryLogic_ConsolidateMandateWithVaryingAmounts(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+
+	mockSubRepo := new(mockSubscriptionRepo)
+	mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
+	mockLLM := new(mockEnricher)
+	mockSettingsRepo := new(mockSettingsRepoForDiscovery)
+	mockDiscoverySettings(mockSettingsRepo, ctx, userID)
+	svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, mockSettingsRepo, mockLLM, nil, nil, slog.Default())
+
+	mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{}, nil)
+	mockSubRepo.On("GetDiscoveryFeedback", ctx, userID).Return([]entity.DiscoveryFeedback{}, nil)
+
+	pDate := func(s string) time.Time {
+		t, _ := time.Parse("2006-01-02", s)
+		return t
+	}
+
+	mandate := "DE000201000200000000000000011781284"
+	history := []entity.Transaction{
+		{Description: "Telekom", Amount: -74.95, BookingDate: pDate("2026-04-16"), MandateReference: mandate, ContentHash: "h1"},
+		{Description: "Telekom", Amount: -74.95, BookingDate: pDate("2026-03-16"), MandateReference: mandate, ContentHash: "h2"},
+		{Description: "Telekom", Amount: -90.26, BookingDate: pDate("2026-02-16"), MandateReference: mandate, ContentHash: "h3"},
+		{Description: "Telekom", Amount: -49.94, BookingDate: pDate("2026-01-16"), MandateReference: mandate, ContentHash: "h4"},
+	}
+	mockDiscoveryBankStmtRepo.On("FindTransactions", ctx, mock.Anything).Return(history, nil)
+
+	mockLLM.On("VerifySubscriptionSuggestion", ctx, userID, "Telekom", -74.95, "EUR", "monthly").Return(true, nil)
+	mockSubRepo.On("SetDiscoveryFeedback", ctx, userID, "Telekom", entity.DiscoveryStatusAllowed, "AI").Return(nil)
+
+	suggestions, err := svc.GetSuggestedSubscriptions(ctx, userID)
+
+	assert.NoError(t, err)
+	assert.Len(t, suggestions, 1, "Should have exactly ONE suggestion for the same mandate despite varying amounts")
+}
+
+func TestDiscoveryService_MatchTransactions_Deterministic(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+	subID := uuid.New()
+
+	mockSubRepo := new(mockSubscriptionRepo)
+	mockDiscoveryBankStmtRepo := new(mockDiscoveryBankStmtRepo)
+	svc := service.NewDiscoveryService(mockDiscoveryBankStmtRepo, mockSubRepo, nil, nil, nil, nil, nil, slog.Default())
+
+	sub := entity.Subscription{
+		ID:             subID,
+		UserID:         userID,
+		MerchantName:   "Barmenia",
+		Amount:         -62.65,
+		LinkedMandates: []string{"MANDATE_123"},
+		LinkedIbans:    []string{"DE1234567890"},
+		MatchingHashes: []string{"MANUAL_HASH"},
+		IgnoredHashes:  []string{"IGNORED_HASH"},
+	}
+
+	mockSubRepo.On("FindByUserID", ctx, userID).Return([]entity.Subscription{sub}, nil)
+
+	txns := []entity.Transaction{
+		// Priority 1: Manual Link
+		{ContentHash: "MANUAL_HASH", Description: "Something else entirely", Amount: -1000.0, MandateReference: "MANDATE_WRONG"},
+
+		// Priority 2: Mandate (Price changed, name same)
+		{ContentHash: "MANDATE_MATCH", Description: "Barmenia", Amount: -65.00, MandateReference: "MANDATE_123"},
+
+		// Priority 2: IBAN (Price same, name same)
+		{ContentHash: "IBAN_MATCH", Description: "Barmenia", Amount: -62.65, CounterpartyIban: "DE1234567890"},
+
+		// Priority 3: Fuzzy (Price close, name same)
+		{ContentHash: "FUZZY_MATCH", Description: "Barmenia", Amount: -62.00},
+
+		// Ignored: Should NOT match even if mandate is correct
+		{ContentHash: "IGNORED_HASH", Description: "Barmenia", Amount: -62.65, MandateReference: "MANDATE_123"},
+
+		// No match
+		{ContentHash: "NO_MATCH", Description: "Something else", Amount: -10.00},
+	}
+
+	// Expectations
+	mockDiscoveryBankStmtRepo.On("UpdateTransactionSubscription", ctx, "MANUAL_HASH", &subID, userID).Return(nil)
+	mockDiscoveryBankStmtRepo.On("UpdateTransactionSubscription", ctx, "MANDATE_MATCH", &subID, userID).Return(nil)
+	mockDiscoveryBankStmtRepo.On("UpdateTransactionSubscription", ctx, "IBAN_MATCH", &subID, userID).Return(nil)
+	mockDiscoveryBankStmtRepo.On("UpdateTransactionSubscription", ctx, "FUZZY_MATCH", &subID, userID).Return(nil)
+
+	err := svc.MatchTransactions(ctx, userID, txns)
+
+	assert.NoError(t, err)
+	mockDiscoveryBankStmtRepo.AssertExpectations(t)
+	mockSubRepo.AssertExpectations(t)
 }

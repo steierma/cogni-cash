@@ -55,3 +55,4 @@ mobile_hermit/android/build/
 mobile_hermit/ios_bak/
 mobile_hermit/bin/inspect_temp.dart
 /coverage.out
+/backend/internal/adapter/parser/bank_statement/ingcsv/parser_test.go

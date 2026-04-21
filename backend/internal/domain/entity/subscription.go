@@ -9,10 +9,10 @@ import (
 type SubscriptionStatus string
 
 const (
-	SubscriptionStatusActive             SubscriptionStatus = "active"
+	SubscriptionStatusActive              SubscriptionStatus = "active"
 	SubscriptionStatusCancellationPending SubscriptionStatus = "cancellation_pending"
-	SubscriptionStatusCanceled           SubscriptionStatus = "canceled"
-	SubscriptionStatusIgnored            SubscriptionStatus = "ignored"
+	SubscriptionStatusCancelled           SubscriptionStatus = "cancelled"
+	SubscriptionStatusIgnored             SubscriptionStatus = "ignored"
 )
 
 type Subscription struct {
@@ -38,21 +38,25 @@ type Subscription struct {
 	LastOccurrence   *time.Time         `json:"last_occurrence,omitempty"`
 	NextOccurrence   *time.Time         `json:"next_occurrence,omitempty"`
 	Notes            *string            `json:"notes,omitempty"`
+	MatchingHashes   []string           `json:"matching_hashes"`
+	IgnoredHashes    []string           `json:"ignored_hashes"`
+	LinkedMandates   []string           `json:"linked_mandates"`
+	LinkedIbans      []string           `json:"linked_ibans"`
 	CreatedAt        time.Time          `json:"created_at"`
 	UpdatedAt        time.Time          `json:"updated_at"`
 }
 
 type SuggestedSubscription struct {
-	MerchantName     string              `json:"merchant_name"`
-	EstimatedAmount  float64             `json:"estimated_amount"`
-	Currency         string              `json:"currency"`
-	BillingCycle     string              `json:"billing_cycle"`
-	BillingInterval  int                 `json:"billing_interval"`
-	LastOccurrence   time.Time           `json:"last_occurrence"`
-	NextOccurrence   time.Time           `json:"next_occurrence"`
-	MatchingHashes   []string            `json:"matching_hashes"`
-	BaseTransactions []BaseTransaction   `json:"base_transactions"`
-	CategoryID       *uuid.UUID          `json:"category_id"`
+	MerchantName     string            `json:"merchant_name"`
+	EstimatedAmount  float64           `json:"estimated_amount"`
+	Currency         string            `json:"currency"`
+	BillingCycle     string            `json:"billing_cycle"`
+	BillingInterval  int               `json:"billing_interval"`
+	LastOccurrence   time.Time         `json:"last_occurrence"`
+	NextOccurrence   time.Time         `json:"next_occurrence"`
+	MatchingHashes   []string          `json:"matching_hashes"`
+	BaseTransactions []BaseTransaction `json:"base_transactions"`
+	CategoryID       *uuid.UUID        `json:"category_id"`
 }
 
 type BaseTransaction struct {

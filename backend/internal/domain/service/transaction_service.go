@@ -118,18 +118,18 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 			}
 		}
 
-		if tx.Amount >= 0 {
-			result.TotalIncome += tx.Amount
-			timeSeriesMap[dateStr].Income += tx.Amount
+		if tx.BaseAmount >= 0 {
+			result.TotalIncome += tx.BaseAmount
+			timeSeriesMap[dateStr].Income += tx.BaseAmount
 		} else {
-			absAmount := math.Abs(tx.Amount)
+			absAmount := math.Abs(tx.BaseAmount)
 			result.TotalExpense += absAmount
 			timeSeriesMap[dateStr].Expense += absAmount
 		}
 
 		// Always accumulate net amount for category and merchant
-		catNetMap[catID] += tx.Amount
-		timeSeriesMap[dateStr].CategoryAmounts[catID] += tx.Amount
+		catNetMap[catID] += tx.BaseAmount
+		timeSeriesMap[dateStr].CategoryAmounts[catID] += tx.BaseAmount
 
 		merchant := strings.TrimSpace(tx.Description)
 		if merchant == "" {
@@ -140,7 +140,7 @@ func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter
 		} else if len(merchant) > 40 {
 			merchant = merchant[:37] + "..."
 		}
-		merchantNetMap[merchant] += tx.Amount
+		merchantNetMap[merchant] += tx.BaseAmount
 	}
 
 	result.NetSavings = result.TotalIncome - result.TotalExpense

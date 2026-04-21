@@ -75,3 +75,6 @@ var ErrInvalidCredentials = errors.New("invalid username or password")
 
 // ErrResetTokenInvalid is returned when a password reset token is missing, expired, or incorrect.
 var ErrResetTokenInvalid = errors.New("invalid or expired reset token")
+
+// ErrExchangeRateNotFound is returned when a requested currency pair or date has no rate available.
+var ErrExchangeRateNotFound = errors.New("exchange rate not found")

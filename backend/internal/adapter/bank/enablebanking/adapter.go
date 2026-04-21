@@ -61,7 +61,7 @@ func (a *Adapter) getJWT() (string, error) {
 	return token.SignedString(a.privateKey)
 }
 
-func (a *Adapter) doRequest(ctx context.Context, method, path string, bodyData io.Reader) ([]byte, error) {
+func (a *Adapter) doRequest(ctx context.Context, method, path string, bodyData io.Reader, headers map[string]string) ([]byte, error) {
 	token, err := a.getJWT()
 	if err != nil {
 		return nil, fmt.Errorf("enablebanking: failed to sign JWT: %w", err)
@@ -70,6 +70,10 @@ func (a *Adapter) doRequest(ctx context.Context, method, path string, bodyData i
 	req, _ := http.NewRequestWithContext(ctx, method, a.BaseURL+path, bodyData)
 	req.Header.Set("Authorization", "Bearer "+token)
 	req.Header.Set("Content-Type", "application/json")
+
+	for k, v := range headers {
+		req.Header.Set(k, v)
+	}
 
 	resp, err := a.client.Do(req)
 	if err != nil {
@@ -82,7 +86,11 @@ func (a *Adapter) doRequest(ctx context.Context, method, path string, bodyData i
 		return nil, fmt.Errorf("enablebanking: error status %d: %s", resp.StatusCode, string(respBody))
 	}
 
-	a.logger.DebugContext(ctx, "Enable Banking API response", "method", method, "path", path, "status", resp.StatusCode, "response", string(respBody))
+	logBody := string(respBody)
+	if len(logBody) > 1000 {
+		logBody = logBody[:1000] + "... [TRUNCATED]"
+	}
+	a.logger.Info("Enable Banking API response", "method", method, "path", path, "status", resp.StatusCode, "response", logBody)
 	return respBody, nil
 }
 
@@ -95,7 +103,8 @@ func (a *Adapter) GetInstitutions(ctx context.Context, userID uuid.UUID, country
 		path += "&test=true" // Zwingend nötig, damit "Sample" von Enable Banking zurückgegeben wird
 	}
 
-	resp, err := a.doRequest(ctx, "GET", path, nil)
+	resp, err := a.doRequest(ctx, "GET", path, nil, nil)
+
 	if err != nil {
 		return nil, err
 	}
@@ -126,7 +135,31 @@ func (a *Adapter) GetInstitutions(ctx context.Context, userID uuid.UUID, country
 	return institutions, nil
 }
 
-func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error) {
+func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
+	// Enable Banking requires psu-ip-address and psu-user-agent for many banks (e.g. Sparkasse, ING)
+	headers := make(map[string]string)
+	if ip != "" {
+		headers["psu-ip-address"] = ip
+	}
+	if userAgent != "" {
+		headers["psu-user-agent"] = userAgent
+	}
+
+	access := map[string]interface{}{
+		"valid_until": time.Now().Add(90 * 24 * time.Hour).Format(time.RFC3339),
+		"scopes":      []string{"accounts", "balances", "transactions"},
+	}
+
+	// Sparkasse often defaults to "business" if not specified,
+	// but let's try to not force "personal" if we don't know for sure.
+	// Enable Banking says: if psu_type is not provided, it will be requested from PSU.
+	// However, for some banks it might be better to provide it.
+	// We'll leave it out for now to let the user select it at the bank if needed,
+	// unless we are in sandbox where "personal" is standard.
+	if isSandbox {
+		access["psu_type"] = "personal"
+	}
+
 	payloadBytes, _ := json.Marshal(map[string]interface{}{
 		"aspsp": map[string]string{
 			"name":    institutionID,
@@ -134,17 +167,19 @@ func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, insti
 		},
 		"redirect_url": redirectURL,
 		"state":        referenceID,
-		"access": map[string]interface{}{
-			"valid_until": time.Now().Add(90 * 24 * time.Hour).Format(time.RFC3339),
-			"psu_type":    "personal",
-			"scopes":      []string{"accounts", "balances", "transactions"},
-		},
+		"access":       access,
 	})
 
-	resp, err := a.doRequest(ctx, "POST", "/auth", bytes.NewReader(payloadBytes))
+	resp, err := a.doRequest(ctx, "POST", "/auth", bytes.NewReader(payloadBytes), headers)
 	if err != nil {
 		return nil, err
 	}
+
+	logResp := string(resp)
+	if len(logResp) > 1000 {
+		logResp = logResp[:1000] + "... [TRUNCATED]"
+	}
+	a.logger.Info("received raw auth response from Enable Banking", "response", logResp)
 
 	var res struct {
 		URL string `json:"url"`
@@ -171,10 +206,16 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, 
 		"code": code,
 	})
 
-	resp, err := a.doRequest(ctx, "POST", "/sessions", bytes.NewReader(payload))
+	resp, err := a.doRequest(ctx, "POST", "/sessions", bytes.NewReader(payload), nil)
 	if err != nil {
 		return "", err
 	}
+
+	logResp := string(resp)
+	if len(logResp) > 1000 {
+		logResp = logResp[:1000] + "... [TRUNCATED]"
+	}
+	a.logger.Info("received raw session response from Enable Banking", "response", logResp)
 
 	var res struct {
 		SessionID string `json:"session_id"`
@@ -199,7 +240,7 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, 
 	// Convert to domain entities
 	bankAccounts := make([]entity.BankAccount, len(res.Accounts))
 	for i, r := range res.Accounts {
-		a.logger.Debug("processing Enable Banking account", "uid", r.UID, "name", r.Name, "iban", r.AccountID.IBAN)
+		a.logger.Info("processing Enable Banking account", "uid", r.UID, "name", r.Name, "iban", r.AccountID.IBAN, "type", r.CashAccountType)
 		// Fallback to BBAN if IBAN is not provided
 		iban := r.AccountID.IBAN
 		if iban == "" {
@@ -235,10 +276,16 @@ func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, 
 }
 
 func (a *Adapter) GetRequisitionStatus(ctx context.Context, userID uuid.UUID, requisitionID string) (entity.ConnectionStatus, error) {
-	resp, err := a.doRequest(ctx, "GET", "/sessions/"+requisitionID, nil)
+	resp, err := a.doRequest(ctx, "GET", "/sessions/"+requisitionID, nil, nil)
 	if err != nil {
 		return entity.StatusFailed, err
 	}
+
+	logResp := string(resp)
+	if len(logResp) > 1000 {
+		logResp = logResp[:1000] + "... [TRUNCATED]"
+	}
+	a.logger.Info("received raw session status response from Enable Banking", "response", logResp)
 
 	var res struct {
 		Status string `json:"status"`
@@ -273,10 +320,16 @@ func (a *Adapter) FetchAccounts(ctx context.Context, userID uuid.UUID, requisiti
 
 	// If not in cache (e.g. after restart), fetch from Enable Banking API
 	a.logger.Info("memory cache empty, fetching accounts from Enable Banking API", "session_id", requisitionID, "user_id", userID)
-	resp, err := a.doRequest(ctx, "GET", "/sessions/"+requisitionID, nil)
+	resp, err := a.doRequest(ctx, "GET", "/sessions/"+requisitionID, nil, nil)
 	if err != nil {
 		return nil, fmt.Errorf("enablebanking: failed to fetch session details: %w", err)
 	}
+
+	logResp := string(resp)
+	if len(logResp) > 1000 {
+		logResp = logResp[:1000] + "... [TRUNCATED]"
+	}
+	a.logger.Info("received raw session details response from Enable Banking", "response", logResp)
 
 	var res struct {
 		Accounts []struct {
@@ -296,6 +349,7 @@ func (a *Adapter) FetchAccounts(ctx context.Context, userID uuid.UUID, requisiti
 
 	bankAccounts := make([]entity.BankAccount, len(res.Accounts))
 	for i, r := range res.Accounts {
+		a.logger.Info("processing Enable Banking account from API recovery", "uid", r.UID, "name", r.Name, "iban", r.AccountID.IBAN, "type", r.CashAccountType)
 		iban := r.AccountID.IBAN
 		if iban == "" {
 			iban = r.AccountID.BBAN
@@ -387,11 +441,17 @@ func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, provi
 		urlPath += "?" + strings.Join(query, "&")
 	}
 
-	resp, err := a.doRequest(ctx, "GET", urlPath, nil)
+	resp, err := a.doRequest(ctx, "GET", urlPath, nil, nil)
+
 	if err != nil {
 		a.logger.Error("failed to fetch transactions from Enable Banking", "account_id", providerAccountID, "error", err)
 		return nil, 0, err
 	}
+	logResp := string(resp)
+	if len(logResp) > 1000 {
+		logResp = logResp[:1000] + "... [TRUNCATED]"
+	}
+	a.logger.Info("received raw transactions response from Enable Banking", "account_id", providerAccountID, "response", logResp)
 	a.logger.Info("successfully fetched transactions from Enable Banking", "account_id", providerAccountID)
 
 	var res struct {
@@ -434,9 +494,14 @@ func (a *Adapter) FetchTransactions(ctx context.Context, userID uuid.UUID, provi
 	}
 
 	// Fetch balance
-	balResp, err := a.doRequest(ctx, "GET", "/accounts/"+providerAccountID+"/balances", nil)
+	balResp, err := a.doRequest(ctx, "GET", "/accounts/"+providerAccountID+"/balances", nil, nil)
 	var balance float64
 	if err == nil {
+		logBalResp := string(balResp)
+		if len(logBalResp) > 1000 {
+			logBalResp = logBalResp[:1000] + "... [TRUNCATED]"
+		}
+		a.logger.Info("received raw balance response from Enable Banking", "account_id", providerAccountID, "response", logBalResp)
 		var balRes struct {
 			Balances []struct {
 				BalanceAmount struct {

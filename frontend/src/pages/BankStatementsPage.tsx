@@ -349,7 +349,13 @@ export default function BankStatementsPage() {
                                         {res.status === 'error' && <XCircle size={16} className="text-red-500 dark:text-red-400 shrink-0" />}
                                         <div className="truncate">
                                             <p className="text-sm font-medium text-gray-900 dark:text-gray-100 truncate">{res.filename}</p>
-                                            {res.error && <p className="text-xs text-red-600 dark:text-red-400 mt-0.5 truncate">{res.error}</p>}
+                                            {res.error && (
+                                                <p className="text-xs text-red-600 dark:text-red-400 mt-0.5 truncate">
+                                                    {res.error === 'unsupported_format' || res.error === 'no_parser_found' || res.error === 'missing_iban' || res.error === 'missing_date' || res.error === 'no_transactions' || res.error === 'corrupted_file' || res.error === 'internal_error'
+                                                        ? t(`bankStatements.results.errors.${res.error}`)
+                                                        : res.error}
+                                                </p>
+                                            )}
                                         </div>
                                     </div>
                                     <div className="shrink-0 ml-4 text-xs">

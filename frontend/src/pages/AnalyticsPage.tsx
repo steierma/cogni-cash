@@ -5,6 +5,7 @@ import { useSearchParams } from 'react-router-dom';
 import { transactionService } from '../api/services/transactionService';
 import { categoryService } from '../api/services/categoryService';
 import { payslipService } from '../api/services/payslipService';
+import { settingsService } from '../api/services/settingsService';
 import { BarChart3, Filter, X, ArrowRightLeft, TrendingUp, TrendingDown, Wallet, Search, BarChart as BarChartIcon, Briefcase, Activity } from 'lucide-react';
 import {
     AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell
@@ -49,6 +50,11 @@ export default function AnalyticsPage() {
     const { data: payslips = [] } = useQuery<Payslip[], Error>({
         queryKey: ['payslips'],
         queryFn: () => payslipService.fetchPayslips(),
+    });
+
+    const { data: baseCurrency = 'EUR' } = useQuery({
+        queryKey: ['settings', 'BASE_DISPLAY_CURRENCY'],
+        queryFn: () => settingsService.fetchSettings().then((s) => s['BASE_DISPLAY_CURRENCY'] || 'EUR'),
     });
 
     // --- State: Filters ---
@@ -362,7 +368,7 @@ export default function AnalyticsPage() {
                             </div>
                             <div>
                                 <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">{t('analytics.periodIncome')}</p>
-                                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{fmtCurrency(totalInc, 'EUR')}</p>
+                                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{fmtCurrency(totalInc, baseCurrency)}</p>
                             </div>
                         </div>
                         <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm flex items-center gap-4">
@@ -371,7 +377,7 @@ export default function AnalyticsPage() {
                             </div>
                             <div>
                                 <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">{t('analytics.periodExpenses')}</p>
-                                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{fmtCurrency(totalExp, 'EUR')}</p>
+                                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{fmtCurrency(totalExp, baseCurrency)}</p>
                             </div>
                         </div>
                         <div className="bg-white dark:bg-gray-900 p-5 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm flex items-center gap-4">
@@ -380,7 +386,7 @@ export default function AnalyticsPage() {
                             </div>
                             <div>
                                 <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">{t('analytics.periodNetFlow')}</p>
-                                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{fmtCurrency(totalInc - totalExp, 'EUR')}</p>
+                                <p className="text-xl font-bold text-gray-900 dark:text-gray-100">{fmtCurrency(totalInc - totalExp, baseCurrency)}</p>
                             </div>
                         </div>
                     </div>
@@ -424,7 +430,7 @@ export default function AnalyticsPage() {
                                             <RechartsTooltip
                                                 contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '8px', color: '#fff' }}
                                                 labelFormatter={(label) => formatMonthAxis(label as string)}
-                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, 'EUR'), '']}
+                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, baseCurrency), '']}
                                             />
                                             <Area type="monotone" dataKey="income" name={t('dashboard.cashFlow.income')} stroke="#10b981" strokeWidth={2} fillOpacity={1} fill="url(#colorInc)" />
                                             <Area type="monotone" dataKey="expense" name={t('dashboard.cashFlow.expense')} stroke="#f43f5e" strokeWidth={2} fillOpacity={1} fill="url(#colorExp)" />
@@ -455,7 +461,7 @@ export default function AnalyticsPage() {
                                             <RechartsTooltip
                                                 cursor={{ fill: 'transparent' }}
                                                 contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '8px', color: '#fff' }}
-                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, 'EUR'), t('analytics.totalSpent')]}
+                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, baseCurrency), t('analytics.totalSpent')]}
                                             />
                                             <Bar dataKey="value" radius={[0, 4, 4, 0]} barSize={24}>
                                                 {expenseBarData.map((entry, index) => (
@@ -494,7 +500,7 @@ export default function AnalyticsPage() {
                                             <RechartsTooltip
                                                 contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '8px', color: '#fff' }}
                                                 labelFormatter={(label) => formatMonthAxis(label as string)}
-                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, 'EUR'), '']}
+                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, baseCurrency), '']}
                                             />
                                             <Bar dataKey="netIncome" stackId="hr" fill="#10b981" name={t('analytics.hrNetIncome')} radius={[0, 0, 4, 4]} barSize={40} />
                                             <Bar dataKey="deductions" stackId="hr" fill="#fbbf24" name={t('analytics.hrDeductions')} radius={[4, 4, 0, 0]} />
@@ -551,7 +557,7 @@ export default function AnalyticsPage() {
                                             <RechartsTooltip
                                                 contentStyle={{ backgroundColor: '#1f2937', borderColor: '#374151', borderRadius: '8px', color: '#fff' }}
                                                 labelFormatter={(label) => formatMonthAxis(label as string)}
-                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, 'EUR'), t('analytics.totalSpent')]}
+                                                formatter={(value: any) => [fmtCurrency(Number(value) || 0, baseCurrency), t('analytics.totalSpent')]}
                                             />
                                             <Line
                                                 type="monotone"

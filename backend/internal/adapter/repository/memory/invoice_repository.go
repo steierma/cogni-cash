@@ -46,6 +46,13 @@ func (r *InvoiceRepository) Save(ctx context.Context, invoice entity.Invoice) er
 		r.order = append(r.order, invoice.ID)
 	}
 
+	// Ensure splits have IDs
+	for i := range invoice.Splits {
+		if invoice.Splits[i].ID == uuid.Nil {
+			invoice.Splits[i].ID = uuid.New()
+		}
+	}
+
 	r.invoices[invoice.ID] = invoice
 	return nil
 }
@@ -57,7 +64,28 @@ func (r *InvoiceRepository) Update(ctx context.Context, invoice entity.Invoice) 
 	if !ok || old.UserID != invoice.UserID {
 		return entity.ErrInvoiceNotFound
 	}
+
+	// Ensure splits have IDs
+	for i := range invoice.Splits {
+		if invoice.Splits[i].ID == uuid.Nil {
+			invoice.Splits[i].ID = uuid.New()
+		}
+	}
+
 	r.invoices[invoice.ID] = invoice
+	return nil
+}
+
+func (r *InvoiceRepository) UpdateBaseAmount(ctx context.Context, id uuid.UUID, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	inv, ok := r.invoices[id]
+	if !ok || inv.UserID != userID {
+		return entity.ErrInvoiceNotFound
+	}
+	inv.BaseAmount = baseAmount
+	inv.BaseCurrency = baseCurrency
+	r.invoices[id] = inv
 	return nil
 }
 
@@ -102,6 +130,16 @@ func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID, userID uui
 		return entity.ErrInvoiceNotFound
 	}
 	delete(r.invoices, id)
+	return nil
+}
+
+func (r *InvoiceRepository) DeleteSplits(ctx context.Context, invoiceID, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if inv, ok := r.invoices[invoiceID]; ok && inv.UserID == userID {
+		inv.Splits = nil
+		r.invoices[invoiceID] = inv
+	}
 	return nil
 }
 

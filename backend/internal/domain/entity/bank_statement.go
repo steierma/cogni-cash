@@ -43,6 +43,8 @@ type Transaction struct {
 	Location            string          `json:"location,omitempty"` // <-- NEW Optional Field
 	Amount              float64         `json:"amount"`
 	Currency            string          `json:"currency"`
+	BaseAmount          float64         `json:"base_amount"`   // Snapshotted converted amount
+	BaseCurrency        string          `json:"base_currency"` // Snapshotted base currency
 	Type                TransactionType `json:"type"`
 	Reference           string          `json:"reference"`
 	CategoryID          *uuid.UUID      `json:"category_id"`

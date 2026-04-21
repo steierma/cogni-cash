@@ -33,6 +33,7 @@ type BankStatementService struct {
 	plannedTxService port.PlannedTransactionUseCase
 	discoveryService port.DiscoveryUseCase
 	aiParser         port.BankStatementAIParser
+	currencyService  *CurrencyService
 	Logger           *slog.Logger
 }
 
@@ -45,6 +46,11 @@ func NewBankStatementService(repo port.BankStatementRepository, logger *slog.Log
 		repo:    repo,
 		Logger:  logger,
 	}
+}
+
+func (s *BankStatementService) WithCurrencyService(svc *CurrencyService) *BankStatementService {
+	s.currencyService = svc
+	return s
 }
 
 func (s *BankStatementService) WithPlannedTransactionService(svc port.PlannedTransactionUseCase) *BankStatementService {
@@ -112,18 +118,18 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 				if parseErr == nil {
 					if err := stmt.IsValid(); err != nil {
 						lastErr = fmt.Errorf("validation failed: %w", err)
+						s.Logger.Warn("Parser succeeded but result is invalid", "parser", fmt.Sprintf("%T", parser), "error", lastErr)
 						continue
 					}
 					parsedSuccessfully = true
 					break
 				}
 
-				if strings.Contains(strings.ToLower(parseErr.Error()), "format mismatch") || strings.Contains(strings.ToLower(parseErr.Error()), "does not match format") {
-					continue
-				}
-
+				// If it's a format mismatch, we just move on.
+				// If it's a "hard" error (like a corrupted file or unexpected structure),
+				// we store it but CONTINUE the loop to see if another parser (like the AI fallback)
+				// can handle it.
 				lastErr = parseErr
-				break
 			}
 
 			if !parsedSuccessfully {
@@ -139,6 +145,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 	}
 
 	if !parsedSuccessfully {
+		s.Logger.Warn("Bank statement import failed: parsing was not successful", "file", fileName, "error", parseErr, "user_id", userID)
 		return entity.BankStatement{}, fmt.Errorf("bank statement service: parse %s: %w", fileName, parseErr)
 	}
 
@@ -296,6 +303,17 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 		}
 	}
 
+	// Trigger asynchronous currency conversion
+	if s.currencyService != nil {
+		go func() {
+			cCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if err := s.currencyService.UpdateBaseAmountsForUser(cCtx, userID); err != nil {
+				s.Logger.Error("Background currency conversion failed", "user_id", userID, "error", err)
+			}
+		}()
+	}
+
 	return stmt, nil
 }
 
@@ -374,6 +392,12 @@ func (s *BankStatementService) ImportFromDirectory(ctx context.Context, userID u
 	var errs []error
 
 	for _, f := range files {
+		select {
+		case <-ctx.Done():
+			return imported, append(errs, ctx.Err())
+		default:
+		}
+
 		if f.IsDir() {
 			continue
 		}

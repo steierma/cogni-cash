@@ -5,6 +5,7 @@ import (
 	"crypto/rsa"
 	"fmt"
 	"log/slog"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -51,7 +52,12 @@ func (a *Adapter) getProvider(ctx context.Context, userID uuid.UUID) (port.BankP
 		appID, _ := a.settingsRepo.Get(ctx, "enablebanking_app_id", userID)
 
 		if appID == "" {
-			return nil, fmt.Errorf("enablebanking configured but missing app_id in settings")
+			// Fallback to environment variable
+			appID = os.Getenv("ENABLEBANKING_APP_ID")
+		}
+
+		if appID == "" {
+			return nil, fmt.Errorf("enablebanking configured but missing app_id in settings and environment")
 		}
 
 		// Prüfen, ob der Key beim App-Start erfolgreich geladen wurde
@@ -83,12 +89,12 @@ func (a *Adapter) GetInstitutions(ctx context.Context, userID uuid.UUID, country
 	return p.GetInstitutions(ctx, userID, countryCode, isSandbox)
 }
 
-func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error) {
+func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
 	p, err := a.getProvider(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
-	return p.CreateRequisition(ctx, userID, institutionID, institutionName, country, redirectURL, referenceID, isSandbox)
+	return p.CreateRequisition(ctx, userID, institutionID, institutionName, country, redirectURL, referenceID, isSandbox, ip, userAgent)
 }
 
 func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error) {

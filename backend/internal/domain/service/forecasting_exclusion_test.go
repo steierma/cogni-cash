@@ -23,7 +23,7 @@ func TestForecastingService_Exclusions(t *testing.T) {
 			ID:          templateID,
 			UserID:      userID,
 			Description: "Recurring Rent",
-			Amount:      -1000.0,
+			Amount: -1000.0, BaseAmount: -1000.0,
 			BookingDate: now.AddDate(0, -3, 0),
 			Type:        entity.TransactionTypeDebit,
 			ContentHash: "rent-1",
@@ -31,7 +31,7 @@ func TestForecastingService_Exclusions(t *testing.T) {
 		{
 			UserID:      userID,
 			Description: "Recurring Rent",
-			Amount:      -1000.0,
+			Amount: -1000.0, BaseAmount: -1000.0,
 			BookingDate: now.AddDate(0, -2, 0),
 			Type:        entity.TransactionTypeDebit,
 			ContentHash: "rent-2",
@@ -39,7 +39,7 @@ func TestForecastingService_Exclusions(t *testing.T) {
 		{
 			UserID:      userID,
 			Description: "Recurring Rent",
-			Amount:      -1000.0,
+			Amount: -1000.0, BaseAmount: -1000.0,
 			BookingDate: now.AddDate(0, -1, 0),
 			Type:        entity.TransactionTypeDebit,
 			ContentHash: "rent-3",
@@ -47,11 +47,11 @@ func TestForecastingService_Exclusions(t *testing.T) {
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
+	bankRepo := &mockForecastingBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
 	catRepo := &mockCategoryRepo{}
 	exRepo := &mockExclusionRepo{}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, exRepo, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, exRepo, nil, nil, nil)
 
 	// 2. Generate forecast WITHOUT exclusions
 	from := now
@@ -121,14 +121,14 @@ func TestForecastingService_SkipHistorical(t *testing.T) {
 		{
 			UserID:      userID,
 			Description: "Gym",
-			Amount:      -50.0,
+			Amount: -50.0, BaseAmount: -50.0,
 			BookingDate: now.AddDate(0, -3, 0),
 			ContentHash: "gym-1",
 		},
 		{
 			UserID:          userID,
 			Description:     "Gym",
-			Amount:          -50.0,
+			Amount: -50.0, BaseAmount: -50.0,
 			BookingDate:     now.AddDate(0, -2, 0),
 			ContentHash:     "gym-2",
 			SkipForecasting: true, // This should break the pattern detection
@@ -136,18 +136,18 @@ func TestForecastingService_SkipHistorical(t *testing.T) {
 		{
 			UserID:      userID,
 			Description: "Gym",
-			Amount:      -50.0,
+			Amount: -50.0, BaseAmount: -50.0,
 			BookingDate: now.AddDate(0, -1, 0),
 			ContentHash: "gym-3",
 		},
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
+	bankRepo := &mockForecastingBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
 	catRepo := &mockCategoryRepo{}
 	exRepo := &mockExclusionRepo{}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, exRepo, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, exRepo, nil, nil, nil)
 
 	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, now, now.AddDate(0, 1, 0))
 	if err != nil {

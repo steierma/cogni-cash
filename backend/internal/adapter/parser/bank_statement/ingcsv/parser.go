@@ -88,10 +88,12 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 	}
 
 	stmt := entity.BankStatement{
-		Currency: "EUR",
+		Currency:      "EUR",
+		StatementType: entity.StatementTypeGiro,
 	}
 
 	// ---- parse metadata rows ------------------------------------------------
+metadataLoop:
 	for _, row := range records {
 		if len(row) < 2 {
 			continue
@@ -103,9 +105,9 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 		case "IBAN":
 			stmt.IBAN = strings.ReplaceAll(val, " ", "")
 		case "Kunde":
-			// "Max Mustermann, Max Mustermann" → first name only
-			parts := strings.SplitN(val, ",", 2)
-			stmt.AccountHolder = strings.TrimSpace(parts[0])
+			// If it contains multiple holders separated by comma, keep them all but trim spaces.
+			// "Max Mustermann, Erika Mustermann" -> "Max Mustermann, Erika Mustermann"
+			stmt.AccountHolder = strings.TrimSpace(val)
 		case "Zeitraum":
 			// "01.02.2026 - 28.02.2026"
 			// PeriodLabel removed
@@ -116,7 +118,7 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 			}
 		case "Buchung":
 			// This is the column-header row — everything after here is transactions.
-			break
+			break metadataLoop
 		}
 	}
 
@@ -138,7 +140,7 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 			if len(row) < 9 {
 				continue
 			}
-			tx, err := parseRow(row)
+			tx, err := parseRow(row, stmt.StatementType)
 			if err != nil {
 				continue // skip malformed rows silently
 			}
@@ -179,7 +181,7 @@ func (p *Parser) Parse(_ context.Context, _ uuid.UUID, fileBytes []byte) (entity
 // Col 6: Währung                → Currency
 // Col 7: Betrag                 → Amount
 // Col 8: Währung                (duplicate — ignored)
-func parseRow(row []string) (entity.Transaction, error) {
+func parseRow(row []string, stmtType entity.StatementType) (entity.Transaction, error) {
 	bookingDate, err := parseGermanDate(row[0])
 	if err != nil {
 		return entity.Transaction{}, fmt.Errorf("booking date: %w", err)
@@ -226,8 +228,9 @@ func parseRow(row []string) (entity.Transaction, error) {
 		Amount:              amount,
 		Currency:            currency,
 		Type:                txType,
-		Reference:           reference, // Verwendungszweck
-		CategoryID:          nil,       // Auto-categorizer will catch this since we migrated to UUID mappings
+		Reference:           reference,     // Verwendungszweck
+		CategoryID:          nil,           // Auto-categorizer will catch this since we migrated to UUID mappings
+		StatementType:       stmtType,      // Propagate statement type
 	}, nil
 }
 

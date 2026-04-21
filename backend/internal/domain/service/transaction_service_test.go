@@ -2,128 +2,276 @@ package service_test
 
 import (
 	"context"
+	"errors"
+	"log/slog"
+	"os"
 	"testing"
 	"time"
+
+	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
 	"cogni-cash/internal/domain/service"
-
-	"github.com/google/uuid"
 )
 
-func TestTransactionService_ListTransactions(t *testing.T) {
-	repo := &mockRepo{
-		existingTxns: []entity.Transaction{
-			{ContentHash: "h1", Description: "Tx 1"},
-			{ContentHash: "h2", Description: "Tx 2"},
-		},
-	}
-	svc := service.NewTransactionService(repo, nil, nil, nil, setupLogger())
+// -- Isolated Mocks for Transaction Service Tests --
 
-	filter := entity.TransactionFilter{UserID: uuid.New()}
-	txns, err := svc.ListTransactions(context.Background(), filter)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if len(txns) != 2 {
-		t.Errorf("expected 2 transactions, got %d", len(txns))
-	}
+type mockTxnSvcBankStatementRepo struct {
+	port.BankStatementRepository
+	FindTransactionsFunc          func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
+	SearchTransactionsFunc        func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
+	UpdateTransactionCategoryFunc func(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
+	MarkTransactionReviewedFunc   func(ctx context.Context, hash string, userID uuid.UUID) error
+	FindMatchingCategoryFunc      func(ctx context.Context, userID uuid.UUID, tx port.TransactionToCategorize) (*uuid.UUID, error)
+	GetCategorizationExamplesFunc func(ctx context.Context, userID uuid.UUID, limit int) ([]entity.CategorizationExample, error)
 }
 
-func TestTransactionService_UpdateCategory(t *testing.T) {
-	repo := &mockRepo{
-		existingTxns: []entity.Transaction{
-			{ContentHash: "h1", Description: "Tx 1"},
-		},
+func (m *mockTxnSvcBankStatementRepo) FindTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
+	if m.FindTransactionsFunc != nil {
+		return m.FindTransactionsFunc(ctx, filter)
 	}
-	svc := service.NewTransactionService(repo, nil, nil, nil, setupLogger())
+	return nil, nil
+}
+func (m *mockTxnSvcBankStatementRepo) SearchTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
+	if m.SearchTransactionsFunc != nil {
+		return m.SearchTransactionsFunc(ctx, filter)
+	}
+	return nil, nil
+}
+func (m *mockTxnSvcBankStatementRepo) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	if m.UpdateTransactionCategoryFunc != nil {
+		return m.UpdateTransactionCategoryFunc(ctx, hash, categoryID, userID)
+	}
+	return nil
+}
+func (m *mockTxnSvcBankStatementRepo) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
+	if m.MarkTransactionReviewedFunc != nil {
+		return m.MarkTransactionReviewedFunc(ctx, hash, userID)
+	}
+	return nil
+}
+func (m *mockTxnSvcBankStatementRepo) FindMatchingCategory(ctx context.Context, userID uuid.UUID, tx port.TransactionToCategorize) (*uuid.UUID, error) {
+	if m.FindMatchingCategoryFunc != nil {
+		return m.FindMatchingCategoryFunc(ctx, userID, tx)
+	}
+	return nil, nil
+}
+func (m *mockTxnSvcBankStatementRepo) GetCategorizationExamples(ctx context.Context, userID uuid.UUID, limit int) ([]entity.CategorizationExample, error) {
+	if m.GetCategorizationExamplesFunc != nil {
+		return m.GetCategorizationExamplesFunc(ctx, userID, limit)
+	}
+	return nil, nil
+}
+func (m *mockTxnSvcBankStatementRepo) UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
+	return nil
+}
 
-	catID := uuid.New()
+type mockTxnSvcCategoryRepo struct {
+	port.CategoryRepository
+	FindAllFunc func(ctx context.Context, userID uuid.UUID) ([]entity.Category, error)
+}
+
+func (m *mockTxnSvcCategoryRepo) FindAll(ctx context.Context, userID uuid.UUID) ([]entity.Category, error) {
+	if m.FindAllFunc != nil {
+		return m.FindAllFunc(ctx, userID)
+	}
+	return nil, nil
+}
+
+type mockTxnSvcCategorizer struct {
+	port.TransactionCategorizer
+	CategorizeBatchFunc func(ctx context.Context, userID uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error)
+}
+
+func (m *mockTxnSvcCategorizer) CategorizeTransactionsBatch(ctx context.Context, userID uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
+	if m.CategorizeBatchFunc != nil {
+		return m.CategorizeBatchFunc(ctx, userID, txns, categories, examples)
+	}
+	return nil, nil
+}
+
+// -- Tests --
+
+func setupTxnLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true, Level: slog.LevelError}))
+}
+
+func TestTransactionService_SimpleOperations(t *testing.T) {
+	ctx := context.Background()
+	logger := setupTxnLogger()
 	userID := uuid.New()
-	err := svc.UpdateCategory(context.Background(), "h1", &catID, userID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
+	hash := "test-hash-123"
 
-	if repo.existingTxns[0].CategoryID == nil || *repo.existingTxns[0].CategoryID != catID {
-		t.Errorf("expected category ID %v, got %v", catID, repo.existingTxns[0].CategoryID)
-	}
+	t.Run("ListTransactions", func(t *testing.T) {
+		repo := &mockTxnSvcBankStatementRepo{
+			FindTransactionsFunc: func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
+				return []entity.Transaction{{ContentHash: "h1"}, {ContentHash: "h2"}}, nil
+			},
+		}
+		svc := service.NewTransactionService(repo, nil, nil, nil, logger)
+
+		txns, err := svc.ListTransactions(ctx, entity.TransactionFilter{UserID: userID})
+		require.NoError(t, err)
+		assert.Len(t, txns, 2)
+	})
+
+	t.Run("UpdateCategory", func(t *testing.T) {
+		catID := uuid.New()
+		called := false
+		repo := &mockTxnSvcBankStatementRepo{
+			UpdateTransactionCategoryFunc: func(ctx context.Context, h string, cID *uuid.UUID, uID uuid.UUID) error {
+				assert.Equal(t, hash, h)
+				assert.Equal(t, catID, *cID)
+				assert.Equal(t, userID, uID)
+				called = true
+				return nil
+			},
+		}
+		svc := service.NewTransactionService(repo, nil, nil, nil, logger)
+
+		err := svc.UpdateCategory(ctx, hash, &catID, userID)
+		require.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("MarkAsReviewed", func(t *testing.T) {
+		called := false
+		repo := &mockTxnSvcBankStatementRepo{
+			MarkTransactionReviewedFunc: func(ctx context.Context, h string, uID uuid.UUID) error {
+				assert.Equal(t, hash, h)
+				assert.Equal(t, userID, uID)
+				called = true
+				return nil
+			},
+		}
+		svc := service.NewTransactionService(repo, nil, nil, nil, logger)
+
+		err := svc.MarkAsReviewed(ctx, hash, userID)
+		require.NoError(t, err)
+		assert.True(t, called)
+	})
 }
 
-func TestTransactionService_MarkAsReviewed(t *testing.T) {
-	repo := &mockRepo{}
-	svc := service.NewTransactionService(repo, nil, nil, nil, setupLogger())
+func TestTransactionService_GetTransactionAnalytics(t *testing.T) {
+	ctx := context.Background()
+	logger := setupTxnLogger()
+	userID := uuid.New()
+	catGroceries := uuid.New()
+	catSalary := uuid.New()
 
-	err := svc.MarkAsReviewed(context.Background(), "h1", uuid.New())
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	repo := &mockTxnSvcBankStatementRepo{
+		FindTransactionsFunc: func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
+			t1 := time.Date(2026, 4, 1, 0, 0, 0, 0, time.UTC)
+			t2 := time.Date(2026, 4, 15, 0, 0, 0, 0, time.UTC)
+
+			return []entity.Transaction{
+				{ContentHash: "h1", UserID: userID, Amount: -50.0, BaseAmount: -50.0, CategoryID: &catGroceries, Description: "REWE", BookingDate: t1},
+				{ContentHash: "h2", UserID: userID, Amount: -150.0, BaseAmount: -150.0, CategoryID: &catGroceries, Description: "Aldi", BookingDate: t2},
+				{ContentHash: "h3", UserID: userID, Amount: 3000.0, BaseAmount: 3000.0, CategoryID: &catSalary, Description: "Employer", BookingDate: t1},
+				{ContentHash: "h4", UserID: userID, Amount: -20.0, BaseAmount: -20.0, CategoryID: nil, Description: "Unknown Vendor", BookingDate: t2},
+			}, nil
+		},
 	}
+
+	catRepo := &mockTxnSvcCategoryRepo{
+		FindAllFunc: func(ctx context.Context, uID uuid.UUID) ([]entity.Category, error) {
+			return []entity.Category{
+				{ID: catGroceries, Name: "Groceries", Color: "#ff0000"},
+				{ID: catSalary, Name: "Salary", Color: "#00ff00"},
+			}, nil
+		},
+	}
+
+	svc := service.NewTransactionService(repo, catRepo, nil, nil, logger)
+
+	filter := entity.TransactionFilter{UserID: userID}
+	analytics, err := svc.GetTransactionAnalytics(ctx, filter)
+
+	require.NoError(t, err)
+
+	// Verify Net Savings (3000 income - 220 expense)
+	assert.Equal(t, 3000.0, analytics.TotalIncome)
+	assert.Equal(t, 220.0, analytics.TotalExpense)
+	assert.Equal(t, 2780.0, analytics.NetSavings)
+
+	// Verify Category Totals (sorted by amount)
+	require.Len(t, analytics.CategoryTotals, 3) // Groceries, Uncategorized, Salary
+
+	assert.Equal(t, 3000.0, analytics.CategoryTotals[0].Amount)
+	assert.Equal(t, catSalary.String(), analytics.CategoryTotals[0].CategoryID)
+
+	assert.Equal(t, 200.0, analytics.CategoryTotals[1].Amount)
+	assert.Equal(t, catGroceries.String(), analytics.CategoryTotals[1].CategoryID)
+
+	// Verify Top Merchants
+	require.Len(t, analytics.TopMerchants, 3)
+	assert.Equal(t, "Aldi", analytics.TopMerchants[0].Merchant)
+	assert.Equal(t, 150.0, analytics.TopMerchants[0].Amount)
 }
 
 func TestTransactionService_AutoCategorize_HybridMatching(t *testing.T) {
-	catGroceries := uuid.New()
+	ctx := context.Background()
+	logger := setupTxnLogger()
 	userID := uuid.New()
+	catGroceries := uuid.New()
 
-	tx1 := entity.Transaction{ContentHash: "h1", Description: "REWE", Amount: -10.0}       // Will match in DB
-	tx2 := entity.Transaction{ContentHash: "h2", Description: "New Vendor", Amount: -20.0} // Will NOT match in DB
+	updatedCategories := make(map[string]*uuid.UUID)
 
-	repo := &mockRepo{
-		existingTxns:   []entity.Transaction{tx1, tx2},
-		findMatchingID: &catGroceries, // Simulate DB match for all queries
-	}
-
-	// We override FindMatchingCategory to only match 'h1'
-	repo.findMatchFunc = func(txn port.TransactionToCategorize) *uuid.UUID {
-		if txn.Hash == "h1" {
-			return &catGroceries
-		}
-		return nil
-	}
-
-	catRepo := &mockCategoryRepo{
-		saved: []entity.Category{
-			{ID: catGroceries, Name: "Groceries"},
+	repo := &mockTxnSvcBankStatementRepo{
+		SearchTransactionsFunc: func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error) {
+			return []entity.Transaction{
+				{ContentHash: "h1", Description: "REWE", Amount: -10.0, BaseAmount: -10.0},
+				{ContentHash: "h2", Description: "New Vendor", Amount: -20.0, BaseAmount: -20.0},
+			}, nil
+		},
+		FindMatchingCategoryFunc: func(ctx context.Context, uID uuid.UUID, tx port.TransactionToCategorize) (*uuid.UUID, error) {
+			if tx.Hash == "h1" {
+				return &catGroceries, nil
+			}
+			return nil, errors.New("no high confidence match")
+		},
+		UpdateTransactionCategoryFunc: func(ctx context.Context, hash string, cID *uuid.UUID, uID uuid.UUID) error {
+			updatedCategories[hash] = cID
+			return nil
 		},
 	}
 
-	llm := &mockCategorizer{
-		results: []port.CategorizedTransaction{
-			{Hash: "h2", Category: "Groceries"},
+	catRepo := &mockTxnSvcCategoryRepo{
+		FindAllFunc: func(ctx context.Context, uID uuid.UUID) ([]entity.Category, error) {
+			return []entity.Category{{ID: catGroceries, Name: "Groceries"}}, nil
 		},
 	}
 
-	svc := service.NewTransactionService(repo, catRepo, nil, llm, setupLogger())
+	llmCalls := 0
+	llm := &mockTxnSvcCategorizer{
+		CategorizeBatchFunc: func(ctx context.Context, uID uuid.UUID, txns []port.TransactionToCategorize, categories []string, examples []entity.CategorizationExample) ([]port.CategorizedTransaction, error) {
+			llmCalls++
+			require.Len(t, txns, 1)
+			assert.Equal(t, "h2", txns[0].Hash)
 
-	err := svc.StartAutoCategorizeAsync(context.Background(), userID, 10)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	// Wait for completion
-	timeout := time.After(1 * time.Second)
-	for {
-		if svc.GetJobStatus().Status == "completed" {
-			break
-		}
-		select {
-		case <-timeout:
-			t.Fatal("timed out")
-		default:
-			time.Sleep(10 * time.Millisecond)
-		}
+			return []port.CategorizedTransaction{
+				{Hash: "h2", Category: "Groceries"},
+			}, nil
+		},
 	}
 
-	// Verify LLM was only called for h2
-	if llm.calls != 1 {
-		t.Errorf("expected 1 LLM call, got %d", llm.calls)
-	}
+	svc := service.NewTransactionService(repo, catRepo, nil, llm, logger)
 
-	// Verify categories updated in repo
-	if repo.existingTxns[0].CategoryID == nil || *repo.existingTxns[0].CategoryID != catGroceries {
-		t.Error("h1 category not updated from DB match")
-	}
-	if repo.existingTxns[1].CategoryID == nil || *repo.existingTxns[1].CategoryID != catGroceries {
-		t.Error("h2 category not updated from LLM result")
-	}
+	err := svc.StartAutoCategorizeAsync(ctx, userID, 10)
+	require.NoError(t, err)
+
+	require.Eventually(t, func() bool {
+		return svc.GetJobStatus().Status == "completed"
+	}, 2*time.Second, 10*time.Millisecond, "Categorization job did not complete in time")
+
+	assert.Equal(t, 1, llmCalls)
+
+	require.Contains(t, updatedCategories, "h1")
+	assert.Equal(t, catGroceries, *updatedCategories["h1"])
+
+	require.Contains(t, updatedCategories, "h2")
+	assert.Equal(t, catGroceries, *updatedCategories["h2"])
 }

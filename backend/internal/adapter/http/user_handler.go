@@ -1,7 +1,6 @@
 package http
 
 import (
-	"context"
 	"encoding/json"
 	"net/http"
 
@@ -89,10 +88,12 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 	h.Logger.Info("createUser successful", "new_user_id", user.ID, "username", user.Username)
 
 	// Send welcome email asynchronously
-	if h.notificationSvc != nil {
+	if h.notificationSvc != nil && h.WaitGroup != nil {
+		h.WaitGroup.Add(1)
 		go func() {
-			// Use background context as the request context will be cancelled
-			if err := h.notificationSvc.SendWelcomeEmail(context.Background(), user); err != nil {
+			defer h.WaitGroup.Done()
+			// Use AppCtx so the task is cancelled on shutdown, or finishes before exit
+			if err := h.notificationSvc.SendWelcomeEmail(h.AppCtx, user); err != nil {
 				h.Logger.Error("Failed to send welcome email in background", "user_id", user.ID, "error", err)
 			}
 		}()

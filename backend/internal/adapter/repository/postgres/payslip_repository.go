@@ -32,11 +32,11 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 		INSERT INTO payslips (
 			user_id, original_file_name, original_file_content, content_hash,
 			period_month_num, period_year, employer_name, tax_class, tax_id,
-			gross_pay, net_pay, payout_amount, custom_deductions
+			currency, gross_pay, base_gross_pay, net_pay, base_net_pay, payout_amount, base_payout_amount, custom_deductions
 		) VALUES (
 			$1, $2, $3, $4,
 			$5, $6, $7, $8, $9,
-			$10, $11, $12, $13
+			$10, $11, $12, $13, $14, $15, $16, $17
 		) RETURNING id
 	`
 
@@ -49,7 +49,7 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 	err = tx.QueryRow(ctx, insertPayslipSQL,
 		p.UserID, p.OriginalFileName, fileContent, p.ContentHash,
 		p.PeriodMonthNum, p.PeriodYear, p.EmployerName, p.TaxClass, p.TaxID,
-		p.GrossPay, p.NetPay, p.PayoutAmount, p.CustomDeductions,
+		p.Currency, p.GrossPay, p.BaseGrossPay, p.NetPay, p.BaseNetPay, p.PayoutAmount, p.BasePayoutAmount, p.CustomDeductions,
 	).Scan(&payslipID)
 
 	if err != nil {
@@ -60,11 +60,11 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 	// 2. Insert Bonuses (if any)
 	if len(p.Bonuses) > 0 {
 		insertBonusSQL := `
-			INSERT INTO payslip_bonuses (payslip_id, description, amount)
-			VALUES ($1, $2, $3)
+			INSERT INTO payslip_bonuses (payslip_id, description, amount, base_amount)
+			VALUES ($1, $2, $3, $4)
 		`
 		for _, b := range p.Bonuses {
-			_, err = tx.Exec(ctx, insertBonusSQL, payslipID, b.Description, b.Amount)
+			_, err = tx.Exec(ctx, insertBonusSQL, payslipID, b.Description, b.Amount, b.BaseAmount)
 			if err != nil {
 				return fmt.Errorf("payslip repo insert bonus: %w", err)
 			}
@@ -91,7 +91,7 @@ func (r *PayslipRepository) ExistsByOriginalFileName(ctx context.Context, origin
 func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFilter) ([]entity.Payslip, error) {
 	query := `
 		SELECT id, user_id, period_month_num, period_year, employer_name, tax_class, tax_id, 
-		       gross_pay, net_pay, payout_amount, custom_deductions, created_at,
+		       currency, gross_pay, base_gross_pay, net_pay, base_net_pay, payout_amount, base_payout_amount, custom_deductions, created_at,
 		       original_file_name
 		FROM payslips
 		WHERE user_id = $1
@@ -130,7 +130,7 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 		var p entity.Payslip
 		err := rows.Scan(
 			&p.ID, &p.UserID, &p.PeriodMonthNum, &p.PeriodYear, &p.EmployerName, &p.TaxClass, &p.TaxID,
-			&p.GrossPay, &p.NetPay, &p.PayoutAmount, &p.CustomDeductions, &p.CreatedAt,
+			&p.Currency, &p.GrossPay, &p.BaseGrossPay, &p.NetPay, &p.BaseNetPay, &p.PayoutAmount, &p.BasePayoutAmount, &p.CustomDeductions, &p.CreatedAt,
 			&p.OriginalFileName,
 		)
 		if err != nil {
@@ -147,7 +147,7 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 
 func (r *PayslipRepository) findBonuses(ctx context.Context, payslipID string, userID uuid.UUID) ([]entity.Bonus, error) {
 	rows, err := r.db.Query(ctx,
-		`SELECT b.description, b.amount FROM payslip_bonuses b JOIN payslips p ON b.payslip_id = p.id WHERE b.payslip_id = $1 AND p.user_id = $2 ORDER BY b.created_at`,
+		`SELECT b.description, b.amount, b.base_amount FROM payslip_bonuses b JOIN payslips p ON b.payslip_id = p.id WHERE b.payslip_id = $1 AND p.user_id = $2 ORDER BY b.created_at`,
 		payslipID, userID,
 	)
 	if err != nil {
@@ -158,7 +158,7 @@ func (r *PayslipRepository) findBonuses(ctx context.Context, payslipID string, u
 	result := make([]entity.Bonus, 0)
 	for rows.Next() {
 		var b entity.Bonus
-		if err := rows.Scan(&b.Description, &b.Amount); err != nil {
+		if err := rows.Scan(&b.Description, &b.Amount, &b.BaseAmount); err != nil {
 			return nil, err
 		}
 		result = append(result, b)
@@ -169,14 +169,14 @@ func (r *PayslipRepository) findBonuses(ctx context.Context, payslipID string, u
 func (r *PayslipRepository) FindByID(ctx context.Context, id string, userID uuid.UUID) (entity.Payslip, error) {
 	query := `
 		SELECT id, user_id, period_month_num, period_year, employer_name, tax_class, tax_id, 
-		       gross_pay, net_pay, payout_amount, custom_deductions,
+		       currency, gross_pay, base_gross_pay, net_pay, base_net_pay, payout_amount, base_payout_amount, custom_deductions,
 		       original_file_name
 		FROM payslips WHERE id = $1 AND user_id = $2
 	`
 	var p entity.Payslip
 	err := r.db.QueryRow(ctx, query, id, userID).Scan(
 		&p.ID, &p.UserID, &p.PeriodMonthNum, &p.PeriodYear, &p.EmployerName, &p.TaxClass, &p.TaxID,
-		&p.GrossPay, &p.NetPay, &p.PayoutAmount, &p.CustomDeductions,
+		&p.Currency, &p.GrossPay, &p.BaseGrossPay, &p.NetPay, &p.BaseNetPay, &p.PayoutAmount, &p.BasePayoutAmount, &p.CustomDeductions,
 		&p.OriginalFileName,
 	)
 	if err != nil {
@@ -197,10 +197,10 @@ func (r *PayslipRepository) Update(ctx context.Context, p *entity.Payslip) error
 	_, err = tx.Exec(ctx, `
 		UPDATE payslips
 		SET period_month_num = $1, period_year = $2, employer_name = $3, tax_class = $4, tax_id = $5,
-		    gross_pay = $6, net_pay = $7, payout_amount = $8, custom_deductions = $9
-		WHERE id = $10 AND user_id = $11`,
+		    currency = $6, gross_pay = $7, base_gross_pay = $8, net_pay = $9, base_net_pay = $10, payout_amount = $11, base_payout_amount = $12, custom_deductions = $13
+		WHERE id = $14 AND user_id = $15`,
 		p.PeriodMonthNum, p.PeriodYear, p.EmployerName, p.TaxClass, p.TaxID,
-		p.GrossPay, p.NetPay, p.PayoutAmount, p.CustomDeductions,
+		p.Currency, p.GrossPay, p.BaseGrossPay, p.NetPay, p.BaseNetPay, p.PayoutAmount, p.BasePayoutAmount, p.CustomDeductions,
 		p.ID, p.UserID,
 	)
 	if err != nil {
@@ -225,8 +225,8 @@ func (r *PayslipRepository) Update(ctx context.Context, p *entity.Payslip) error
 	}
 	for _, b := range p.Bonuses {
 		_, err = tx.Exec(ctx,
-			`INSERT INTO payslip_bonuses (payslip_id, description, amount) VALUES ($1, $2, $3)`,
-			p.ID, b.Description, b.Amount,
+			`INSERT INTO payslip_bonuses (payslip_id, description, amount, base_amount) VALUES ($1, $2, $3, $4)`,
+			p.ID, b.Description, b.Amount, b.BaseAmount,
 		)
 		if err != nil {
 			return fmt.Errorf("payslip repo update insert bonus: %w", err)
@@ -234,6 +234,13 @@ func (r *PayslipRepository) Update(ctx context.Context, p *entity.Payslip) error
 	}
 
 	return tx.Commit(ctx)
+}
+
+func (r *PayslipRepository) UpdateBaseAmount(ctx context.Context, id string, baseGross, baseNet, basePayout float64, currency string, userID uuid.UUID) error {
+	_, err := r.db.Exec(ctx, `
+		UPDATE payslips SET base_gross_pay = $1, base_net_pay = $2, base_payout_amount = $3, currency = $4
+		WHERE id = $5 AND user_id = $6`, baseGross, baseNet, basePayout, currency, id, userID)
+	return err
 }
 
 func (r *PayslipRepository) Delete(ctx context.Context, id string, userID uuid.UUID) error {
@@ -265,9 +272,9 @@ func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (e
 	// 1. Totals
 	queryTotals := `
 		SELECT 
-			COALESCE(SUM(gross_pay), 0),
-			COALESCE(SUM(net_pay), 0),
-			COALESCE(SUM(payout_amount), 0),
+			COALESCE(SUM(base_gross_pay), 0),
+			COALESCE(SUM(base_net_pay), 0),
+			COALESCE(SUM(base_payout_amount), 0),
 			COUNT(*)
 		FROM payslips 
 		WHERE user_id = $1
@@ -286,7 +293,7 @@ func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (e
 
 	// 2. Total Bonuses
 	queryBonuses := `
-		SELECT COALESCE(SUM(b.amount), 0)
+		SELECT COALESCE(SUM(b.base_amount), 0)
 		FROM payslip_bonuses b
 		JOIN payslips p ON b.payslip_id = p.id
 		WHERE p.user_id = $1
@@ -298,7 +305,7 @@ func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (e
 
 	// 3. Latest and Previous for Trend
 	queryRecent := `
-		SELECT net_pay, period_year, period_month_num
+		SELECT base_net_pay, period_year, period_month_num
 		FROM payslips
 		WHERE user_id = $1
 		ORDER BY period_year DESC, period_month_num DESC
@@ -332,7 +339,7 @@ func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (e
 
 	// 4. Last 12 months for chart
 	queryTrend := `
-		SELECT period_year, period_month_num, gross_pay, net_pay
+		SELECT period_year, period_month_num, base_gross_pay, base_net_pay
 		FROM payslips
 		WHERE user_id = $1
 		ORDER BY period_year DESC, period_month_num DESC

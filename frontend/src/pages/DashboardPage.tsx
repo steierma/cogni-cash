@@ -12,6 +12,7 @@ import { transactionService } from '../api/services/transactionService';
 import { payslipService } from '../api/services/payslipService';
 import { forecastingService } from '../api/services/forecastingService';
 import { subscriptionService } from '../api/services/subscriptionService';
+import { settingsService } from '../api/services/settingsService';
 import type { BankStatementSummary } from "../api/types/bank";
 import type { Transaction, TransactionAnalytics, CashFlowForecast } from "../api/types/transaction";
 import type { Payslip } from "../api/types/payslip";
@@ -39,12 +40,12 @@ function getGreeting(t: any) {
 
 // ── sub-components ───────────────────────────────────────────────────────────
 
-function TrueSavingsCard({analytics, payslips}: { analytics?: TransactionAnalytics, payslips?: Payslip[] }) {
+function TrueSavingsCard({analytics, payslips, baseCurrency}: { analytics?: TransactionAnalytics, payslips?: Payslip[], baseCurrency: string }) {
     const {t} = useTranslation();
     if (!analytics || !payslips || payslips.length === 0) return null;
 
     const latestPayslip = payslips[0];
-    const trueNetIncome = latestPayslip.net_pay;
+    const trueNetIncome = latestPayslip.base_net_pay || latestPayslip.net_pay;
 
     // Match the payslip's period to the analytics time_series data
     const payslipPeriod = `${latestPayslip.period_year}-${String(latestPayslip.period_month_num).padStart(2, '0')}`;
@@ -63,7 +64,7 @@ function TrueSavingsCard({analytics, payslips}: { analytics?: TransactionAnalyti
 
             <div className="flex items-end gap-4">
                 <p className="text-4xl font-black text-gray-900 dark:text-gray-100">
-                    {fmtCurrency(trueSavings, 'EUR')}
+                    {fmtCurrency(trueSavings, baseCurrency)}
                 </p>
                 <div
                     className={`flex items-center gap-1 text-sm font-bold pb-1 ${trueSavings >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-red-600 dark:text-red-400'}`}>
@@ -85,8 +86,8 @@ function TrueSavingsCard({analytics, payslips}: { analytics?: TransactionAnalyti
                 />
             </div>
             <div className="flex justify-between text-xs font-medium text-gray-500 dark:text-gray-400 mt-2">
-                <span>{t('dashboard.trueSavings.spent')} {fmtCurrency(currentMonthExpenses, 'EUR')}</span>
-                <span>{t('dashboard.trueSavings.actualNet')} {fmtCurrency(trueNetIncome, 'EUR')}</span>
+                <span>{t('dashboard.trueSavings.spent')} {fmtCurrency(currentMonthExpenses, baseCurrency)}</span>
+                <span>{t('dashboard.trueSavings.actualNet')} {fmtCurrency(trueNetIncome, baseCurrency)}</span>
             </div>
         </div>
     );
@@ -153,7 +154,7 @@ function StatementCard({stmt}: { stmt: BankStatementSummary }) {
     );
 }
 
-function SubscriptionSummaryCard() {
+function SubscriptionSummaryCard({baseCurrency}: { baseCurrency: string }) {
     const {t} = useTranslation();
     const {data: subscriptions = [], isLoading} = useQuery({
         queryKey: ['subscriptions'],
@@ -188,7 +189,7 @@ function SubscriptionSummaryCard() {
                 <div>
                     <p className="text-[10px] text-gray-400 dark:text-gray-500 uppercase tracking-tight">{t('subscriptions.monthlySpend')}</p>
                     <p className="text-2xl font-bold text-gray-900 dark:text-gray-100">
-                        {fmtCurrency(totalMonthly, 'EUR')}
+                        {fmtCurrency(totalMonthly, baseCurrency)}
                     </p>
                 </div>
                 <div className="text-right">
@@ -283,6 +284,11 @@ export default function DashboardPage() {
         queryFn: () => transactionService.fetchAnalytics(hideReconciled),
     });
 
+    const { data: baseCurrency = 'EUR' } = useQuery({
+        queryKey: ['settings', 'BASE_DISPLAY_CURRENCY'],
+        queryFn: () => settingsService.fetchSettings().then((s) => s['BASE_DISPLAY_CURRENCY'] || 'EUR'),
+    });
+
     const isLoading = statementsQuery.isLoading || transactionsQuery.isLoading || analyticsQuery.isLoading;
     const isError = statementsQuery.isError || transactionsQuery.isError || analyticsQuery.isError;
 
@@ -338,7 +344,7 @@ export default function DashboardPage() {
             )}
 
             {/* True Savings Card */}
-            {!isLoading && <TrueSavingsCard analytics={analytics} payslips={payslipsQuery.data}/>}
+            {!isLoading && <TrueSavingsCard analytics={analytics} payslips={payslipsQuery.data} baseCurrency={baseCurrency}/>}
 
             {/* KPI metrics */}
             <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
@@ -351,21 +357,21 @@ export default function DashboardPage() {
                 />
                 <KpiCard
                     label={t('dashboard.kpi.totalIncome')}
-                    value={isLoading ? '…' : (analytics ? fmtCurrency(analytics.total_income, 'EUR') : '—')}
+                    value={isLoading ? '…' : (analytics ? fmtCurrency(analytics.total_income, baseCurrency) : '—')}
                     sub={t('dashboard.kpi.totalIncomeSub')}
                     color="green"
                     icon={<TrendingUp size={20}/>}
                 />
                 <KpiCard
                     label={t('dashboard.kpi.totalExpenses')}
-                    value={isLoading ? '…' : (analytics ? fmtCurrency(analytics.total_expense, 'EUR') : '—')}
+                    value={isLoading ? '…' : (analytics ? fmtCurrency(analytics.total_expense, baseCurrency) : '—')}
                     sub={t('dashboard.kpi.totalExpensesSub')}
                     color="red"
                     icon={<TrendingDown size={20}/>}
                 />
                 <KpiCard
                     label={t('dashboard.kpi.netSavings')}
-                    value={isLoading ? '…' : (analytics ? fmtCurrency(analytics.net_savings, 'EUR') : '—')}
+                    value={isLoading ? '…' : (analytics ? fmtCurrency(analytics.net_savings, baseCurrency) : '—')}
                     sub={t('dashboard.kpi.netSavingsSub')}
                     color={analytics && analytics.net_savings >= 0 ? 'blue' : 'red'}
                     icon={<Wallet size={20}/>}
@@ -420,12 +426,12 @@ export default function DashboardPage() {
                                                     <div
                                                         className="w-4 bg-emerald-400 dark:bg-emerald-500 rounded-t-md transition-all group-hover:opacity-80"
                                                         style={{height: `${Math.max(incPct, pt.income > 0 ? 2 : 0)}%`}}
-                                                        title={`${monthLabel} ${t('dashboard.cashFlow.income')}: ${fmtCurrency(pt.income, 'EUR')}`}
+                                                        title={`${monthLabel} ${t('dashboard.cashFlow.income')}: ${fmtCurrency(pt.income, baseCurrency)}`}
                                                     />
                                                     <div
                                                         className="w-4 bg-rose-400 dark:bg-rose-500 rounded-t-md transition-all group-hover:opacity-80"
                                                         style={{height: `${Math.max(expPct, pt.expense > 0 ? 2 : 0)}%`}}
-                                                        title={`${monthLabel} ${t('dashboard.cashFlow.expense')}: ${fmtCurrency(pt.expense, 'EUR')}`}
+                                                        title={`${monthLabel} ${t('dashboard.cashFlow.expense')}: ${fmtCurrency(pt.expense, baseCurrency)}`}
                                                     />
                                                 </div>
                                                 <span
@@ -461,7 +467,7 @@ export default function DashboardPage() {
                                             <span
                                                 className="text-sm font-medium text-gray-700 dark:text-gray-300 truncate pr-2">{cat.category || t('dashboard.topCategories.uncategorized')}</span>
                                             <span
-                                                className="text-sm text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">{fmtCurrency(cat.amount, 'EUR')}</span>
+                                                className="text-sm text-gray-500 dark:text-gray-400 font-mono whitespace-nowrap">{fmtCurrency(cat.amount, baseCurrency)}</span>
                                         </div>
                                         <div
                                             className="w-full bg-gray-100 dark:bg-gray-800 rounded-full h-2.5 overflow-hidden">
@@ -490,7 +496,7 @@ export default function DashboardPage() {
             {!isLoading && <ForecastingWidget />}
 
             {/* Subscriptions Widget */}
-            {!isLoading && <SubscriptionSummaryCard />}
+            {!isLoading && <SubscriptionSummaryCard baseCurrency={baseCurrency} />}
 
             {/* Swipeable Statements Section */}
             <div>

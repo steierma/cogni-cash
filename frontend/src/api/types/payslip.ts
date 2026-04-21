@@ -1,6 +1,7 @@
 export interface Bonus {
     description: string;
     amount: number;
+    base_amount: number;
 }
 
 export interface Payslip {
@@ -11,9 +12,13 @@ export interface Payslip {
     employer_name: string;
     tax_class: string;
     tax_id: string;
+    currency: string;
     gross_pay: number;
+    base_gross_pay: number;
     net_pay: number;
+    base_net_pay: number;
     payout_amount: number;
+    base_payout_amount: number;
     custom_deductions: number;
     bonuses: Bonus[];
     created_at: string;

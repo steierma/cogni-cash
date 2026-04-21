@@ -1,7 +1,8 @@
 import { useTranslation } from 'react-i18next';
-import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, BarChart3, Slash, Users, RefreshCcw } from 'lucide-react';
+import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, BarChart3, Slash, Users, RefreshCcw, Link as LinkIcon } from 'lucide-react';
 import type { Category } from "../../api/types/category";
 import type { Transaction, PatternExclusion } from "../../api/types/transaction";
+import type { Subscription } from "../../api/types/subscription";
 import { fmtCurrency, fmtDate } from '../../utils/formatters';
 
 export type TxColKey = 'date' | 'description' | 'counterparty' | 'location' | 'reference' | 'category' | 'amount';
@@ -11,6 +12,7 @@ export type SortDir = 'asc' | 'desc';
 interface TransactionTableProps {
     transactions: Transaction[];
     categories: Category[];
+    subscriptions?: Subscription[];
     currentUserId?: string;
     patternExclusions?: PatternExclusion[];
     selectedHashes: Set<string>;
@@ -23,12 +25,15 @@ interface TransactionTableProps {
     onMarkReviewed?: (hash: string) => void;
     onTogglePatternExclusion?: (matchTerm: string, excluded: boolean) => void;
     onCreateSubscription?: (tx: Transaction) => void;
+    onLinkSubscription?: (tx: Transaction) => void;
+    onUnlinkSubscription?: (tx: Transaction) => void;
     visibleCols: Record<TxColKey, boolean>;
 }
 
 export default function TransactionTable({
                                              transactions,
                                              categories,
+                                             subscriptions = [],
                                              currentUserId,
                                              patternExclusions = [],
                                              selectedHashes,
@@ -41,6 +46,8 @@ export default function TransactionTable({
                                              onMarkReviewed,
                                              onTogglePatternExclusion,
                                              onCreateSubscription,
+                                             onLinkSubscription,
+                                             onUnlinkSubscription,
                                              visibleCols
                                          }: TransactionTableProps) {
     const { t } = useTranslation();
@@ -171,6 +178,14 @@ export default function TransactionTable({
                                                             <Unlink size={9} /> {t('transactions.table.reconciled')}
                                                         </span>
                                                     )}
+                                                    {tx.subscription_id && (
+                                                        <span 
+                                                            title={subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name ?? t('subscriptions.title')} 
+                                                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800/50 shrink-0 uppercase tracking-tighter"
+                                                        >
+                                                            <RefreshCcw size={9} /> {subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name ?? t('subscriptions.title')}
+                                                        </span>
+                                                    )}
                                                     {!tx.bank_statement_id && (
                                                         <span title={t('transactions.table.liveFeed')} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0">
                                                             {t('transactions.table.liveFeed')}
@@ -237,9 +252,16 @@ export default function TransactionTable({
 
                                 {visibleCols.amount && (
                                     <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${isSkipped ? 'opacity-40' : tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                                            <span className="inline-flex items-center gap-1 justify-end w-full">
-                                                {tx.amount >= 0 ? <TrendingUp size={11} className={isSkipped ? '' : "text-green-500 dark:text-green-400"} /> : <TrendingDown size={11} className={isSkipped ? '' : "text-red-400 dark:text-red-500"} />}
-                                                {fmtCurrency(tx.amount, tx.currency)}
+                                            <span className="flex flex-col items-end">
+                                                <span className="inline-flex items-center gap-1 justify-end w-full">
+                                                    {tx.amount >= 0 ? <TrendingUp size={11} className={isSkipped ? '' : "text-green-500 dark:text-green-400"} /> : <TrendingDown size={11} className={isSkipped ? '' : "text-red-400 dark:text-red-500"} />}
+                                                    {fmtCurrency(tx.amount, tx.currency)}
+                                                </span>
+                                                {tx.base_currency && tx.base_currency !== tx.currency && tx.base_amount !== 0 && (
+                                                    <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal">
+                                                        {fmtCurrency(tx.base_amount, tx.base_currency)}
+                                                    </span>
+                                                )}
                                             </span>
                                     </td>
                                 )}
@@ -275,6 +297,26 @@ export default function TransactionTable({
                                                 title={t('transactions.createSubscription', 'Create Subscription')}
                                             >
                                                 <RefreshCcw size={16} />
+                                            </button>
+                                        )}
+
+                                        {tx.amount < 0 && !tx.subscription_id && !tx.is_prediction && onLinkSubscription && (
+                                            <button
+                                                onClick={() => onLinkSubscription(tx)}
+                                                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                title={t('subscriptions.linkTransaction', 'Link to Subscription')}
+                                            >
+                                                <LinkIcon size={16} />
+                                            </button>
+                                        )}
+
+                                        {tx.subscription_id && onUnlinkSubscription && (
+                                            <button
+                                                onClick={() => onUnlinkSubscription(tx)}
+                                                className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                title={t('subscriptions.unlinkTransaction', 'Unlink from Subscription')}
+                                            >
+                                                <Unlink size={16} />
                                             </button>
                                         )}
                                     </div>

@@ -130,6 +130,10 @@ func (m *mockRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string,
 	return nil
 }
 
+func (m *mockRepo) UpdateTransactionBaseAmount(_ context.Context, _ string, _ float64, _ string, _ uuid.UUID) error {
+	return nil
+}
+
 func (m *mockRepo) LinkTransactionToStatement(_ context.Context, id uuid.UUID, stmtID uuid.UUID, _ uuid.UUID) error {
 	m.linkedTxIDs = append(m.linkedTxIDs, id)
 	m.linkedStmtIDs = append(m.linkedStmtIDs, stmtID)
@@ -197,7 +201,7 @@ func TestBankStatementService_ImportFromDirectory(t *testing.T) {
 		AccountHolder: "Test",
 		IBAN:          "DE12345678901234567890",
 		StatementDate: time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC),
-		Transactions:  []entity.Transaction{{Amount: 100.0}},
+		Transactions:  []entity.Transaction{{Amount: 100.0, BaseAmount: 100.0}},
 	}}
 	svc := setupTestBankStatementService(parser, repo)
 
@@ -220,7 +224,7 @@ func TestBankStatementService_ImportFromFile_HappyPath(t *testing.T) {
 		Currency:      "EUR",
 		StatementDate: time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC),
 		Transactions: []entity.Transaction{
-			{BookingDate: time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), Amount: 1300.00, Description: "Gutschrift Max Mustermann"},
+			{BookingDate: time.Date(2026, 2, 2, 0, 0, 0, 0, time.UTC), Amount: 1300.00, BaseAmount: 1300.00, Description: "Gutschrift Max Mustermann"},
 		},
 	}
 
@@ -246,6 +250,7 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicates(t *testing.T) {
 	existingTx := entity.Transaction{
 		BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		Amount:      -50.0,
+		BaseAmount:  -50.0,
 		Description: "Grocery Store",
 	}
 
@@ -261,11 +266,13 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicates(t *testing.T) {
 			{
 				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 				Amount:      -50.0,
+				BaseAmount:  -50.0,
 				Description: "Grocery Store",
 			},
 			{
 				BookingDate: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC),
 				Amount:      -20.0,
+				BaseAmount:  -20.0,
 				Description: "Bakery",
 			},
 		},
@@ -293,6 +300,7 @@ func TestBankStatementService_ImportFromFile_DoesNotSkipSameDateAmountDifferentT
 			{
 				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 				Amount:      -50.0,
+				BaseAmount:  -50.0,
 				Description: "Fuel Station",
 				Reference:   "REF-111",
 			},
@@ -307,6 +315,7 @@ func TestBankStatementService_ImportFromFile_DoesNotSkipSameDateAmountDifferentT
 			{
 				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 				Amount:      -50.0,
+				BaseAmount:  -50.0,
 				Description: "Grocery Store",
 				Reference:   "REF-222",
 			},
@@ -335,6 +344,7 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicatesWithNormalizedText(t
 			{
 				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 				Amount:      -50.0,
+				BaseAmount:  -50.0,
 				Description: "AMAZON   EU S.A.R.L.",
 			},
 		},
@@ -348,11 +358,13 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicatesWithNormalizedText(t
 			{
 				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 				Amount:      -50.0,
+				BaseAmount:  -50.0,
 				Description: "amazon eu sarl",
 			},
 			{
 				BookingDate: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC),
 				Amount:      -12.0,
+				BaseAmount:  -12.0,
 				Description: "Bakery",
 			},
 		},
@@ -395,6 +407,7 @@ func TestBankStatementService_ImportFromFile_LinksExistingTransactions(t *testin
 				ID:          existingTxID,
 				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 				Amount:      -50.0,
+				BaseAmount:  -50.0,
 				Description: "AMAZON   EU S.A.R.L.",
 			},
 		},
@@ -408,6 +421,7 @@ func TestBankStatementService_ImportFromFile_LinksExistingTransactions(t *testin
 			{
 				BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 				Amount:      -50.0,
+				BaseAmount:  -50.0,
 				Description: "amazon eu sarl", // Fuzzy match
 			},
 		},
@@ -485,12 +499,14 @@ func TestReconcileStatements_Success(t *testing.T) {
 	settlementTx := entity.Transaction{
 		BookingDate:   time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
 		Amount:        -1994.14,
+		BaseAmount:    -1994.14,
 		ContentHash:   "settlementhash123",
 		StatementType: entity.StatementTypeGiro,
 	}
 	targetTx := entity.Transaction{
 		BookingDate:   time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC),
 		Amount:        1994.14,
+		BaseAmount:    1994.14,
 		ContentHash:   "targethash456",
 		StatementType: entity.StatementTypeCreditCard,
 	}
@@ -539,10 +555,10 @@ func TestAnalytics_ExcludesReconciledTx(t *testing.T) {
 
 	repo := &mockRepo{
 		existingTxns: []entity.Transaction{
-			{BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Amount: 3000.0, CategoryID: &catID1, Description: "Employer"},
-			{BookingDate: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), Amount: -100.0, CategoryID: &catID2, Description: "Supermarket"},
-			{BookingDate: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), Amount: -500.0, CategoryID: nil, Description: "Internal Transfer Leg 1", IsReconciled: true},
-			{BookingDate: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), Amount: 500.0, CategoryID: nil, Description: "Internal Transfer Leg 2", IsReconciled: true},
+			{BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Amount: 3000.0, BaseAmount: 3000.0, CategoryID: &catID1, Description: "Employer"},
+			{BookingDate: time.Date(2026, 3, 2, 0, 0, 0, 0, time.UTC), Amount: -100.0, BaseAmount: -100.0, CategoryID: &catID2, Description: "Supermarket"},
+			{BookingDate: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), Amount: -500.0, BaseAmount: -500.0, CategoryID: nil, Description: "Internal Transfer Leg 1", IsReconciled: true},
+			{BookingDate: time.Date(2026, 3, 3, 0, 0, 0, 0, time.UTC), Amount: 500.0, BaseAmount: 500.0, CategoryID: nil, Description: "Internal Transfer Leg 2", IsReconciled: true},
 		},
 	}
 
@@ -574,8 +590,8 @@ func TestAnalytics_ExcludesReconciledTx(t *testing.T) {
 func TestReconciliationService_SuggestReconciliations_FindsMatches(t *testing.T) {
 	repo := &mockRepo{
 		existingTxns: []entity.Transaction{
-			{BookingDate: time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC), Amount: -200, ContentHash: "giro1", StatementType: entity.StatementTypeGiro},
-			{BookingDate: time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC), Amount: 200, ContentHash: "cc1", StatementType: entity.StatementTypeCreditCard},
+			{BookingDate: time.Date(2026, 3, 10, 0, 0, 0, 0, time.UTC), Amount: -200, BaseAmount: -200, ContentHash: "giro1", StatementType: entity.StatementTypeGiro},
+			{BookingDate: time.Date(2026, 3, 11, 0, 0, 0, 0, time.UTC), Amount: 200, BaseAmount: 200, ContentHash: "cc1", StatementType: entity.StatementTypeCreditCard},
 		},
 	}
 	svc := service.NewReconciliationService(repo, nil, setupLogger())
@@ -597,8 +613,8 @@ func TestReconciliationService_SuggestReconciliations_FindsMatches(t *testing.T)
 func TestReconciliationService_SuggestReconciliations_OutsideWindow(t *testing.T) {
 	repo := &mockRepo{
 		existingTxns: []entity.Transaction{
-			{BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Amount: -500, ContentHash: "giro1", StatementType: entity.StatementTypeGiro},
-			{BookingDate: time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC), Amount: 500, ContentHash: "cc1", StatementType: entity.StatementTypeCreditCard},
+			{BookingDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC), Amount: -500, BaseAmount: -500, ContentHash: "giro1", StatementType: entity.StatementTypeGiro},
+			{BookingDate: time.Date(2026, 3, 20, 0, 0, 0, 0, time.UTC), Amount: 500, BaseAmount: 500, ContentHash: "cc1", StatementType: entity.StatementTypeCreditCard},
 		},
 	}
 	svc := service.NewReconciliationService(repo, nil, setupLogger())
@@ -624,6 +640,7 @@ func TestStartAutoCategorizeAsync_Success(t *testing.T) {
 			ContentHash: uuid.NewString(),
 			Description: "Test Vendor",
 			Amount:      -10.0,
+			BaseAmount:  -10.0,
 			CategoryID:  nil,
 		})
 	}

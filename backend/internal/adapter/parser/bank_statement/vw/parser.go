@@ -34,6 +34,10 @@ func (p *Parser) Parse(ctx context.Context, _ uuid.UUID, fileBytes []byte) (enti
 	// 2. Otherwise try PDF
 	rawText, err := pdfutil.ExtractText(fileBytes)
 	if err != nil {
+		// If it's not a PDF, it's definitely not a VW PDF. Return FormatMismatch so the chain continues.
+		if strings.Contains(err.Error(), "not a PDF file") {
+			return entity.BankStatement{}, ErrFormatMismatch
+		}
 		return entity.BankStatement{}, fmt.Errorf("vw parser: failed to read pdf: %w", err)
 	}
 

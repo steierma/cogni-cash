@@ -5,9 +5,11 @@ import (
 	"encoding/json"
 	"log/slog"
 	"mime"
+	"net"
 	"net/http"
 	"path/filepath"
 	"strings"
+	"sync"
 
 	"cogni-cash/internal/domain/port"
 
@@ -41,6 +43,9 @@ type Handler struct {
 	bankStmtRepo          port.BankStatementRepository
 	reconciliationRepo    port.ReconciliationRepository
 	Logger                *slog.Logger
+	LogLevel              *slog.LevelVar
+	AppCtx                context.Context
+	WaitGroup             *sync.WaitGroup
 	storageMode           string
 	dbHost                string
 	dbPinger              func(context.Context) error
@@ -77,6 +82,8 @@ func NewHandler(
 	storageMode string,
 	dbHost string,
 	dbPinger func(context.Context) error,
+	appCtx context.Context,
+	wg *sync.WaitGroup,
 ) *Handler {
 	if logger == nil {
 		logger = slog.Default()
@@ -88,14 +95,26 @@ func NewHandler(
 		settingsSvc:      settingsSvc,
 		bankSvc:          bankSvc,
 		Logger:           logger,
+		AppCtx:           appCtx,
+		WaitGroup:        wg,
 		storageMode:      storageMode,
 		dbHost:           dbHost,
 		dbPinger:         dbPinger,
 	}
 }
 
+func (h *Handler) WithLogLevel(v *slog.LevelVar) *Handler {
+	h.LogLevel = v
+	return h
+}
+
 func (h *Handler) WithBankService(svc port.BankUseCase) *Handler {
 	h.bankSvc = svc
+	return h
+}
+
+func (h *Handler) WithInvoiceService(svc port.InvoiceUseCase) *Handler {
+	h.invoiceSvc = svc
 	return h
 }
 
@@ -191,7 +210,9 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 			r.Get("/auth/me/", h.getMe) // MUST BE OUTSIDE ADMIN MIDDLEWARE
 
 			r.With(h.adminMiddleware).Get("/system/info/", h.getSystemInfo)
-			
+			r.With(h.adminMiddleware).Get("/system/log-level/", h.getLogLevel)
+			r.With(h.adminMiddleware).Put("/system/log-level/", h.updateLogLevel)
+
 			r.Route("/users/", func(r chi.Router) {
 				r.Use(h.adminMiddleware) // ONLY ADMINS CAN ACCESS THESE
 				r.Get("/", h.listUsers)
@@ -213,6 +234,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 
 			r.Route("/invoices/", func(r chi.Router) {
 				r.Get("/", h.listInvoices)
+				r.Post("/", h.importManual)
 				r.Post("/import/", h.importInvoice)
 				r.Get("/{id}/", h.getInvoice)
 				r.Put("/{id}/", h.updateInvoice)
@@ -243,6 +265,8 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Post("/{id}/preview-cancellation/", h.PreviewCancellation)
 				r.Post("/{id}/cancel/", h.CancelSubscription)
 				r.Get("/{id}/events/", h.GetSubscriptionEvents)
+				r.Post("/{id}/transactions/{hash}/link/", h.LinkTransaction)
+				r.Delete("/{id}/transactions/{hash}/unlink/", h.UnlinkTransaction)
 				r.Post("/from-transaction/", h.CreateSubscriptionFromTransaction)
 			})
 
@@ -416,4 +440,22 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 
 func writeError(w http.ResponseWriter, status int, msg string) {
 	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func (h *Handler) getClientIP(r *http.Request) string {
+	// 1. Check X-Forwarded-For (standard for proxies)
+	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+		// Take the first IP in the list
+		parts := strings.Split(xff, ",")
+		return strings.TrimSpace(parts[0])
+	}
+
+	// 2. Check X-Real-IP
+	if xri := r.Header.Get("X-Real-IP"); xri != "" {
+		return xri
+	}
+
+	// 3. Fallback to RemoteAddr
+	ip, _, _ := net.SplitHostPort(r.RemoteAddr)
+	return ip
 }

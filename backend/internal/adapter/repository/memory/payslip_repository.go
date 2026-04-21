@@ -1,51 +1,34 @@
 package memory
 
 import (
+	"cogni-cash/internal/domain/entity"
+	"cogni-cash/internal/domain/port"
 	"context"
 	"fmt"
 	"net/http"
 	"strings"
 	"sync"
 
-	"cogni-cash/internal/domain/entity"
-	"cogni-cash/internal/domain/port"
-
 	"github.com/google/uuid"
 )
 
-const maxPayslips = 100
-
 type PayslipRepository struct {
-	mu       sync.RWMutex
 	payslips map[string]entity.Payslip
-	order    []string
+	mu       sync.RWMutex
 }
 
 func NewPayslipRepository() *PayslipRepository {
 	return &PayslipRepository{
 		payslips: make(map[string]entity.Payslip),
-		order:    make([]string, 0, maxPayslips),
 	}
 }
 
 func (r *PayslipRepository) Save(ctx context.Context, payslip *entity.Payslip) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-
 	if payslip.ID == "" {
 		payslip.ID = uuid.New().String()
 	}
-
-	if _, exists := r.payslips[payslip.ID]; !exists {
-		if len(r.order) >= maxPayslips {
-			// Evict oldest
-			oldestID := r.order[0]
-			delete(r.payslips, oldestID)
-			r.order = r.order[1:]
-		}
-		r.order = append(r.order, payslip.ID)
-	}
-
 	r.payslips[payslip.ID] = *payslip
 	return nil
 }
@@ -61,11 +44,11 @@ func (r *PayslipRepository) ExistsByHash(ctx context.Context, hash string, userI
 	return false, nil
 }
 
-func (r *PayslipRepository) ExistsByOriginalFileName(ctx context.Context, originalFileName string, userID uuid.UUID) (bool, error) {
+func (r *PayslipRepository) ExistsByOriginalFileName(ctx context.Context, fileName string, userID uuid.UUID) (bool, error) {
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, p := range r.payslips {
-		if p.OriginalFileName == originalFileName && p.UserID == userID {
+		if p.OriginalFileName == fileName && p.UserID == userID {
 			return true, nil
 		}
 	}
@@ -78,22 +61,11 @@ func (r *PayslipRepository) FindAll(ctx context.Context, filter entity.PayslipFi
 	var payslips []entity.Payslip
 	for _, p := range r.payslips {
 		if p.UserID == filter.UserID {
-			if filter.Employer != "" && p.EmployerName != filter.Employer {
-				continue
-			}
 			payslips = append(payslips, p)
 		}
 	}
 
-	// Simple sort by period DESC
-	for i := 0; i < len(payslips); i++ {
-		for j := i + 1; j < len(payslips); j++ {
-			if payslips[i].PeriodYear < payslips[j].PeriodYear || (payslips[i].PeriodYear == payslips[j].PeriodYear && payslips[i].PeriodMonthNum < payslips[j].PeriodMonthNum) {
-				payslips[i], payslips[j] = payslips[j], payslips[i]
-			}
-		}
-	}
-
+	// Simple pagination
 	if filter.Offset >= len(payslips) {
 		return []entity.Payslip{}, nil
 	}
@@ -127,6 +99,21 @@ func (r *PayslipRepository) Update(ctx context.Context, payslip *entity.Payslip)
 	return nil
 }
 
+func (r *PayslipRepository) UpdateBaseAmount(ctx context.Context, id string, baseGross, baseNet, basePayout float64, currency string, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.payslips[id]
+	if !ok || p.UserID != userID {
+		return entity.ErrPayslipNotFound
+	}
+	p.BaseGrossPay = baseGross
+	p.BaseNetPay = baseNet
+	p.BasePayoutAmount = basePayout
+	p.Currency = currency
+	r.payslips[id] = p
+	return nil
+}
+
 func (r *PayslipRepository) Delete(ctx context.Context, id string, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -150,7 +137,7 @@ func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, user
 	if len(p.OriginalFileContent) > 0 {
 		mimeType = http.DetectContentType(p.OriginalFileContent)
 		if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
-			mimeType = mimeType[:idx]
+			mimeType = mimeType[0:idx]
 		}
 	}
 
@@ -182,11 +169,11 @@ func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (e
 
 	for i := range userPayslips {
 		p := &userPayslips[i]
-		summary.TotalGross += p.GrossPay
-		summary.TotalNet += p.NetPay
-		summary.TotalPayout += p.PayoutAmount
+		summary.TotalGross += p.BaseGrossPay
+		summary.TotalNet += p.BaseNetPay
+		summary.TotalPayout += p.BasePayoutAmount
 		for _, b := range p.Bonuses {
-			summary.TotalBonuses += b.Amount
+			summary.TotalBonuses += b.BaseAmount
 		}
 
 		if latest == nil || p.PeriodYear > latest.PeriodYear || (p.PeriodYear == latest.PeriodYear && p.PeriodMonthNum > latest.PeriodMonthNum) {
@@ -198,23 +185,22 @@ func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (e
 	}
 
 	if latest != nil {
-		summary.LatestNetPay = latest.NetPay
+		summary.LatestNetPay = latest.BaseNetPay
 		summary.LatestPeriod = fmt.Sprintf("%04d-%02d", latest.PeriodYear, latest.PeriodMonthNum)
 
-		if previous != nil && previous.NetPay > 0 {
-			summary.NetPayTrend = ((latest.NetPay - previous.NetPay) / previous.NetPay) * 100
+		if previous != nil && previous.BaseNetPay > 0 {
+			summary.NetPayTrend = ((latest.BaseNetPay - previous.BaseNetPay) / previous.BaseNetPay) * 100
 		}
 	}
 
 	// For simple memory repo, just take last 12 from whatever order we have
-	// (In a real scenario, we'd sort them properly)
 	trendCount := 0
 	for i := len(userPayslips) - 1; i >= 0 && trendCount < 12; i-- {
 		p := userPayslips[i]
 		summary.Trends = append([]entity.PayslipTrend{{
 			Period: fmt.Sprintf("%04d-%02d", p.PeriodYear, p.PeriodMonthNum),
-			Gross:  p.GrossPay,
-			Net:    p.NetPay,
+			Gross:  p.BaseGrossPay,
+			Net:    p.BaseNetPay,
 		}}, summary.Trends...)
 		trendCount++
 	}

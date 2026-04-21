@@ -26,7 +26,7 @@ func TestDocumentRepository(t *testing.T) {
 	t.Run("Save and FindByID with binary content", func(t *testing.T) {
 		// Binary content that contains non-UTF8 bytes (e.g., 0xbf, 0xff)
 		binaryContent := []byte{0x25, 0x50, 0x44, 0x46, 0x2d, 0x31, 0x2e, 0x34, 0x0a, 0xbf, 0xff, 0x12, 0x34}
-		
+
 		doc := entity.Document{
 			UserID:              userID,
 			Type:                entity.DocTypeTaxCertificate,
@@ -63,7 +63,7 @@ func TestDocumentRepository(t *testing.T) {
 	t.Run("Update", func(t *testing.T) {
 		docs, _ := repo.FindAll(ctx, entity.DocumentFilter{UserID: userID})
 		doc := docs[0]
-		
+
 		newName := "updated.pdf"
 		newType := entity.DocTypeReceipt
 		doc.OriginalFileName = newName
@@ -90,10 +90,10 @@ func TestDocumentRepository(t *testing.T) {
 	})
 
 	t.Run("Save - Duplicate Hash", func(t *testing.T) {
-		// Since we deleted hash123 in the Delete test, let's re-save it first if needed, 
-		// or use a fresh one. 
+		// Since we deleted hash123 in the Delete test, let's re-save it first if needed,
+		// or use a fresh one.
 		// Actually, let's just save one and then try to save again.
-		
+
 		docFresh := entity.Document{
 			UserID:           userID,
 			Type:             entity.DocTypeOther,

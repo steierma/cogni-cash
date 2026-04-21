@@ -10,7 +10,7 @@ import (
 
 type BankProvider interface {
 	GetInstitutions(ctx context.Context, userID uuid.UUID, countryCode string, isSandbox bool) ([]entity.BankInstitution, error)
-	CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool) (*entity.BankConnection, error)
+	CreateRequisition(ctx context.Context, userID uuid.UUID, institutionID, institutionName, country, redirectURL, referenceID string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error)
 	ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error)
 	GetRequisitionStatus(ctx context.Context, userID uuid.UUID, requisitionID string) (entity.ConnectionStatus, error)
 	FetchAccounts(ctx context.Context, userID uuid.UUID, requisitionID string) ([]entity.BankAccount, error)

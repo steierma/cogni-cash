@@ -100,3 +100,7 @@ func (s *UserService) DeleteUser(ctx context.Context, idStr string) error {
 	s.logger.Info("Deleting user", "id", id)
 	return s.repo.Delete(ctx, id)
 }
+
+func (s *UserService) GetAdminID(ctx context.Context) (uuid.UUID, error) {
+	return s.repo.GetAdminID(ctx)
+}

@@ -14,6 +14,7 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -24,6 +25,7 @@ import (
 
 	dynamicbank "cogni-cash/internal/adapter/bank/dynamic"
 	mockbank "cogni-cash/internal/adapter/bank/mock"
+	currencyadapter "cogni-cash/internal/adapter/currency"
 	smtpadapter "cogni-cash/internal/adapter/email/smtp"
 	httpAdapter "cogni-cash/internal/adapter/http"
 	llmadapter "cogni-cash/internal/adapter/ollama"
@@ -42,11 +44,13 @@ import (
 )
 
 func main() {
-	logLevel := slog.LevelInfo
+	logLevelVar := &slog.LevelVar{}
+	logLevelVar.Set(slog.LevelInfo)
 	if strings.EqualFold(os.Getenv("LOG_LEVEL"), "debug") {
-		logLevel = slog.LevelDebug
+		logLevelVar.Set(slog.LevelDebug)
 	}
-	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true, Level: logLevel}))
+
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true, Level: logLevelVar}))
 	addr := envOrDefault("SERVER_ADDR", ":8080")
 
 	jwtSecret := os.Getenv("JWT_SECRET")
@@ -166,6 +170,25 @@ func main() {
 
 	ensureDefaultSettings(appCtx, settingsRepo, userRepo, logger)
 
+	// Apply saved log level
+	if savedLevel, err := settingsRepo.Get(appCtx, "log_level", adminID); err == nil && savedLevel != "" {
+		var l slog.Level
+		switch strings.ToUpper(savedLevel) {
+		case "DEBUG":
+			l = slog.LevelDebug
+		case "INFO":
+			l = slog.LevelInfo
+		case "WARN":
+			l = slog.LevelWarn
+		case "ERROR":
+			l = slog.LevelError
+		default:
+			l = slog.LevelInfo
+		}
+		logLevelVar.Set(l)
+		logger.Info("Initial log level applied from settings", "level", l.String())
+	}
+
 	// --- Lade Enable Banking Key aus Environment ---
 	ebPrivateKey, err := loadEnableBankingKey(logger)
 	if err != nil {
@@ -195,20 +218,26 @@ func main() {
 	// Inject the text extractor into the LLM adapter so it can handle the fallback internally
 	llmClient := llmadapter.NewAdapter(settingsRepo, invoiceFileParser, logger)
 
-	invoiceSvc := service.NewInvoiceService(invoiceRepo, categoryRepo, sharingRepo, notificationSvc, userRepo, invoiceFileParser, llmClient, logger)
+	invoiceSvc := service.NewInvoiceService(invoiceRepo, llmClient, invoiceFileParser, categoryRepo, sharingRepo, logger)
 
 	discoverySvc := service.NewDiscoveryService(bankStmtRepo, subscriptionRepo, userRepo, settingsRepo, llmClient, llmClient, emailProvider, logger)
 
 	reconciliationSvc := service.NewReconciliationService(bankStmtRepo, reconciliationRepo, logger)
 	plannedTransactionSvc := service.NewPlannedTransactionService(plannedTransactionRepo)
 
+	// --- Currency Service ---
+	currencyAdapter := currencyadapter.NewFrankfurterExchangeRateAdapter()
+	currencySvc := service.NewCurrencyService(currencyAdapter, settingsRepo, bankStmtRepo, invoiceRepo, payslipRepo, logger)
+
 	// Inject the LLMClient (which satisfies port.BankStatementAIParser)
 	bankStatementSvc := service.NewBankStatementService(bankStmtRepo, logger).
 		WithPlannedTransactionService(plannedTransactionSvc).
 		WithDiscoveryService(discoverySvc).
-		WithAIParser(llmClient)
+		WithAIParser(llmClient).
+		WithCurrencyService(currencySvc)
 
 	transactionSvc := service.NewTransactionService(bankStmtRepo, categoryRepo, settingsRepo, llmClient, logger)
+	invoiceSvc = invoiceSvc.WithCurrencyService(currencySvc)
 	sharingSvc := service.NewSharingService(categoryRepo, invoiceRepo, sharingRepo, bankStmtRepo, userRepo, logger)
 
 	var bankProvider port.BankProvider
@@ -220,7 +249,7 @@ func main() {
 
 	bankSvc := service.NewBankService(bankRepo, bankStmtRepo, settingsRepo, plannedTransactionSvc, bankProvider, logger).
 		WithDiscoveryService(discoverySvc)
-	forecastingSvc := service.NewForecastingService(bankStmtRepo, bankRepo, categoryRepo, payslipRepo, plannedTransactionRepo, forecastingRepo, logger)
+	forecastingSvc := service.NewForecastingService(bankStmtRepo, bankRepo, categoryRepo, payslipRepo, plannedTransactionRepo, forecastingRepo, settingsRepo, currencyAdapter, logger)
 
 	// If using dynamic adapter (Postgres mode), decide if we allow mock interception
 	if storageMode != "memory" {
@@ -240,12 +269,17 @@ func main() {
 	// --- Payslip Service ---
 	cariadParser := cariadparser.NewParser(logger)
 	// Inject the LLMClient (which satisfies port.PayslipAIParser)
-	payslipSvc := service.NewPayslipService(payslipRepo, cariadParser, llmClient, logger)
+	payslipSvc := service.NewPayslipService(payslipRepo, cariadParser, llmClient, logger).
+		WithCurrencyService(currencySvc)
 
 	documentSvc := service.NewDocumentService(documentRepo, llmClient, payslipRepo, invoiceRepo)
 
 	// --- Background Workers ---
+	var wg sync.WaitGroup
+
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		logger.Info("Background worker: Auto-import started")
 		for {
 			dir, _ := settingsRepo.Get(appCtx, "import_dir", adminID)
@@ -269,7 +303,9 @@ func main() {
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		logger.Info("Background worker: Auto-categorization started")
 		for {
 			enabledStr, _ := settingsRepo.Get(appCtx, "auto_categorization_enabled", adminID)
@@ -308,7 +344,9 @@ func main() {
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		logger.Info("Background worker: Payslip JSON import started")
 		for {
 			jsonPath, _ := settingsRepo.Get(appCtx, "payslip_import_json_path", adminID)
@@ -332,7 +370,9 @@ func main() {
 		}
 	}()
 
+	wg.Add(1)
 	go func() {
+		defer wg.Done()
 		logger.Info("Background worker: Smart Bank Sync started")
 		for {
 			enabledStr, _ := settingsRepo.Get(appCtx, "bank_sync_enabled", adminID)
@@ -390,7 +430,8 @@ func main() {
 	}()
 
 	// --- HTTP Handler Setup ---
-	handler := httpAdapter.NewHandler(authSvc, invoiceSvc, bankStatementSvc, settingsSvc, bankSvc, logger, storageMode, dbHost, dbPinger)
+	handler := httpAdapter.NewHandler(authSvc, invoiceSvc, bankStatementSvc, settingsSvc, bankSvc, logger, storageMode, dbHost, dbPinger, appCtx, &wg)
+	handler.WithLogLevel(logLevelVar)
 
 	handler.WithUserService(userSvc)
 	handler.WithTransactionService(transactionSvc)
@@ -428,9 +469,10 @@ func main() {
 	logger.Info("Shutdown signal received. Initiating graceful shutdown...")
 
 	appCancel()
-	logger.Info("Signalled background workers to stop")
+	transactionSvc.CancelJob()
+	logger.Info("Signalled background workers and active jobs to stop")
 
-	shutCtx, srvCancel := context.WithTimeout(context.Background(), 10*time.Second)
+	shutCtx, srvCancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer srvCancel()
 
 	logger.Info("Shutting down HTTP server...")
@@ -438,6 +480,20 @@ func main() {
 		logger.Error("HTTP server shutdown forced or timed out", "error", err)
 	} else {
 		logger.Info("HTTP server shut down cleanly")
+	}
+
+	// Wait for background workers with a timeout
+	waitCh := make(chan struct{})
+	go func() {
+		wg.Wait()
+		close(waitCh)
+	}()
+
+	select {
+	case <-waitCh:
+		logger.Info("All background workers shut down cleanly")
+	case <-time.After(15 * time.Second):
+		logger.Warn("Timed out waiting for background workers to shut down")
 	}
 
 	if pool != nil {
@@ -481,6 +537,7 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, us
 		"bank_sync_enabled":                         "true",
 		"bank_sync_interval":                        "1h",
 		"bank_sync_next_run":                        "",
+		"log_level":                                 envOrDefault("LOG_LEVEL", "INFO"),
 		"enablebanking_app_id":                      envOrDefault("ENABLEBANKING_APP_ID", ""),
 		"smtp_host":                                 envOrDefault("SMTP_HOST", ""),
 		"smtp_port":                                 envOrDefault("SMTP_PORT", "587"),
@@ -490,7 +547,7 @@ func ensureDefaultSettings(ctx context.Context, repo port.SettingsRepository, us
 		"subscription_lookback_years":               "3",
 		"subscription_discovery_amount_tolerance":   "0.10",
 		"subscription_discovery_min_transactions_generic": "3",
-		"subscription_discovery_date_tolerance":     "3.0",
+		"subscription_discovery_date_tolerance":           "3.0",
 	}
 
 	envOverrideKeys := map[string]string{

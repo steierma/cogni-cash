@@ -28,6 +28,7 @@ import {
 } from 'recharts';
 import { forecastingService } from '../api/services/forecastingService';
 import { categoryService } from '../api/services/categoryService';
+import { settingsService } from '../api/services/settingsService';
 import type { CashFlowForecast, PatternExclusion } from "../api/types/transaction";
 import type { Category } from "../api/types/category";
 import { fmtCurrency, fmtDate } from '../utils/formatters';
@@ -37,24 +38,25 @@ interface CustomTooltipProps {
     payload?: any[];
     label?: string;
     t: (key: string, options?: any) => string;
+    baseCurrency: string;
 }
 
-const CustomTooltip = ({ active, payload, label, t }: CustomTooltipProps) => {
+const CustomTooltip = ({ active, payload, label, t, baseCurrency }: CustomTooltipProps) => {
     if (active && payload && payload.length) {
         return (
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 p-3 shadow-lg rounded-lg text-sm">
                 <p className="font-bold text-gray-900 dark:text-gray-100 mb-1">{fmtDate(label ?? '')}</p>
                 <p className="text-indigo-600 dark:text-indigo-400 font-medium">
-                    {t('forecasting.projectedBalance')}: {fmtCurrency(payload[0].value, 'EUR')}
+                    {t('forecasting.projectedBalance')}: {fmtCurrency(payload[0].value, baseCurrency)}
                 </p>
                 {payload[0].payload.income > 0 && (
                     <p className="text-emerald-600 dark:text-emerald-400 text-xs">
-                        +{fmtCurrency(payload[0].payload.income, 'EUR')} {t('dashboard.cashFlow.income')}
+                        +{fmtCurrency(payload[0].payload.income, baseCurrency)} {t('dashboard.cashFlow.income')}
                     </p>
                 )}
                 {payload[0].payload.expense > 0 && (
                     <p className="text-rose-600 dark:text-rose-400 text-xs">
-                        -{fmtCurrency(payload[0].payload.expense, 'EUR')} {t('dashboard.cashFlow.expense')}
+                        -{fmtCurrency(payload[0].payload.expense, baseCurrency)} {t('dashboard.cashFlow.expense')}
                     </p>
                 )}
             </div>
@@ -138,6 +140,11 @@ export default function ForecastingPage() {
     const categoriesQuery = useQuery<Category[]>({
         queryKey: ['categories'],
         queryFn: () => categoryService.fetchCategories(),
+    });
+
+    const { data: baseCurrency = 'EUR' } = useQuery({
+        queryKey: ['settings', 'BASE_DISPLAY_CURRENCY'],
+        queryFn: () => settingsService.fetchSettings().then((s) => s['BASE_DISPLAY_CURRENCY'] || 'EUR'),
     });
 
     const excludeMutation = useMutation({
@@ -274,7 +281,7 @@ export default function ForecastingPage() {
                 <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
                     <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">{t('forecasting.currentBalance')}</p>
                     <p className="text-3xl font-black text-gray-900 dark:text-gray-100">
-                        {isLoading ? '...' : fmtCurrency(currentBalance, 'EUR')}
+                        {isLoading ? '...' : fmtCurrency(currentBalance, baseCurrency)}
                     </p>
                 </div>
 
@@ -283,12 +290,12 @@ export default function ForecastingPage() {
                         <p className="text-xs text-gray-400 dark:text-gray-500 uppercase tracking-wide mb-1">{t('forecasting.projectedBalance')}</p>
                         <div className="flex items-end gap-3">
                             <p className="text-3xl font-black text-gray-900 dark:text-gray-100">
-                                {isLoading ? '...' : fmtCurrency(projectedBalance, 'EUR')}
+                                {isLoading ? '...' : fmtCurrency(projectedBalance, baseCurrency)}
                             </p>
                             {!isLoading && (
                                 <span className={`text-sm font-bold pb-1 flex items-center gap-0.5 ${balanceDiff >= 0 ? 'text-emerald-600 dark:text-emerald-400' : 'text-rose-600 dark:text-rose-400'}`}>
                                     {balanceDiff >= 0 ? <TrendingUp size={16} /> : <TrendingDown size={16} />}
-                                    {fmtCurrency(Math.abs(balanceDiff), 'EUR')}
+                                    {fmtCurrency(Math.abs(balanceDiff), baseCurrency)}
                                 </span>
                             )}
                         </div>
@@ -301,12 +308,12 @@ export default function ForecastingPage() {
                     <div className="flex items-center gap-4 mt-1">
                         <div className="flex items-center gap-1.5 text-emerald-600 dark:text-emerald-400 font-bold">
                             <TrendingUp size={18} />
-                            {isLoading ? '...' : fmtCurrency(totalExpectedIncome, 'EUR')}
+                            {isLoading ? '...' : fmtCurrency(totalExpectedIncome, baseCurrency)}
                         </div>
                         <div className="h-4 w-px bg-gray-200 dark:bg-gray-800" />
                         <div className="flex items-center gap-1.5 text-rose-600 dark:text-rose-400 font-bold">
                             <TrendingDown size={18} />
-                            {isLoading ? '...' : fmtCurrency(totalExpectedExpense, 'EUR')}
+                            {isLoading ? '...' : fmtCurrency(totalExpectedExpense, baseCurrency)}
                         </div>
                     </div>
                 </div>
@@ -362,9 +369,9 @@ export default function ForecastingPage() {
                                     axisLine={false}
                                     tickLine={false}
                                     tick={{ fontSize: 10, fill: '#9ca3af' }}
-                                    tickFormatter={(val) => `€${val}`}
+                                    tickFormatter={(val) => `${baseCurrency === 'EUR' ? '€' : baseCurrency}${val}`}
                                 />
-                                <Tooltip content={<CustomTooltip t={t} />} />
+                                <Tooltip content={<CustomTooltip t={t} baseCurrency={baseCurrency} />} />
                                 <ReferenceLine y={currentBalance} stroke="#94a3b8" strokeDasharray="3 3" label={{ position: 'right', value: 'Today', fill: '#94a3b8', fontSize: 10 }} />
                                 <Area
                                     type="monotone"

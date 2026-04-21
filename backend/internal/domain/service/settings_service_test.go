@@ -12,24 +12,24 @@ import (
 
 // --- Mock Settings Repository ---
 
-type mockSettingsRepo struct {
+type mockSimpleSettingsRepo struct {
 	data   map[string]string
 	setErr error
 	getErr error
 }
 
-func newMockSettingsRepo() *mockSettingsRepo {
-	return &mockSettingsRepo{data: make(map[string]string)}
+func newMockSimpleSettingsRepo() *mockSimpleSettingsRepo {
+	return &mockSimpleSettingsRepo{data: make(map[string]string)}
 }
 
-func (m *mockSettingsRepo) Get(_ context.Context, key string, _ uuid.UUID) (string, error) {
+func (m *mockSimpleSettingsRepo) Get(_ context.Context, key string, _ uuid.UUID) (string, error) {
 	if v, ok := m.data[key]; ok {
 		return v, nil
 	}
 	return "", errors.New("key not found")
 }
 
-func (m *mockSettingsRepo) GetAll(_ context.Context, _ uuid.UUID) (map[string]string, error) {
+func (m *mockSimpleSettingsRepo) GetAll(_ context.Context, _ uuid.UUID) (map[string]string, error) {
 	if m.getErr != nil {
 		return nil, m.getErr
 	}
@@ -40,7 +40,7 @@ func (m *mockSettingsRepo) GetAll(_ context.Context, _ uuid.UUID) (map[string]st
 	return cp, nil
 }
 
-func (m *mockSettingsRepo) Set(_ context.Context, key string, value string, _ uuid.UUID, isSensitive bool) error {
+func (m *mockSimpleSettingsRepo) Set(_ context.Context, key string, value string, _ uuid.UUID, isSensitive bool) error {
 	if m.setErr != nil {
 		return m.setErr
 	}
@@ -51,7 +51,7 @@ func (m *mockSettingsRepo) Set(_ context.Context, key string, value string, _ uu
 // --- Tests ---
 
 func TestSettingsService_GetAllMasked_Admin(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.data["theme"] = "dark"
 	repo.data["smtp_password"] = "super-secret"
 	repo.data["llm_api_token"] = "token-123"
@@ -75,7 +75,7 @@ func TestSettingsService_GetAllMasked_Admin(t *testing.T) {
 }
 
 func TestSettingsService_GetAllMasked_NonAdmin_HidesKeys(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.data["theme"] = "light"
 	repo.data["smtp_host"] = "smtp.example.com"
 	repo.data["llm_model"] = "gpt-4"
@@ -99,7 +99,7 @@ func TestSettingsService_GetAllMasked_NonAdmin_HidesKeys(t *testing.T) {
 }
 
 func TestSettingsService_UpdateMultiple_IgnoreMask(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.data["smtp_password"] = "original-secret"
 	svc := service.NewSettingsService(repo, setupLogger())
 
@@ -120,7 +120,7 @@ func TestSettingsService_UpdateMultiple_IgnoreMask(t *testing.T) {
 }
 
 func TestSettingsService_Get(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.data["theme"] = "dark"
 	svc := service.NewSettingsService(repo, setupLogger())
 
@@ -134,7 +134,7 @@ func TestSettingsService_Get(t *testing.T) {
 }
 
 func TestSettingsService_GetAllMasked_RepoError(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.getErr = errors.New("db error")
 	svc := service.NewSettingsService(repo, setupLogger())
 
@@ -145,7 +145,7 @@ func TestSettingsService_GetAllMasked_RepoError(t *testing.T) {
 }
 
 func TestSettingsService_UpdateMultiple_RepoError(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.setErr = errors.New("db error")
 	svc := service.NewSettingsService(repo, setupLogger())
 
@@ -156,7 +156,7 @@ func TestSettingsService_UpdateMultiple_RepoError(t *testing.T) {
 }
 
 func TestSettingsService_GetAll(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.data["theme"] = "dark"
 	repo.data["currency"] = "EUR"
 
@@ -174,7 +174,7 @@ func TestSettingsService_GetAll(t *testing.T) {
 }
 
 func TestSettingsService_GetAll_Empty(t *testing.T) {
-	svc := service.NewSettingsService(newMockSettingsRepo(), setupLogger())
+	svc := service.NewSettingsService(newMockSimpleSettingsRepo(), setupLogger())
 	settings, err := svc.GetAll(context.Background(), uuid.New())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -185,7 +185,7 @@ func TestSettingsService_GetAll_Empty(t *testing.T) {
 }
 
 func TestSettingsService_UpdateMultiple_Success(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	svc := service.NewSettingsService(repo, setupLogger())
 
 	err := svc.UpdateMultiple(context.Background(), map[string]string{
@@ -205,7 +205,7 @@ func TestSettingsService_UpdateMultiple_Success(t *testing.T) {
 }
 
 func TestSettingsService_UpdateMultiple_NonAdmin_Restriction(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	svc := service.NewSettingsService(repo, setupLogger())
 
 	err := svc.UpdateMultiple(context.Background(), map[string]string{
@@ -225,7 +225,7 @@ func TestSettingsService_UpdateMultiple_NonAdmin_Restriction(t *testing.T) {
 }
 
 func TestSettingsService_UpdateMultiple_Error(t *testing.T) {
-	repo := newMockSettingsRepo()
+	repo := newMockSimpleSettingsRepo()
 	repo.setErr = errors.New("db write failed")
 
 	svc := service.NewSettingsService(repo, setupLogger())
@@ -240,7 +240,7 @@ func TestSettingsService_UpdateMultiple_Error(t *testing.T) {
 
 func TestSettingsService_NilLogger(t *testing.T) {
 	// Should not panic with nil logger
-	svc := service.NewSettingsService(newMockSettingsRepo(), nil)
+	svc := service.NewSettingsService(newMockSimpleSettingsRepo(), nil)
 	_, err := svc.GetAll(context.Background(), uuid.New())
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)

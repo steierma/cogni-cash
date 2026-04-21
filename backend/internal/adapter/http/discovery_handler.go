@@ -124,6 +124,21 @@ func (h *Handler) ApproveSubscription(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Trigger AI enrichment asynchronously
+	if h.WaitGroup != nil {
+		h.WaitGroup.Add(1)
+		go func() {
+			defer h.WaitGroup.Done()
+			h.Logger.Info("Triggering background AI enrichment for approved subscription", "sub_id", subscription.ID, "user_id", userID)
+			_, err := h.discoverySvc.EnrichSubscription(h.AppCtx, userID, subscription.ID)
+			if err != nil {
+				h.Logger.Warn("Background AI enrichment failed", "sub_id", subscription.ID, "error", err)
+			} else {
+				h.Logger.Info("Background AI enrichment successful", "sub_id", subscription.ID)
+			}
+		}()
+	}
+
 	writeJSON(w, http.StatusCreated, subscription)
 }
 
@@ -348,7 +363,9 @@ func (h *Handler) CreateSubscriptionFromTransaction(w http.ResponseWriter, r *ht
 
 	var req struct {
 		TransactionHash string `json:"transaction_hash"`
+		MerchantName    string `json:"merchant_name"`
 		BillingCycle    string `json:"billing_cycle"`
+		BillingInterval int    `json:"billing_interval"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -360,7 +377,11 @@ func (h *Handler) CreateSubscriptionFromTransaction(w http.ResponseWriter, r *ht
 		return
 	}
 
-	sub, err := h.discoverySvc.CreateSubscriptionFromTransaction(r.Context(), userID, req.TransactionHash, req.BillingCycle)
+	if req.BillingInterval <= 0 {
+		req.BillingInterval = 1
+	}
+
+	sub, err := h.discoverySvc.CreateSubscriptionFromTransaction(r.Context(), userID, req.TransactionHash, req.MerchantName, req.BillingCycle, req.BillingInterval)
 	if err != nil {
 		h.Logger.Error("failed to create subscription from transaction", "error", err, "user_id", userID, "hash", req.TransactionHash)
 		writeError(w, http.StatusInternalServerError, err.Error())
@@ -368,4 +389,64 @@ func (h *Handler) CreateSubscriptionFromTransaction(w http.ResponseWriter, r *ht
 	}
 
 	writeJSON(w, http.StatusCreated, sub)
+}
+
+func (h *Handler) LinkTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	subIDStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(subIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid subscription id")
+		return
+	}
+
+	txnHash := chi.URLParam(r, "hash")
+	if txnHash == "" {
+		writeError(w, http.StatusBadRequest, "transaction hash is required")
+		return
+	}
+
+	err = h.discoverySvc.LinkTransaction(r.Context(), userID, subID, txnHash)
+	if err != nil {
+		h.Logger.Error("failed to link transaction to subscription", "error", err, "user_id", userID, "sub_id", subID, "hash", txnHash)
+		writeError(w, http.StatusInternalServerError, "failed to link transaction")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "linked"})
+}
+
+func (h *Handler) UnlinkTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	subIDStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(subIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid subscription id")
+		return
+	}
+
+	txnHash := chi.URLParam(r, "hash")
+	if txnHash == "" {
+		writeError(w, http.StatusBadRequest, "transaction hash is required")
+		return
+	}
+
+	err = h.discoverySvc.UnlinkTransaction(r.Context(), userID, subID, txnHash)
+	if err != nil {
+		h.Logger.Error("failed to unlink transaction from subscription", "error", err, "user_id", userID, "sub_id", subID, "hash", txnHash)
+		writeError(w, http.StatusInternalServerError, "failed to unlink transaction")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "unlinked"})
 }

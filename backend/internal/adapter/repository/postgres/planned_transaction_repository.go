@@ -30,10 +30,10 @@ func (r *PlannedTransactionRepository) Create(ctx context.Context, pt *entity.Pl
 	}
 
 	err := r.pool.QueryRow(ctx, `
-		INSERT INTO planned_transactions (id, user_id, amount, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 		RETURNING created_at`,
-		pt.ID, pt.UserID, pt.Amount, pt.Date, pt.Description, pt.CategoryID, pt.Status, pt.MatchedTransactionID, pt.IntervalMonths, pt.EndDate, pt.IsSuperseded).
+		pt.ID, pt.UserID, pt.Amount, pt.Currency, pt.BaseAmount, pt.BaseCurrency, pt.Date, pt.Description, pt.CategoryID, pt.Status, pt.MatchedTransactionID, pt.IntervalMonths, pt.EndDate, pt.IsSuperseded).
 		Scan(&pt.CreatedAt)
 	if err != nil {
 		return fmt.Errorf("planned tx repo: create: %w", err)
@@ -45,10 +45,10 @@ func (r *PlannedTransactionRepository) GetByID(ctx context.Context, id uuid.UUID
 	r.Logger.Info("Getting planned transaction by id", "id", id, "user_id", userID)
 	var pt entity.PlannedTransaction
 	err := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, amount, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded, created_at
+		SELECT id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded, created_at
 		FROM planned_transactions
 		WHERE id = $1 AND user_id = $2`, id, userID).
-		Scan(&pt.ID, &pt.UserID, &pt.Amount, &pt.Date, &pt.Description, &pt.CategoryID, &pt.Status, &pt.MatchedTransactionID, &pt.IntervalMonths, &pt.EndDate, &pt.IsSuperseded, &pt.CreatedAt)
+		Scan(&pt.ID, &pt.UserID, &pt.Amount, &pt.Currency, &pt.BaseAmount, &pt.BaseCurrency, &pt.Date, &pt.Description, &pt.CategoryID, &pt.Status, &pt.MatchedTransactionID, &pt.IntervalMonths, &pt.EndDate, &pt.IsSuperseded, &pt.CreatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("planned tx repo: get by id: %w", err)
 	}
@@ -59,9 +59,9 @@ func (r *PlannedTransactionRepository) Update(ctx context.Context, pt *entity.Pl
 	r.Logger.Info("Updating planned transaction", "id", pt.ID, "user_id", pt.UserID)
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE planned_transactions
-		SET amount = $1, date = $2, description = $3, category_id = $4, status = $5, matched_transaction_id = $6, interval_months = $7, end_date = $8, is_superseded = $9
-		WHERE id = $10 AND user_id = $11`,
-		pt.Amount, pt.Date, pt.Description, pt.CategoryID, pt.Status, pt.MatchedTransactionID, pt.IntervalMonths, pt.EndDate, pt.IsSuperseded, pt.ID, pt.UserID)
+		SET amount = $1, currency = $2, base_amount = $3, base_currency = $4, date = $5, description = $6, category_id = $7, status = $8, matched_transaction_id = $9, interval_months = $10, end_date = $11, is_superseded = $12
+		WHERE id = $13 AND user_id = $14`,
+		pt.Amount, pt.Currency, pt.BaseAmount, pt.BaseCurrency, pt.Date, pt.Description, pt.CategoryID, pt.Status, pt.MatchedTransactionID, pt.IntervalMonths, pt.EndDate, pt.IsSuperseded, pt.ID, pt.UserID)
 	if err != nil {
 		return fmt.Errorf("planned tx repo: update: %w", err)
 	}
@@ -86,7 +86,7 @@ func (r *PlannedTransactionRepository) Delete(ctx context.Context, id uuid.UUID,
 func (r *PlannedTransactionRepository) FindByUserID(ctx context.Context, userID uuid.UUID) ([]entity.PlannedTransaction, error) {
 	r.Logger.Info("Finding planned transactions by user_id", "user_id", userID)
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, amount, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded, created_at
+		SELECT id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded, created_at
 		FROM planned_transactions
 		WHERE user_id = $1
 		ORDER BY date ASC`, userID)
@@ -98,7 +98,7 @@ func (r *PlannedTransactionRepository) FindByUserID(ctx context.Context, userID 
 	var pts []entity.PlannedTransaction
 	for rows.Next() {
 		var pt entity.PlannedTransaction
-		if err := rows.Scan(&pt.ID, &pt.UserID, &pt.Amount, &pt.Date, &pt.Description, &pt.CategoryID, &pt.Status, &pt.MatchedTransactionID, &pt.IntervalMonths, &pt.EndDate, &pt.IsSuperseded, &pt.CreatedAt); err != nil {
+		if err := rows.Scan(&pt.ID, &pt.UserID, &pt.Amount, &pt.Currency, &pt.BaseAmount, &pt.BaseCurrency, &pt.Date, &pt.Description, &pt.CategoryID, &pt.Status, &pt.MatchedTransactionID, &pt.IntervalMonths, &pt.EndDate, &pt.IsSuperseded, &pt.CreatedAt); err != nil {
 			return nil, fmt.Errorf("planned tx repo: scan: %w", err)
 		}
 		pts = append(pts, pt)
@@ -109,7 +109,7 @@ func (r *PlannedTransactionRepository) FindByUserID(ctx context.Context, userID 
 func (r *PlannedTransactionRepository) FindPendingByUserID(ctx context.Context, userID uuid.UUID) ([]entity.PlannedTransaction, error) {
 	r.Logger.Info("Finding pending planned transactions by user_id", "user_id", userID)
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, amount, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded, created_at
+		SELECT id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, matched_transaction_id, interval_months, end_date, is_superseded, created_at
 		FROM planned_transactions
 		WHERE user_id = $1 AND status = 'pending'
 		ORDER BY date ASC`, userID)
@@ -121,7 +121,7 @@ func (r *PlannedTransactionRepository) FindPendingByUserID(ctx context.Context, 
 	var pts []entity.PlannedTransaction
 	for rows.Next() {
 		var pt entity.PlannedTransaction
-		if err := rows.Scan(&pt.ID, &pt.UserID, &pt.Amount, &pt.Date, &pt.Description, &pt.CategoryID, &pt.Status, &pt.MatchedTransactionID, &pt.IntervalMonths, &pt.EndDate, &pt.IsSuperseded, &pt.CreatedAt); err != nil {
+		if err := rows.Scan(&pt.ID, &pt.UserID, &pt.Amount, &pt.Currency, &pt.BaseAmount, &pt.BaseCurrency, &pt.Date, &pt.Description, &pt.CategoryID, &pt.Status, &pt.MatchedTransactionID, &pt.IntervalMonths, &pt.EndDate, &pt.IsSuperseded, &pt.CreatedAt); err != nil {
 			return nil, fmt.Errorf("planned tx repo: scan: %w", err)
 		}
 		pts = append(pts, pt)

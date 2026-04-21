@@ -1,4 +1,4 @@
-export type SubscriptionStatus = 'active' | 'cancellation_pending' | 'canceled' | 'paused';
+export type SubscriptionStatus = 'active' | 'cancellation_pending' | 'cancelled' | 'paused';
 
 export interface Subscription {
     id: string;
@@ -23,6 +23,8 @@ export interface Subscription {
     last_occurrence?: string;
     next_occurrence?: string;
     notes?: string;
+    matching_hashes: string[];
+    ignored_hashes: string[];
     created_at: string;
     updated_at: string;
 }

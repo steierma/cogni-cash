@@ -97,7 +97,7 @@ Now for the magic part.
 Once everything is "Running" (Green in Docker Desktop):
 
 1.  Open your browser (Chrome, Edge, Firefox).
-2.  Go to: **[http://localhost:3000](http://localhost:3000)**
+2.  Go to: **[http://localhost](http://localhost)** (or `http://localhost:3000` if you are using the development override).
 3.  Log in using the `ADMIN_USERNAME` and `ADMIN_PASSWORD` you chose in Step 4.
 
 ---
@@ -144,15 +144,31 @@ This tells Windows that `cognicash.local` points directly to your own computer.
 
 ### 3. Accessing via HTTPS
 1.  Restart your app in the terminal: `docker compose restart`.
-2.  In your browser, go to **[https://cognicash.local:3000](https://cognicash.local:3000)**.
+2.  In your browser, go to **[https://cognicash.local](https://cognicash.local)** (Note: Do **not** add `:3000` when using Caddy's HTTPS).
 3.  Your browser will show a **"Your connection is not private"** warning because the security certificate is local. This is normal! Click **"Advanced"** and then **"Proceed to cognicash.local (unsafe)"**.
+
+### 4. Allowing both HTTP and HTTPS (via Caddy)
+By default, Caddy enforces HTTPS for any custom domain. If you want to allow plain **HTTP** as well (e.g. for devices on your network that can't handle the certificate), you can modify the configuration:
+
+1.  Open the file `caddy/Caddyfile` in Notepad.
+2.  Change the very first line from:
+    ```caddy
+    {$DOMAIN_NAME:localhost} {
+    ```
+    to:
+    ```caddy
+    http://{$DOMAIN_NAME:localhost}, https://{$DOMAIN_NAME:localhost} {
+    ```
+3.  Restart Caddy in your terminal: `docker compose restart caddy`.
+4.  You can now access the app via both `http://cognicash.local` and `https://cognicash.local`.
 
 ---
 
 ## ❓ Troubleshooting (For Windows Users)
 
 - **"is a directory" error:** If you see an error about `enable-banking-prod.pem` being a directory, it means you started the app before creating the file. Delete the folder named `enable-banking-prod.pem` in your main directory and create the real file as explained in Step 4/Optional.
-- **Port 3000 is busy:** Make sure you don't have other web development tools running on port 3000.
+- **Port 80 or 443 is busy:** If Docker fails to start Caddy, make sure no other web servers (like IIS or Apache) are running on your computer.
+- **Port 3000 is busy:** Only relevant if you are using the development override. Make sure you don't have other web development tools running on port 3000.
 - **Ollama connection:** Ensure Ollama is running on your Windows taskbar. If it's not connecting, check your firewall settings to allow Docker to talk to your PC.
 
 **Need Help?** Open an issue on GitHub!

@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"time"
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
@@ -20,10 +21,11 @@ import (
 var ErrPayslipDuplicate = entity.ErrPayslipDuplicate
 
 type PayslipService struct {
-	repo         port.PayslipRepository
-	staticParser port.PayslipParser
-	aiParser     port.PayslipAIParser
-	logger       *slog.Logger
+	repo            port.PayslipRepository
+	staticParser    port.PayslipParser
+	aiParser        port.PayslipAIParser
+	currencyService *CurrencyService
+	logger          *slog.Logger
 }
 
 func NewPayslipService(
@@ -38,6 +40,11 @@ func NewPayslipService(
 		aiParser:     aiParser,
 		logger:       logger,
 	}
+}
+
+func (s *PayslipService) WithCurrencyService(svc *CurrencyService) *PayslipService {
+	s.currencyService = svc
+	return s
 }
 
 func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, fileName, mimeType string, fileBytes []byte, overrides *entity.Payslip, useAI bool) (*entity.Payslip, error) {
@@ -123,6 +130,17 @@ func (s *PayslipService) Import(ctx context.Context, userID uuid.UUID, fileName,
 
 	if err := s.repo.Save(ctx, &payslip); err != nil {
 		return nil, fmt.Errorf("failed to save payslip: %w", err)
+	}
+
+	// Trigger asynchronous currency conversion
+	if s.currencyService != nil {
+		go func() {
+			cCtx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+			defer cancel()
+			if err := s.currencyService.UpdateBaseAmountsForUser(cCtx, userID); err != nil {
+				s.logger.Error("Background currency conversion failed for payslip", "user_id", userID, "error", err)
+			}
+		}()
 	}
 
 	s.logger.Info("Successfully imported payslip", "id", payslip.ID, "month", payslip.PeriodMonthNum, "user_id", userID)

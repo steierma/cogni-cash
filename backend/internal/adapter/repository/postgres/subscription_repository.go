@@ -34,6 +34,7 @@ func (r *SubscriptionRepository) GetByID(ctx context.Context, id uuid.UUID, user
 			category_id, customer_number, contact_email, contact_phone, contact_website,
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
+			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
 			created_at, updated_at
 		FROM subscriptions
 		WHERE id = $1 AND user_id = $2`, id, userID).
@@ -42,6 +43,7 @@ func (r *SubscriptionRepository) GetByID(ctx context.Context, id uuid.UUID, user
 			&s.CategoryID, &s.CustomerNumber, &s.ContactEmail, &s.ContactPhone, &s.ContactWebsite,
 			&s.SupportURL, &s.CancellationURL, &s.Status, &s.NoticePeriodDays, &s.ContractEndDate,
 			&s.IsTrial, &s.PaymentMethod, &s.LastOccurrence, &s.NextOccurrence, &s.Notes,
+			&s.MatchingHashes, &s.IgnoredHashes, &s.LinkedMandates, &s.LinkedIbans,
 			&s.CreatedAt, &s.UpdatedAt,
 		)
 	if err != nil {
@@ -57,6 +59,7 @@ func (r *SubscriptionRepository) FindByUserID(ctx context.Context, userID uuid.U
 			category_id, customer_number, contact_email, contact_phone, contact_website,
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
+			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
 			created_at, updated_at
 		FROM subscriptions
 		WHERE user_id = $1
@@ -74,6 +77,7 @@ func (r *SubscriptionRepository) FindByUserID(ctx context.Context, userID uuid.U
 			&s.CategoryID, &s.CustomerNumber, &s.ContactEmail, &s.ContactPhone, &s.ContactWebsite,
 			&s.SupportURL, &s.CancellationURL, &s.Status, &s.NoticePeriodDays, &s.ContractEndDate,
 			&s.IsTrial, &s.PaymentMethod, &s.LastOccurrence, &s.NextOccurrence, &s.Notes,
+			&s.MatchingHashes, &s.IgnoredHashes, &s.LinkedMandates, &s.LinkedIbans,
 			&s.CreatedAt, &s.UpdatedAt,
 		); err != nil {
 			return nil, fmt.Errorf("subscription repo: scan: %w", err)
@@ -95,20 +99,35 @@ func (r *SubscriptionRepository) Create(ctx context.Context, s entity.Subscripti
 		s.UpdatedAt = now
 	}
 
+	if s.MatchingHashes == nil {
+		s.MatchingHashes = []string{}
+	}
+	if s.IgnoredHashes == nil {
+		s.IgnoredHashes = []string{}
+	}
+	if s.LinkedMandates == nil {
+		s.LinkedMandates = []string{}
+	}
+	if s.LinkedIbans == nil {
+		s.LinkedIbans = []string{}
+	}
+
 	err := r.pool.QueryRow(ctx, `
 		INSERT INTO subscriptions (
 			id, user_id, merchant_name, amount, currency, billing_cycle, billing_interval,
 			category_id, customer_number, contact_email, contact_phone, contact_website,
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
+			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
 			created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 		) RETURNING created_at, updated_at`,
 		s.ID, s.UserID, s.MerchantName, s.Amount, s.Currency, s.BillingCycle, s.BillingInterval,
 		s.CategoryID, s.CustomerNumber, s.ContactEmail, s.ContactPhone, s.ContactWebsite,
 		s.SupportURL, s.CancellationURL, s.Status, s.NoticePeriodDays, s.ContractEndDate,
 		s.IsTrial, s.PaymentMethod, s.LastOccurrence, s.NextOccurrence, s.Notes,
+		s.MatchingHashes, s.IgnoredHashes, s.LinkedMandates, s.LinkedIbans,
 		s.CreatedAt, s.UpdatedAt,
 	).Scan(&s.CreatedAt, &s.UpdatedAt)
 
@@ -132,20 +151,36 @@ func (r *SubscriptionRepository) CreateWithBackfill(ctx context.Context, sub ent
 	sub.CreatedAt = now
 	sub.UpdatedAt = now
 
+	sub.MatchingHashes = matchingHashes
+	if sub.MatchingHashes == nil {
+		sub.MatchingHashes = []string{}
+	}
+	if sub.IgnoredHashes == nil {
+		sub.IgnoredHashes = []string{}
+	}
+	if sub.LinkedMandates == nil {
+		sub.LinkedMandates = []string{}
+	}
+	if sub.LinkedIbans == nil {
+		sub.LinkedIbans = []string{}
+	}
+
 	err = tx.QueryRow(ctx, `
 		INSERT INTO subscriptions (
 			id, user_id, merchant_name, amount, currency, billing_cycle, billing_interval,
 			category_id, customer_number, contact_email, contact_phone, contact_website,
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
+			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
 			created_at, updated_at
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
 		) RETURNING created_at, updated_at`,
 		sub.ID, sub.UserID, sub.MerchantName, sub.Amount, sub.Currency, sub.BillingCycle, sub.BillingInterval,
 		sub.CategoryID, sub.CustomerNumber, sub.ContactEmail, sub.ContactPhone, sub.ContactWebsite,
 		sub.SupportURL, sub.CancellationURL, sub.Status, sub.NoticePeriodDays, sub.ContractEndDate,
 		sub.IsTrial, sub.PaymentMethod, sub.LastOccurrence, sub.NextOccurrence, sub.Notes,
+		sub.MatchingHashes, sub.IgnoredHashes, sub.LinkedMandates, sub.LinkedIbans,
 		sub.CreatedAt, sub.UpdatedAt,
 	).Scan(&sub.CreatedAt, &sub.UpdatedAt)
 	if err != nil {
@@ -173,18 +208,33 @@ func (r *SubscriptionRepository) CreateWithBackfill(ctx context.Context, sub ent
 
 func (r *SubscriptionRepository) Update(ctx context.Context, s entity.Subscription) (entity.Subscription, error) {
 	s.UpdatedAt = time.Now()
+	if s.MatchingHashes == nil {
+		s.MatchingHashes = []string{}
+	}
+	if s.IgnoredHashes == nil {
+		s.IgnoredHashes = []string{}
+	}
+	if s.LinkedMandates == nil {
+		s.LinkedMandates = []string{}
+	}
+	if s.LinkedIbans == nil {
+		s.LinkedIbans = []string{}
+	}
+
 	_, err := r.pool.Exec(ctx, `
 		UPDATE subscriptions SET
 			merchant_name = $1, amount = $2, currency = $3, billing_cycle = $4, billing_interval = $5,
 			category_id = $6, customer_number = $7, contact_email = $8, contact_phone = $9, contact_website = $10,
 			support_url = $11, cancellation_url = $12, status = $13, notice_period_days = $14, contract_end_date = $15,
 			is_trial = $16, payment_method = $17, last_occurrence = $18, next_occurrence = $19, notes = $20,
-			updated_at = $21
-		WHERE id = $22 AND user_id = $23`,
+			matching_hashes = $21, ignored_hashes = $22, linked_mandates = $23, linked_ibans = $24,
+			updated_at = $25
+		WHERE id = $26 AND user_id = $27`,
 		s.MerchantName, s.Amount, s.Currency, s.BillingCycle, s.BillingInterval,
 		s.CategoryID, s.CustomerNumber, s.ContactEmail, s.ContactPhone, s.ContactWebsite,
 		s.SupportURL, s.CancellationURL, s.Status, s.NoticePeriodDays, s.ContractEndDate,
 		s.IsTrial, s.PaymentMethod, s.LastOccurrence, s.NextOccurrence, s.Notes,
+		s.MatchingHashes, s.IgnoredHashes, s.LinkedMandates, s.LinkedIbans,
 		s.UpdatedAt, s.ID, s.UserID,
 	)
 	if err != nil {

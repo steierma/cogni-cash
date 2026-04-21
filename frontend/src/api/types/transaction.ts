@@ -10,6 +10,8 @@ export interface Transaction {
     mandate_reference?: string;
     amount: number;
     currency: string;
+    base_amount: number;
+    base_currency: string;
     type: 'credit' | 'debit';
     reference: string;
     category_id: string | null;
@@ -87,6 +89,9 @@ export interface PlannedTransaction {
     id: string;
     user_id: string;
     amount: number;
+    currency: string;
+    base_amount: number;
+    base_currency: string;
     date: string;
     description: string;
     category_id: string;
@@ -100,6 +105,7 @@ export interface PlannedTransaction {
 
 export interface CreatePlannedTransactionRequest {
     amount: number;
+    currency?: string;
     date: string;
     description: string;
     category_id: string | null;

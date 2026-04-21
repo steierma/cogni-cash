@@ -5,11 +5,12 @@ import { useSearchParams } from 'react-router-dom';
 import {
     Trash2, Download, Edit2, Upload, X, Search, Database,
     ChevronUp, ChevronDown, Loader2, Filter, BarChart3,
-    TrendingUp, Store, CheckSquare, Square, Layers, FileText, Share2, Users, Eye
+    TrendingUp, Store, CheckSquare, Square, Layers, FileText, Share2, Users, Eye, PlusCircle
 } from 'lucide-react';
 
 import ShareInvoiceModal from '../components/ShareInvoiceModal';
 import { EditInvoiceModal, PreviewInvoiceModal } from '../components/invoices/InvoiceModals';
+import { InvoiceForm } from '../components/invoices/InvoiceForm';
 import { invoiceService, type InvoiceUpdatePayload } from '../api/services/invoiceService';
 import { categoryService } from '../api/services/categoryService';
 import { authService } from '../api/services/authService';
@@ -17,6 +18,7 @@ import { fmtCurrency, fmtDate } from '../utils/formatters';
 import type { Invoice } from "../api/types/invoice";
 import type { Category } from "../api/types/category";
 import type { User } from "../api/types/system";
+
 type SortKey = 'issued_at' | 'vendor' | 'category' | 'description' | 'amount';
 type SortDir = 'asc' | 'desc';
 
@@ -34,6 +36,73 @@ const initialFilters: FilterState = {
     search: '', category: 'all', from: '', to: '', amountMin: '', amountMax: '', source: 'all'
 };
 
+// --- Sub-Components ---
+
+interface ManualImportModalProps {
+    categories: Category[];
+    onClose: () => void;
+    onSubmit: (data: InvoiceUpdatePayload & { file?: File }) => void;
+    isPending: boolean;
+}
+
+function ManualImportModal({ categories, onClose, onSubmit, isPending }: ManualImportModalProps) {
+    const { t } = useTranslation();
+    const [selectedFile, setSelectedFile] = useState<File | null>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
+
+    return (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-gray-900/60 backdrop-blur-sm animate-in fade-in duration-200">
+            <div className="bg-white dark:bg-gray-900 rounded-3xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh] overflow-hidden border border-gray-100 dark:border-gray-800 animate-in zoom-in-95 duration-200">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between">
+                    <div>
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-gray-100">{t('invoices.manualImport', 'Manual Import')}</h3>
+                        <p className="text-xs text-gray-500 mt-1">{t('invoices.manualImportDesc', 'Add an invoice with manual metadata entry')}</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 hover:bg-gray-100 dark:hover:bg-gray-800 rounded-full transition-all">
+                        <X size={20} />
+                    </button>
+                </div>
+                
+                <div className="px-6 pt-4">
+                    <label className="block text-xs font-bold text-gray-400 dark:text-gray-500 uppercase tracking-wider mb-2">{t('invoices.optionalFile', 'Optional File')}</label>
+                    <div 
+                        onClick={() => fileInputRef.current?.click()}
+                        className={`p-4 border-2 border-dashed rounded-xl flex items-center justify-center gap-3 cursor-pointer transition-colors ${selectedFile ? 'border-indigo-500 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400' : 'border-gray-200 dark:border-gray-800 hover:border-gray-300 dark:hover:border-gray-700'}`}
+                    >
+                        <Upload size={18} />
+                        <span className="text-sm font-medium">{selectedFile ? selectedFile.name : t('invoices.chooseFile', 'Choose file (PDF/Image)...')}</span>
+                        <input 
+                            type="file" 
+                            ref={fileInputRef} 
+                            className="hidden" 
+                            accept=".pdf,.png,.jpg,.jpeg,.webp,.gif"
+                            onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                        />
+                        {selectedFile && (
+                            <button 
+                                onClick={(e) => { e.stopPropagation(); setSelectedFile(null); }}
+                                className="ml-auto p-1 hover:bg-white dark:hover:bg-gray-800 rounded-md"
+                            >
+                                <X size={14} />
+                            </button>
+                        )}
+                    </div>
+                </div>
+
+                <InvoiceForm 
+                    initialData={{ currency: 'EUR', issued_at: new Date().toISOString() }} 
+                    categories={categories} 
+                    onSubmit={(data) => onSubmit({ ...data, file: selectedFile || undefined })} 
+                    isPending={isPending} 
+                    submitLabel={t('invoices.createInvoice', 'Create Invoice')}
+                />
+            </div>
+        </div>
+    );
+}
+
+// --- Main Page Component ---
+
 export default function InvoicesPage() {
     const { t, i18n } = useTranslation();
     const [searchParams, setSearchParams] = useSearchParams();
@@ -42,6 +111,7 @@ export default function InvoicesPage() {
 
     // --- State ---
     const [dragOver, setDragOver] = useState(false);
+    const [showManualImport, setShowManualImport] = useState(false);
 
     const initialFiltersFromURL: FilterState = useMemo(() => {
         return {
@@ -128,8 +198,24 @@ export default function InvoicesPage() {
     });
 
     const importMutation = useMutation({
-        mutationFn: invoiceService.import,
+        mutationFn: ({ file, categoryId, splits }: { file: File, categoryId?: string, splits?: any[] }) => 
+            invoiceService.import(file, { category_id: categoryId || null, splits }),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['invoices'] }),
+    });
+
+    const manualImportMutation = useMutation({
+        mutationFn: (data: InvoiceUpdatePayload & { file?: File }) => {
+            if (data.file) {
+                // If a file is provided, we use the multipart import path but with manual metadata and splits
+                return invoiceService.import(data.file, data);
+            }
+            // Pure manual entry
+            return invoiceService.manualImport(data);
+        },
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['invoices'] });
+            setShowManualImport(false);
+        },
     });
 
     const updateMutation = useMutation({
@@ -155,14 +241,14 @@ export default function InvoicesPage() {
     // --- Handlers ---
     const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
         const file = e.target.files?.[0];
-        if (file) importMutation.mutate(file);
+        if (file) importMutation.mutate({ file });
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
 
     const handleFiles = (files: FileList | File[]) => {
         const file = files[0];
         if (file) {
-            importMutation.mutate(file);
+            importMutation.mutate({ file });
         }
         if (fileInputRef.current) fileInputRef.current.value = '';
     };
@@ -291,8 +377,24 @@ export default function InvoicesPage() {
             const vName = inv.vendor?.name || 'Unknown';
             vMap[vName] = (vMap[vName] || 0) + inv.amount;
 
-            const cName = categories.find(c => c.id === inv.category_id)?.name || 'Uncategorized';
-            cMap[cName] = (cMap[cName] || 0) + inv.amount;
+            if (inv.splits && inv.splits.length > 0) {
+                let splitTotal = 0;
+                inv.splits.forEach(s => {
+                    const scName = categories.find(c => c.id === s.category_id)?.name || 'Uncategorized';
+                    cMap[scName] = (cMap[scName] || 0) + s.amount;
+                    splitTotal += s.amount;
+                });
+
+                // Calculate rest and assign to main category
+                const remainder = inv.amount - splitTotal;
+                if (remainder > 0.001) {
+                    const mainCatName = categories.find(c => c.id === inv.category_id)?.name || 'Uncategorized';
+                    cMap[mainCatName] = (cMap[mainCatName] || 0) + remainder;
+                }
+            } else {
+                const cName = categories.find(c => c.id === inv.category_id)?.name || 'Uncategorized';
+                cMap[cName] = (cMap[cName] || 0) + inv.amount;
+            }
         });
 
         const vArr = Object.entries(vMap).sort((a, b) => b[1] - a[1]).slice(0, 5);
@@ -336,18 +438,10 @@ export default function InvoicesPage() {
                         </button>
                     )}
                     <input type="file" ref={fileInputRef} className="hidden" accept=".pdf,.png,.jpg,.jpeg,.webp,.gif" onChange={handleFileChange} />
-                    <button
-                        onClick={() => fileInputRef.current?.click()}
-                        disabled={importMutation.isPending}
-                        className="flex items-center space-x-2 px-4 py-2 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl transition-all shadow-sm disabled:opacity-70 disabled:cursor-not-allowed font-medium text-sm"
-                    >
-                        {importMutation.isPending ? <Loader2 size={16} className="animate-spin" /> : <Upload size={16} />}
-                        <span className="hidden sm:inline">{importMutation.isPending ? t('invoices.uploading') : t('invoices.import')}</span>
-                    </button>
                 </div>
             </div>
 
-            {/* Quick Upload Dropzone (New, aligning with other pages) */}
+            {/* Quick Upload Dropzone */}
             <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-2xl p-4 shadow-sm flex flex-col md:flex-row gap-4 items-center animate-in fade-in duration-500">
                 <div
                     onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
@@ -376,6 +470,13 @@ export default function InvoicesPage() {
                 </div>
 
                 <div className="flex flex-col gap-3 w-full md:w-auto md:min-w-[180px] justify-center items-center md:items-stretch">
+                    <button 
+                        onClick={() => setShowManualImport(true)}
+                        className="flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl border border-gray-200 dark:border-gray-700 text-sm font-semibold text-gray-700 dark:text-gray-200 hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+                    >
+                        <PlusCircle size={16} className="text-indigo-500" />
+                        {t('invoices.manualEntry', 'Manual Entry')}
+                    </button>
                     <div className="text-[10px] text-gray-400 dark:text-gray-500 text-center px-2 leading-relaxed">
                         {t('invoices.subtitle')}
                     </div>
@@ -626,6 +727,7 @@ export default function InvoicesPage() {
                             {filtered.map((inv: Invoice) => {
                                 const currentCat = categories.find((c) => c.id === inv.category_id);
                                 const isSelected = selectedIds.has(inv.id);
+                                const hasSplits = inv.splits && inv.splits.length > 0;
 
                                 return (
                                     <tr key={inv.id} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''}`}>
@@ -652,23 +754,36 @@ export default function InvoicesPage() {
                                             </div>
                                         </td>
                                         <td className="px-4 py-3">
-                                            <select
-                                                value={currentCat?.id ?? ''}
-                                                onChange={(e) => updateMutation.mutate({ id: inv.id, data: { category_id: e.target.value || null }})}
-                                                className="text-xs rounded-lg border border-gray-200 dark:border-gray-700 px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500 max-w-[11rem] truncate transition-colors hover:border-indigo-300 dark:hover:border-indigo-500"
-                                                style={currentCat ? { color: currentCat.color, borderColor: currentCat.color + '55' } : undefined}
-                                            >
-                                                <option value="">{t('transactions.table.unset')}</option>
-                                                {categories.filter(c => !c.deleted_at || c.id === currentCat?.id).map((c) => (
-                                                    <option key={c.id} value={c.id}>{c.name}</option>
-                                                ))}
-                                            </select>
+                                            {hasSplits ? (
+                                                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold border border-indigo-100 dark:border-indigo-800/50 uppercase tracking-wider">
+                                                    <Layers size={10} /> {t('invoices.split', 'Split')}
+                                                </span>
+                                            ) : (
+                                                <select
+                                                    value={currentCat?.id ?? ''}
+                                                    onChange={(e) => updateMutation.mutate({ id: inv.id, data: { category_id: e.target.value || null }})}
+                                                    className="text-xs rounded-lg border border-gray-200 dark:border-gray-700 px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500 max-w-[11rem] truncate transition-colors hover:border-indigo-300 dark:hover:border-indigo-500"
+                                                    style={currentCat ? { color: currentCat.color, borderColor: currentCat.color + '55' } : undefined}
+                                                >
+                                                    <option value="">{t('transactions.table.unset')}</option>
+                                                    {categories.filter(c => !c.deleted_at || c.id === currentCat?.id).map((c) => (
+                                                        <option key={c.id} value={c.id}>{c.name}</option>
+                                                    ))}
+                                                </select>
+                                            )}
                                         </td>
                                         <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-[12rem] sm:max-w-xs truncate" title={inv.description}>
                                             {inv.description || t('invoices.emptyDescription')}
                                         </td>
                                         <td className="px-4 py-3 text-right font-mono font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                                            {fmtCurrency(inv.amount, inv.currency)}
+                                            <div className="flex flex-col items-end">
+                                                <span>{fmtCurrency(inv.amount, inv.currency)}</span>
+                                                {inv.base_currency && inv.base_currency !== inv.currency && inv.base_amount !== 0 && (
+                                                    <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal">
+                                                        {fmtCurrency(inv.base_amount, inv.base_currency)}
+                                                    </span>
+                                                )}
+                                            </div>
                                         </td>
                                         <td className="px-4 py-3 text-right">
                                             <div className="flex justify-end space-x-1">
@@ -775,6 +890,15 @@ export default function InvoicesPage() {
                 />
             )}
 
+            {showManualImport && (
+                <ManualImportModal
+                    categories={categories}
+                    onClose={() => setShowManualImport(false)}
+                    onSubmit={(data) => manualImportMutation.mutate(data)}
+                    isPending={manualImportMutation.isPending}
+                />
+            )}
+
             {previewingInvoice && previewInfo && (
                 <PreviewInvoiceModal
                     invoice={previewingInvoice}
@@ -794,6 +918,6 @@ export default function InvoicesPage() {
                     onClose={() => setSharingInvoice(null)}
                 />
             )}
-            </div>
-            );
-            }
+        </div>
+    );
+}

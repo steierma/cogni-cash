@@ -242,7 +242,6 @@ func (r *BankStatementRepository) UpdateTransactionSubscription(ctx context.Cont
 	return nil
 }
 
-
 func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -274,12 +273,26 @@ func (r *BankStatementRepository) UpdateTransactionSkipForecasting(ctx context.C
 	defer r.mu.Unlock()
 	tx, ok := r.transactions[hash]
 	if !ok || tx.UserID != userID {
-		return entity.ErrTransactionNotFound
+		return nil
 	}
 	tx.SkipForecasting = skip
 	r.transactions[hash] = tx
 	return nil
 }
+
+func (r *BankStatementRepository) UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	tx, ok := r.transactions[hash]
+	if !ok || tx.UserID != userID {
+		return nil
+	}
+	tx.BaseAmount = baseAmount
+	tx.BaseCurrency = baseCurrency
+	r.transactions[hash] = tx
+	return nil
+}
+
 
 func (r *BankStatementRepository) LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()

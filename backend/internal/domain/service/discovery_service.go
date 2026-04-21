@@ -89,6 +89,7 @@ func (s *DiscoveryService) UpdateSubscription(ctx context.Context, sub entity.Su
 	current.MerchantName = sub.MerchantName
 	current.Amount = sub.Amount
 	current.BillingCycle = sub.BillingCycle
+	current.BillingInterval = sub.BillingInterval
 	current.CustomerNumber = sub.CustomerNumber
 	current.ContactEmail = sub.ContactEmail
 	current.ContactPhone = sub.ContactPhone
@@ -163,6 +164,26 @@ func (s *DiscoveryService) GetSuggestedSubscriptions(ctx context.Context, userID
 		feedbackMap[normalizeDescription(f.MerchantName)] = f
 	}
 
+	// Build a set of all hashes, mandates, and IBANs already covered by existing subscriptions
+	coveredHashes := make(map[string]bool)
+	coveredMandates := make(map[string]bool)
+	coveredIbans := make(map[string]bool)
+	for _, sub := range existingSubs {
+		for _, h := range sub.MatchingHashes {
+			coveredHashes[h] = true
+		}
+		for _, m := range sub.LinkedMandates {
+			if m != "" {
+				coveredMandates[m] = true
+			}
+		}
+		for _, i := range sub.LinkedIbans {
+			if i != "" {
+				coveredIbans[i] = true
+			}
+		}
+	}
+
 	// 3. Detect recurring patterns
 	recurring := s.detectRecurring(history, amountTolerance, minTxGeneric, dateTolerance)
 
@@ -174,13 +195,41 @@ func (s *DiscoveryService) GetSuggestedSubscriptions(ctx context.Context, userID
 			normCounterparty = normalizeDescription(rt.template.CounterpartyName)
 		}
 
-		// Filter out if already a subscription
+		// Filter out if hashes are already mostly covered by an existing subscription
+		matchedHashes := 0
+		for _, h := range rt.matchingHashes {
+			if coveredHashes[h] {
+				matchedHashes++
+			}
+		}
+		// If more than 50% of the sequence is already covered, skip it.
+		// This handles the case where discovery finds the same pattern as an existing sub.
+		if len(rt.matchingHashes) > 0 && float64(matchedHashes)/float64(len(rt.matchingHashes)) >= 0.5 {
+			continue
+		}
+
+		// Priority Filter: If the pattern uses a Mandate or IBAN that is ALREADY covered, skip it.
+		// This is the most reliable check for "I already have this subscription" regardless of renaming.
+		if rt.template.MandateReference != "" && coveredMandates[rt.template.MandateReference] {
+			continue
+		}
+		if rt.template.CounterpartyIban != "" && coveredIbans[rt.template.CounterpartyIban] {
+			continue
+		}
+
+		// Filter out if already a subscription with similar amount and description
 		isExisting := false
 		for _, sub := range existingSubs {
 			normSub := normalizeDescription(sub.MerchantName)
-			if normSub == normDesc || (normCounterparty != "" && normSub == normCounterparty) {
-				isExisting = true
-				break
+			// Match if: same merchant name (either Desc or CP) AND similar amount
+			isSameMerchant := (normSub == normDesc || (normCounterparty != "" && normSub == normCounterparty))
+			if isSameMerchant && isAmountClose(rt.template.Amount, sub.Amount, amountTolerance) {
+				// We ALSO require the description to match to allow multiple distinct subscriptions
+				// for the same merchant (e.g. different Barmenia contracts).
+				if normalizeDescription(rt.template.Description) == normalizeDescription(sub.MerchantName) {
+					isExisting = true
+					break
+				}
 			}
 		}
 		if isExisting {
@@ -287,14 +336,50 @@ func (s *DiscoveryService) ApproveSubscription(ctx context.Context, userID uuid.
 			hashSet[h] = true
 		}
 
+		mandateSet := make(map[string]bool)
+		ibanSet := make(map[string]bool)
+
+		// Fetch tolerance (same as GetSuggestedSubscriptions)
+		amountTolerance := 0.10
+		if val, err := s.settingsRepo.Get(ctx, "subscription_discovery_amount_tolerance", userID); err == nil && val != "" {
+			if v, err := strconv.ParseFloat(val, 64); err == nil && v > 0 {
+				amountTolerance = v
+			}
+		}
+
 		for _, tx := range txns {
-			// Link if: no sub yet, it's a debit, and name matches normalized
-			if tx.SubscriptionID == nil && tx.Amount < 0 && normalizeDescription(tx.Description) == normSub {
+			// Link if: no sub yet, it's a debit, name matches (CP or Desc) AND amount is similar
+			normTxDesc := normalizeDescription(tx.Description)
+			normTxCP := ""
+			if tx.CounterpartyName != "" {
+				normTxCP = normalizeDescription(tx.CounterpartyName)
+			}
+
+			isNameMatch := (normTxDesc == normSub || (normTxCP != "" && normTxCP == normSub))
+			if tx.SubscriptionID == nil && tx.Amount < 0 &&
+				isNameMatch &&
+				isAmountClose(tx.Amount, suggestion.EstimatedAmount, amountTolerance) {
 				if !hashSet[tx.ContentHash] {
 					hashSet[tx.ContentHash] = true
 					suggestion.MatchingHashes = append(suggestion.MatchingHashes, tx.ContentHash)
 				}
+
+				// Extract deterministic identifiers
+				if tx.MandateReference != "" {
+					mandateSet[tx.MandateReference] = true
+				}
+				if tx.CounterpartyIban != "" {
+					ibanSet[tx.CounterpartyIban] = true
+				}
 			}
+		}
+
+		// Update subscription with deterministic identifiers
+		for m := range mandateSet {
+			sub.LinkedMandates = append(sub.LinkedMandates, m)
+		}
+		for i := range ibanSet {
+			sub.LinkedIbans = append(sub.LinkedIbans, i)
 		}
 	}
 
@@ -412,20 +497,21 @@ func (s *DiscoveryService) EnrichSubscription(ctx context.Context, userID, subID
 	return updated, nil
 }
 
-func (s *DiscoveryService) CreateSubscriptionFromTransaction(ctx context.Context, userID uuid.UUID, txnHash string, billingCycle string) (entity.Subscription, error) {
+func (s *DiscoveryService) CreateSubscriptionFromTransaction(ctx context.Context, userID uuid.UUID, txnHash string, merchantName, billingCycle string, billingInterval int) (entity.Subscription, error) {
 	// 1. Fetch the source transaction
+	// We fetch ALL transactions for the user to ensure we find the one with the matching hash,
+	// even if it's already reconciled or doesn't match a search proxy.
 	txns, err := s.txRepo.FindTransactions(ctx, entity.TransactionFilter{
 		UserID: userID,
-		Search: txnHash, // Use search as a proxy for finding by specific hash if dedicated method doesn't exist
 	})
 	if err != nil {
 		return entity.Subscription{}, err
 	}
 
 	var sourceTx *entity.Transaction
-	for _, t := range txns {
-		if t.ContentHash == txnHash {
-			sourceTx = &t
+	for i := range txns {
+		if txns[i].ContentHash == txnHash {
+			sourceTx = &txns[i]
 			break
 		}
 	}
@@ -440,17 +526,12 @@ func (s *DiscoveryService) CreateSubscriptionFromTransaction(ctx context.Context
 	}
 
 	// 3. Prepare Subscription details
-	merchant := sourceTx.CounterpartyName
+	merchant := merchantName
 	if merchant == "" {
-		merchant = sourceTx.Description
-	}
-
-	// Calculate billing interval
-	interval := 1
-	if billingCycle == "yearly" {
-		interval = 12
-	} else if billingCycle == "quarterly" {
-		interval = 3
+		merchant = sourceTx.CounterpartyName
+		if merchant == "" {
+			merchant = sourceTx.Description
+		}
 	}
 
 	sub := entity.Subscription{
@@ -460,16 +541,81 @@ func (s *DiscoveryService) CreateSubscriptionFromTransaction(ctx context.Context
 		Amount:          math.Abs(sourceTx.Amount),
 		Currency:        sourceTx.Currency,
 		BillingCycle:    billingCycle,
-		BillingInterval: interval,
+		BillingInterval: billingInterval,
 		Status:          entity.SubscriptionStatusActive,
 		CategoryID:      sourceTx.CategoryID,
 		LastOccurrence:  &sourceTx.BookingDate,
+		LinkedMandates:  []string{},
+		LinkedIbans:     []string{},
 		CreatedAt:       time.Now(),
 		UpdatedAt:       time.Now(),
 	}
 
-	// 4. Create in DB and backfill this transaction
-	created, err := s.subRepo.CreateWithBackfill(ctx, sub, []string{txnHash})
+	// 4. Broad Historical Backfill
+	// Similar to ApproveSubscription, we link all historical transactions that match this merchant.
+	normSub := normalizeDescription(merchant)
+	matchingHashes := []string{txnHash}
+	hashSet := map[string]bool{txnHash: true}
+
+	mandateSet := make(map[string]bool)
+	ibanSet := make(map[string]bool)
+
+	if sourceTx.MandateReference != "" {
+		mandateSet[sourceTx.MandateReference] = true
+	}
+	if sourceTx.CounterpartyIban != "" {
+		ibanSet[sourceTx.CounterpartyIban] = true
+	}
+
+	// Fetch tolerance
+	amountTolerance := 0.10
+	if val, err := s.settingsRepo.Get(ctx, "subscription_discovery_amount_tolerance", userID); err == nil && val != "" {
+		if v, err := strconv.ParseFloat(val, 64); err == nil && v > 0 {
+			amountTolerance = v
+		}
+	}
+
+	for _, tx := range txns {
+		if tx.ContentHash == txnHash {
+			continue
+		}
+
+		// Link if: no sub yet, it's a debit, name matches (CP or Desc) AND amount is similar
+		normTxDesc := normalizeDescription(tx.Description)
+		normTxCP := ""
+		if tx.CounterpartyName != "" {
+			normTxCP = normalizeDescription(tx.CounterpartyName)
+		}
+
+		isNameMatch := (normTxDesc == normSub || (normTxCP != "" && normTxCP == normSub))
+		if tx.SubscriptionID == nil && tx.Amount < 0 &&
+			isNameMatch &&
+			isAmountClose(tx.Amount, sourceTx.Amount, amountTolerance) {
+			if !hashSet[tx.ContentHash] {
+				hashSet[tx.ContentHash] = true
+				matchingHashes = append(matchingHashes, tx.ContentHash)
+			}
+
+			// Extract deterministic identifiers
+			if tx.MandateReference != "" {
+				mandateSet[tx.MandateReference] = true
+			}
+			if tx.CounterpartyIban != "" {
+				ibanSet[tx.CounterpartyIban] = true
+			}
+		}
+	}
+
+	// Update subscription with deterministic identifiers
+	for m := range mandateSet {
+		sub.LinkedMandates = append(sub.LinkedMandates, m)
+	}
+	for i := range ibanSet {
+		sub.LinkedIbans = append(sub.LinkedIbans, i)
+	}
+
+	// 5. Create in DB and backfill matched transactions
+	created, err := s.subRepo.CreateWithBackfill(ctx, sub, matchingHashes)
 	if err != nil {
 		return entity.Subscription{}, err
 	}
@@ -589,30 +735,210 @@ func (s *DiscoveryService) MatchTransactions(ctx context.Context, userID uuid.UU
 		return nil
 	}
 
-	// 2. Build a map of normalized merchant names to subscriptions
+	// 2. Build maps for deterministic and fuzzy matching
 	merchantMap := make(map[string][]entity.Subscription)
+	mandateMap := make(map[string]uuid.UUID)
+	ibanMap := make(map[string]uuid.UUID)
+	hashMap := make(map[string]uuid.UUID)
+
 	for _, sub := range subs {
 		norm := normalizeDescription(sub.MerchantName)
 		merchantMap[norm] = append(merchantMap[norm], sub)
+
+		for _, h := range sub.MatchingHashes {
+			hashMap[h] = sub.ID
+		}
+		for _, m := range sub.LinkedMandates {
+			if m != "" {
+				mandateMap[m] = sub.ID
+			}
+		}
+		for _, i := range sub.LinkedIbans {
+			if i != "" {
+				ibanMap[i] = sub.ID
+			}
+		}
 	}
 
 	// 3. Match each transaction
 	for _, tx := range txns {
+		// Priority 1: Explicit matching_hashes (manual links)
+		if subID, ok := hashMap[tx.ContentHash]; ok {
+			s.Logger.Info("Matching transaction to subscription via explicit hash", "tx_hash", tx.ContentHash, "sub_id", subID, "user_id", userID)
+			_ = s.txRepo.UpdateTransactionSubscription(ctx, tx.ContentHash, &subID, userID)
+			continue
+		}
+
+		// Priority 2: Deterministic identifiers (Mandate or IBAN)
+		matchedDeterministic := false
+		if tx.MandateReference != "" {
+			if subID, ok := mandateMap[tx.MandateReference]; ok {
+				// Verify not ignored
+				if !isIgnored(getSubByID(subs, subID), tx.ContentHash) {
+					s.Logger.Info("Matching transaction to subscription via mandate", "tx_hash", tx.ContentHash, "sub_id", subID, "mandate", tx.MandateReference)
+					_ = s.txRepo.UpdateTransactionSubscription(ctx, tx.ContentHash, &subID, userID)
+					matchedDeterministic = true
+				}
+			}
+		}
+		if !matchedDeterministic && tx.CounterpartyIban != "" {
+			if subID, ok := ibanMap[tx.CounterpartyIban]; ok {
+				// Verify not ignored
+				if !isIgnored(getSubByID(subs, subID), tx.ContentHash) {
+					s.Logger.Info("Matching transaction to subscription via IBAN", "tx_hash", tx.ContentHash, "sub_id", subID, "iban", tx.CounterpartyIban)
+					_ = s.txRepo.UpdateTransactionSubscription(ctx, tx.ContentHash, &subID, userID)
+					matchedDeterministic = true
+				}
+			}
+		}
+		if matchedDeterministic {
+			continue
+		}
+
+		// Priority 3: Fuzzy matching (normalized name + amount)
 		normDesc := normalizeDescription(tx.Description)
+		normCP := ""
+		if tx.CounterpartyName != "" {
+			normCP = normalizeDescription(tx.CounterpartyName)
+		}
+
+		matchedFuzzy := false
+		// Try matching by Description first
 		if candidates, ok := merchantMap[normDesc]; ok {
 			for _, sub := range candidates {
-				// Match if amount is close (within 10%)
+				if isIgnored(sub, tx.ContentHash) {
+					continue
+				}
 				if isAmountClose(tx.Amount, sub.Amount, 0.1) {
-					s.Logger.Info("Matching transaction to subscription", "tx_hash", tx.ContentHash, "sub_id", sub.ID, "user_id", userID)
-					err := s.txRepo.UpdateTransactionSubscription(ctx, tx.ContentHash, &sub.ID, userID)
-					if err != nil {
-						s.Logger.Error("Failed to link transaction to subscription", "error", err, "tx_hash", tx.ContentHash, "sub_id", sub.ID)
+					s.Logger.Info("Matching transaction to subscription via fuzzy match (Description)", "tx_hash", tx.ContentHash, "sub_id", sub.ID)
+					_ = s.txRepo.UpdateTransactionSubscription(ctx, tx.ContentHash, &sub.ID, userID)
+					matchedFuzzy = true
+					break
+				}
+			}
+		}
+
+		// If not matched, try matching by CounterpartyName
+		if !matchedFuzzy && normCP != "" {
+			if candidates, ok := merchantMap[normCP]; ok {
+				for _, sub := range candidates {
+					if isIgnored(sub, tx.ContentHash) {
+						continue
 					}
-					break // Linked to the first matching candidate
+					if isAmountClose(tx.Amount, sub.Amount, 0.1) {
+						s.Logger.Info("Matching transaction to subscription via fuzzy match (Counterparty)", "tx_hash", tx.ContentHash, "sub_id", sub.ID)
+						_ = s.txRepo.UpdateTransactionSubscription(ctx, tx.ContentHash, &sub.ID, userID)
+						matchedFuzzy = true
+						break
+					}
 				}
 			}
 		}
 	}
+
+	return nil
+}
+
+func (s *DiscoveryService) LinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error {
+	// 1. Fetch Subscription
+	sub, err := s.subRepo.GetByID(ctx, subID, userID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Remove from IgnoredHashes if present
+	newIgnored := []string{}
+	for _, h := range sub.IgnoredHashes {
+		if h != txnHash {
+			newIgnored = append(newIgnored, h)
+		}
+	}
+	sub.IgnoredHashes = newIgnored
+
+	// 3. Add to MatchingHashes if not present
+	found := false
+	for _, h := range sub.MatchingHashes {
+		if h == txnHash {
+			found = true
+			break
+		}
+	}
+	if !found {
+		sub.MatchingHashes = append(sub.MatchingHashes, txnHash)
+	}
+
+	// 4. Update Subscription
+	if _, err := s.subRepo.Update(ctx, sub); err != nil {
+		return fmt.Errorf("failed to update subscription matching hashes: %w", err)
+	}
+
+	// 5. Link Transaction
+	if err := s.txRepo.UpdateTransactionSubscription(ctx, txnHash, &subID, userID); err != nil {
+		return fmt.Errorf("failed to link transaction: %w", err)
+	}
+
+	// 6. Log Event
+	_ = s.subRepo.LogEvent(ctx, entity.SubscriptionEvent{
+		ID:             uuid.New(),
+		SubscriptionID: subID,
+		UserID:         userID,
+		EventType:      "transaction_linked_manually",
+		Title:          "Manual Transaction Link",
+		Content:        fmt.Sprintf("Transaction %s was manually linked to this subscription.", txnHash),
+		CreatedAt:      time.Now(),
+	})
+
+	return nil
+}
+
+func (s *DiscoveryService) UnlinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error {
+	// 1. Fetch Subscription
+	sub, err := s.subRepo.GetByID(ctx, subID, userID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Remove from MatchingHashes if present
+	newMatching := []string{}
+	for _, h := range sub.MatchingHashes {
+		if h != txnHash {
+			newMatching = append(newMatching, h)
+		}
+	}
+	sub.MatchingHashes = newMatching
+
+	// 3. Add to IgnoredHashes if not present
+	found := false
+	for _, h := range sub.IgnoredHashes {
+		if h == txnHash {
+			found = true
+			break
+		}
+	}
+	if !found {
+		sub.IgnoredHashes = append(sub.IgnoredHashes, txnHash)
+	}
+
+	// 4. Update Subscription
+	if _, err := s.subRepo.Update(ctx, sub); err != nil {
+		return fmt.Errorf("failed to update subscription ignored hashes: %w", err)
+	}
+
+	// 5. Unlink Transaction (set subscription_id to NULL)
+	if err := s.txRepo.UpdateTransactionSubscription(ctx, txnHash, nil, userID); err != nil {
+		return fmt.Errorf("failed to unlink transaction: %w", err)
+	}
+
+	// 6. Log Event
+	_ = s.subRepo.LogEvent(ctx, entity.SubscriptionEvent{
+		ID:             uuid.New(),
+		SubscriptionID: subID,
+		UserID:         userID,
+		EventType:      "transaction_unlinked_manually",
+		Title:          "Manual Transaction Unlink",
+		Content:        fmt.Sprintf("Transaction %s was manually unlinked and added to the ignore list.", txnHash),
+		CreatedAt:      time.Now(),
+	})
 
 	return nil
 }
@@ -634,35 +960,43 @@ type discoveryPattern struct {
 }
 
 func (s *DiscoveryService) detectRecurring(history []entity.Transaction, amountTolerance float64, minTxGeneric int, dateTolerance float64) []discoveryPattern {
-	// 1. Initial Grouping: IBAN-first with Description-fallback
-	// This ensures that all transactions from the same account are grouped regardless of name noise.
-	
-	type groupNode struct {
-		txs []entity.Transaction
-	}
-	
-	// Composite key: IBAN or Normalized Description
+	// 1. Initial Grouping: Mandate-first, then IBAN, then Description-fallback
+	// This ensures that all transactions sharing a deterministic identifier are grouped together.
+
 	groups := make(map[string][]entity.Transaction)
-	ibanToGroup := make(map[string]string)
-	
+	identifierToGroup := make(map[string]string)
+
 	for _, tx := range history {
 		if tx.Amount >= 0 {
 			continue
 		}
-		
+
+		// If a transaction is already linked to a subscription, ignore it for pattern discovery.
+		// This is the most robust way to prevent approved subscriptions from reappearing.
+		if tx.SubscriptionID != nil {
+			continue
+		}
+
 		normDesc := normalizeDescription(tx.Description)
 		groupKey := normDesc
-		
-		if tx.CounterpartyIban != "" {
-			if root, ok := ibanToGroup[tx.CounterpartyIban]; ok {
+
+		// Deterministic Identifier Linkage (Mandate > IBAN)
+		if tx.MandateReference != "" {
+			if root, ok := identifierToGroup[tx.MandateReference]; ok {
 				groupKey = root
 			} else {
-				// New IBAN, link it to this description group
-				ibanToGroup[tx.CounterpartyIban] = normDesc
+				identifierToGroup[tx.MandateReference] = normDesc
+				groupKey = normDesc
+			}
+		} else if tx.CounterpartyIban != "" {
+			if root, ok := identifierToGroup[tx.CounterpartyIban]; ok {
+				groupKey = root
+			} else {
+				identifierToGroup[tx.CounterpartyIban] = normDesc
 				groupKey = normDesc
 			}
 		}
-		
+
 		groups[groupKey] = append(groups[groupKey], tx)
 	}
 
@@ -677,6 +1011,8 @@ func (s *DiscoveryService) detectRecurring(history []entity.Transaction, amountT
 		})
 
 		// 2. Multi-Sequence Detection within each group
+		// Note: For deterministic groups (same Mandate), we allow more amount flexibility
+		// because a mandate is an unambiguous contract link.
 		type seqState struct {
 			txs      []entity.Transaction
 			interval int
@@ -692,10 +1028,20 @@ func (s *DiscoveryService) detectRecurring(history []entity.Transaction, amountT
 				interval := getIntervalFromDays(days, dateTolerance)
 
 				if interval > 0 && (seq.interval == 0 || interval == seq.interval) {
+					// Check amount similarity
 					amtDiff := math.Abs(tx.Amount - last.Amount)
-					maxAllowed := math.Max(math.Abs(last.Amount)*amountTolerance, 10.0)
+					
+					// If they share the SAME MandateReference, we allow much higher tolerance
+					// because the mandate is the authoritative link.
+					isSameMandate := tx.MandateReference != "" && tx.MandateReference == last.MandateReference
+					effectiveTolerance := amountTolerance
+					if isSameMandate {
+						effectiveTolerance = 0.50 // Allow up to 50% change for mandate-linked payments (e.g. mobile data overage)
+					}
+					
+					maxAllowed := math.Max(math.Abs(last.Amount)*effectiveTolerance, 10.0)
 
-					if amtDiff <= maxAllowed {
+					if amtDiff <= maxAllowed || isSameMandate {
 						seq.txs = append(seq.txs, tx)
 						seq.interval = interval
 						matched = true
@@ -751,7 +1097,6 @@ func deduplicatePatterns(patterns []discoveryPattern, amountTolerance float64) [
 	var result []discoveryPattern
 
 	for _, p := range patterns {
-		// Use normalized template description for merging
 		normName := normalizeDescription(p.template.Description)
 		if p.template.CounterpartyName != "" {
 			normName = normalizeDescription(p.template.CounterpartyName)
@@ -764,16 +1109,51 @@ func deduplicatePatterns(patterns []discoveryPattern, amountTolerance float64) [
 				existingNorm = normalizeDescription(existing.template.CounterpartyName)
 			}
 
-			// Merging criteria: Same normalized name OR Same IBAN (implicit in clustering but good to double-check)
-			// We prioritize name merge to fulfill "same name should never result in multiple suggestions"
-			if normName == existingNorm {
-				// Merge: Keep the one with more transactions (more likely to be accurate)
-				// or the more recent one if counts are equal.
-				if len(p.matchingHashes) > len(existing.matchingHashes) || 
-				   (len(p.matchingHashes) == len(existing.matchingHashes) && p.template.BookingDate.After(existing.template.BookingDate)) {
-					// Transfer matching hashes to the winner if we want to be exhaustive
-					// For now, we just pick the better template
+			// Merging criteria:
+			// 1. Same MandateReference -> Unambiguous merge, always do it.
+			// 2. Same normalized name AND similar amount AND similar description.
+			
+			isSameMandate := p.template.MandateReference != "" && p.template.MandateReference == existing.template.MandateReference
+			
+			pDesc := normalizeDescription(p.template.Description)
+			eDesc := normalizeDescription(existing.template.Description)
+			
+			isSameMerchant := normName == existingNorm &&
+				isAmountClose(p.template.Amount, existing.template.Amount, amountTolerance) &&
+				pDesc == eDesc
+
+			if isSameMandate || isSameMerchant {
+				// Merge: Keep the one with more transactions
+				if len(p.matchingHashes) > len(existing.matchingHashes) ||
+					(len(p.matchingHashes) == len(existing.matchingHashes) && p.template.BookingDate.After(existing.template.BookingDate)) {
+					
+					// Transfer matching hashes to the winner to keep full history
+					allHashes := append(existing.matchingHashes, p.matchingHashes...)
+					// Simple deduplication (just in case)
+					uniqueHashes := make(map[string]bool)
+					finalHashes := []string{}
+					for _, h := range allHashes {
+						if !uniqueHashes[h] {
+							uniqueHashes[h] = true
+							finalHashes = append(finalHashes, h)
+						}
+					}
+					
+					p.matchingHashes = finalHashes
 					result[i] = p
+				} else {
+					// Transfer p's hashes to existing
+					allHashes := append(existing.matchingHashes, p.matchingHashes...)
+					uniqueHashes := make(map[string]bool)
+					finalHashes := []string{}
+					for _, h := range allHashes {
+						if !uniqueHashes[h] {
+							uniqueHashes[h] = true
+							finalHashes = append(finalHashes, h)
+						}
+					}
+					existing.matchingHashes = finalHashes
+					result[i] = existing
 				}
 				merged = true
 				break
@@ -806,4 +1186,23 @@ func getBillingCycle(months int) (string, int) {
 	return "monthly", months
 }
 
+func isIgnored(sub entity.Subscription, hash string) bool {
+	if sub.ID == uuid.Nil {
+		return false
+	}
+	for _, h := range sub.IgnoredHashes {
+		if h == hash {
+			return true
+		}
+	}
+	return false
+}
 
+func getSubByID(subs []entity.Subscription, id uuid.UUID) entity.Subscription {
+	for _, s := range subs {
+		if s.ID == id {
+			return s
+		}
+	}
+	return entity.Subscription{}
+}

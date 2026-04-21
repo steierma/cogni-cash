@@ -89,8 +89,11 @@ func (m *mockPayslipRepoDocSvc) FindAll(ctx context.Context, filter entity.Paysl
 func (m *mockPayslipRepoDocSvc) FindByID(context.Context, string, uuid.UUID) (entity.Payslip, error) {
 	return entity.Payslip{}, nil
 }
-func (m *mockPayslipRepoDocSvc) Update(context.Context, *entity.Payslip) error     { return nil }
-func (m *mockPayslipRepoDocSvc) Delete(context.Context, string, uuid.UUID) error     { return nil }
+func (m *mockPayslipRepoDocSvc) Update(context.Context, *entity.Payslip) error   { return nil }
+func (m *mockPayslipRepoDocSvc) UpdateBaseAmount(context.Context, string, float64, float64, float64, string, uuid.UUID) error {
+	return nil
+}
+func (m *mockPayslipRepoDocSvc) Delete(context.Context, string, uuid.UUID) error { return nil }
 func (m *mockPayslipRepoDocSvc) ExistsByHash(context.Context, string, uuid.UUID) (bool, error) {
 	return false, nil
 }
@@ -119,7 +122,12 @@ func (m *mockInvoiceRepoDocSvc) FindByID(context.Context, uuid.UUID, uuid.UUID) 
 	return entity.Invoice{}, nil
 }
 func (m *mockInvoiceRepoDocSvc) Update(context.Context, entity.Invoice) error { return nil }
+func (m *mockInvoiceRepoDocSvc) UpdateBaseAmount(context.Context, uuid.UUID, float64, string, uuid.UUID) error {
+	return nil
+}
 func (m *mockInvoiceRepoDocSvc) Delete(context.Context, uuid.UUID, uuid.UUID) error { return nil }
+
+func (m *mockInvoiceRepoDocSvc) DeleteSplits(context.Context, uuid.UUID, uuid.UUID) error        { return nil }
 func (m *mockInvoiceRepoDocSvc) ExistsByContentHash(context.Context, string, uuid.UUID) (bool, error) {
 	return false, nil
 }

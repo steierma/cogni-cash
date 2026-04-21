@@ -18,6 +18,7 @@ type PayslipRepository interface {
 
 	// Editing and Deletion
 	Update(ctx context.Context, payslip *entity.Payslip) error
+	UpdateBaseAmount(ctx context.Context, id string, baseGross, baseNet, basePayout float64, currency string, userID uuid.UUID) error
 	Delete(ctx context.Context, id string, userID uuid.UUID) error
 
 	// File Download

@@ -17,6 +17,7 @@ import (
 
 type BankService struct {
 	repo             port.BankRepository
+	sharingRepo      port.SharingRepository
 	stmtRepo         port.BankStatementRepository
 	settingsRepo     port.SettingsRepository
 	plannedTxService port.PlannedTransactionUseCase
@@ -25,9 +26,10 @@ type BankService struct {
 	logger           *slog.Logger
 }
 
-func NewBankService(repo port.BankRepository, stmtRepo port.BankStatementRepository, settingsRepo port.SettingsRepository, plannedTxService port.PlannedTransactionUseCase, provider port.BankProvider, logger *slog.Logger) *BankService {
+func NewBankService(repo port.BankRepository, sharingRepo port.SharingRepository, stmtRepo port.BankStatementRepository, settingsRepo port.SettingsRepository, plannedTxService port.PlannedTransactionUseCase, provider port.BankProvider, logger *slog.Logger) *BankService {
 	return &BankService{
 		repo:             repo,
+		sharingRepo:      sharingRepo,
 		stmtRepo:         stmtRepo,
 		settingsRepo:     settingsRepo,
 		plannedTxService: plannedTxService,
@@ -117,7 +119,7 @@ func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, re
 		}
 		s.logger.Info("Fetched accounts for connection", "count", len(accounts), "connection_id", conn.ID, "user_id", conn.UserID)
 		for i := range accounts {
-			accounts[i].ConnectionID = conn.ID
+			accounts[i].ConnectionID = &conn.ID
 			s.logger.Info("Account to upsert",
 				"provider_account_id", accounts[i].ProviderAccountID,
 				"iban", accounts[i].IBAN,
@@ -151,12 +153,59 @@ func (s *BankService) GetConnections(ctx context.Context, userID uuid.UUID) ([]e
 		}
 	}
 
+	// Fetch ALL accounts for this user to find virtual or shared ones not attached to the user's connections
+	allAccs, err := s.repo.GetAccountsByUserID(ctx, userID)
+	if err != nil {
+		return conns, nil // Return what we have
+	}
+
+	// Identify accounts that are NOT in the fetched connections
+	linkedAccountIDs := make(map[uuid.UUID]bool)
+	for _, conn := range conns {
+		for _, acc := range conn.Accounts {
+			linkedAccountIDs[acc.ID] = true
+		}
+	}
+
+	var virtualAndSharedAccs []entity.BankAccount
+	for _, acc := range allAccs {
+		if !linkedAccountIDs[acc.ID] {
+			virtualAndSharedAccs = append(virtualAndSharedAccs, acc)
+		}
+	}
+
+	if len(virtualAndSharedAccs) > 0 {
+		// Add a synthetic connection for virtual/shared accounts
+		virtualConn := entity.BankConnection{
+			ID:              uuid.Nil,
+			UserID:          userID,
+			InstitutionName: "Manual & Shared Accounts",
+			Provider:        "internal",
+			Status:          entity.StatusLinked,
+			Accounts:        virtualAndSharedAccs,
+		}
+		conns = append(conns, virtualConn)
+	}
+
 	return conns, nil
 }
 
 func (s *BankService) DeleteConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	s.logger.Info("Deleting bank connection", "id", id, "user_id", userID)
 	return s.repo.DeleteConnection(ctx, id, userID)
+}
+
+func (s *BankService) CreateVirtualAccount(ctx context.Context, acc *entity.BankAccount) error {
+	s.logger.Info("Creating virtual bank account", "name", acc.Name, "user_id", acc.UserID)
+	if acc.ID == uuid.Nil {
+		acc.ID = uuid.New()
+	}
+	acc.ConnectionID = nil
+	acc.ProviderAccountID = "virtual-" + acc.ID.String()
+	if acc.LastSyncedAt.IsZero() {
+		acc.LastSyncedAt = time.Now()
+	}
+	return s.repo.SaveAccount(ctx, acc)
 }
 
 func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, userID uuid.UUID) error {
@@ -169,6 +218,11 @@ func (s *BankService) SyncAccount(ctx context.Context, accountID uuid.UUID, user
 	if acc == nil {
 		s.logger.Warn("account not found for sync", "account_id", accountID, "user_id", userID)
 		return fmt.Errorf("account not found: %s", accountID)
+	}
+
+	if acc.ConnectionID == nil {
+		s.logger.Info("Skipping sync for virtual account", "account_id", accountID, "user_id", userID)
+		return nil
 	}
 
 	historyDaysStr, _ := s.settingsRepo.Get(ctx, "bank_sync_history_days", userID)
@@ -308,4 +362,18 @@ func (s *BankService) SyncAllAccounts(ctx context.Context, userID uuid.UUID) err
 func (s *BankService) UpdateAccountType(ctx context.Context, accountID uuid.UUID, accType entity.StatementType, userID uuid.UUID) error {
 	s.logger.Info("Updating account type", "account_id", accountID, "type", accType, "user_id", userID)
 	return s.repo.UpdateAccountType(ctx, accountID, accType, userID)
+}
+
+func (s *BankService) ShareAccount(ctx context.Context, accountID, ownerID, sharedWithID uuid.UUID, permission string) error {
+	s.logger.Info("Sharing bank account", "account_id", accountID, "owner", ownerID, "with", sharedWithID)
+	return s.sharingRepo.ShareBankAccount(ctx, accountID, ownerID, sharedWithID, permission)
+}
+
+func (s *BankService) RevokeShare(ctx context.Context, accountID, ownerID, sharedWithID uuid.UUID) error {
+	s.logger.Info("Revoking bank account share", "account_id", accountID, "owner", ownerID, "with", sharedWithID)
+	return s.sharingRepo.RevokeBankAccountShare(ctx, accountID, ownerID, sharedWithID)
+}
+
+func (s *BankService) ListShares(ctx context.Context, accountID, ownerID uuid.UUID) ([]uuid.UUID, error) {
+	return s.sharingRepo.ListBankAccountShares(ctx, accountID, ownerID)
 }

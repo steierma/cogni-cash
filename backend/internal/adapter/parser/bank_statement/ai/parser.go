@@ -19,7 +19,7 @@ import (
 // passes the detected MIME type and raw bytes; the adapter decides the LLM path
 // (multimodal for images, text-prompt for PDFs/CSV).
 type LLMStatementParser interface {
-	ParseBankStatementDocument(ctx context.Context, userID uuid.UUID, mimeType string, data []byte) (entity.BankStatement, error)
+	ParseBankStatement(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, data []byte) (entity.BankStatement, error)
 }
 
 // imageMIMETypes is the set of MIME types that bypass text extraction.
@@ -42,8 +42,8 @@ func NewParser(llm LLMStatementParser, logger *slog.Logger) *Parser {
 }
 
 // Parse detects the file type from magic bytes and routes accordingly:
-//   - Image → passes raw bytes + detected MIME to ParseBankStatementDocument (multimodal)
-//   - PDF/text → extracts text first, then passes as text/plain to ParseBankStatementDocument
+//   - Image → passes raw bytes + detected MIME to ParseBankStatement (multimodal)
+//   - PDF/text → extracts text first, then passes as text/plain to ParseBankStatement
 func (p *Parser) Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
 	detected := http.DetectContentType(fileBytes)
 
@@ -55,7 +55,7 @@ func (p *Parser) Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) 
 	if imageMIMETypes[detected] {
 		p.logger.Info("Image file detected in AI bank statement parser, using multimodal path",
 			"mime_type", detected, "size_bytes", len(fileBytes), "user_id", userID)
-		return p.llm.ParseBankStatementDocument(ctx, userID, detected, fileBytes)
+		return p.llm.ParseBankStatement(ctx, userID, "ai_extracted_image", detected, fileBytes)
 	}
 
 	// Text/PDF path: extract readable text, then forward as plain-text bytes
@@ -74,5 +74,5 @@ func (p *Parser) Parse(ctx context.Context, userID uuid.UUID, fileBytes []byte) 
 	}
 
 	p.logger.Info("Sending extracted text to LLM for bank statement parsing", "text_length", len(rawText))
-	return p.llm.ParseBankStatementDocument(ctx, userID, "text/plain", []byte(rawText))
+	return p.llm.ParseBankStatement(ctx, userID, "ai_extracted_text", "text/plain", []byte(rawText))
 }

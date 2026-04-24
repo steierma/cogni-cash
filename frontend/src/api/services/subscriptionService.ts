@@ -58,6 +58,9 @@ export const subscriptionService = {
     linkTransaction: (subID: string, txnHash: string): Promise<void> =>
         api.post(`subscriptions/${subID}/transactions/${txnHash}/link/`).then(() => undefined),
 
+    linkTransactions: (subID: string, txnHashes: string[]): Promise<void> =>
+        api.post(`subscriptions/${subID}/transactions/link/`, { hashes: txnHashes }).then(() => undefined),
+
     unlinkTransaction: (subID: string, txnHash: string): Promise<void> =>
         api.delete(`subscriptions/${subID}/transactions/${txnHash}/unlink/`).then(() => undefined),
 

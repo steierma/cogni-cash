@@ -12,22 +12,28 @@ import (
 )
 
 type createPlannedTransactionRequest struct {
-	Amount         float64    `json:"amount"`
-	Date           time.Time  `json:"date"`
-	Description    string     `json:"description"`
-	CategoryID     *uuid.UUID `json:"category_id"`
-	IntervalMonths int        `json:"interval_months"`
-	EndDate        *time.Time `json:"end_date"`
+	Amount             float64                   `json:"amount"`
+	Currency           string                    `json:"currency"`
+	Date               time.Time                 `json:"date"`
+	Description        string                    `json:"description"`
+	CategoryID         *uuid.UUID                `json:"category_id"`
+	BankAccountID      *uuid.UUID                `json:"bank_account_id"`
+	IntervalMonths     int                       `json:"interval_months"`
+	SchedulingStrategy entity.SchedulingStrategy `json:"scheduling_strategy"`
+	EndDate            *time.Time                `json:"end_date"`
 }
 
 type updatePlannedTransactionRequest struct {
-	Amount         float64                         `json:"amount"`
-	Date           time.Time                       `json:"date"`
-	Description    string                          `json:"description"`
-	CategoryID     *uuid.UUID                      `json:"category_id"`
-	Status         entity.PlannedTransactionStatus `json:"status"`
-	IntervalMonths int                             `json:"interval_months"`
-	EndDate        *time.Time                      `json:"end_date"`
+	Amount             float64                         `json:"amount"`
+	Currency           string                          `json:"currency"`
+	Date               time.Time                       `json:"date"`
+	Description        string                          `json:"description"`
+	CategoryID         *uuid.UUID                      `json:"category_id"`
+	BankAccountID      *uuid.UUID                      `json:"bank_account_id"`
+	Status             entity.PlannedTransactionStatus `json:"status"`
+	IntervalMonths     int                             `json:"interval_months"`
+	SchedulingStrategy entity.SchedulingStrategy       `json:"scheduling_strategy"`
+	EndDate            *time.Time                      `json:"end_date"`
 }
 
 func (h *Handler) listPlannedTransactions(w http.ResponseWriter, r *http.Request) {
@@ -64,13 +70,16 @@ func (h *Handler) createPlannedTransaction(w http.ResponseWriter, r *http.Reques
 	}
 
 	pt := &entity.PlannedTransaction{
-		UserID:         userID,
-		Amount:         req.Amount,
-		Date:           req.Date,
-		Description:    req.Description,
-		CategoryID:     req.CategoryID,
-		IntervalMonths: req.IntervalMonths,
-		EndDate:        req.EndDate,
+		UserID:             userID,
+		Amount:             req.Amount,
+		Currency:           req.Currency,
+		Date:               req.Date,
+		Description:        req.Description,
+		CategoryID:         req.CategoryID,
+		BankAccountID:      req.BankAccountID,
+		IntervalMonths:     req.IntervalMonths,
+		SchedulingStrategy: req.SchedulingStrategy,
+		EndDate:            req.EndDate,
 	}
 
 	if err := h.plannedTransactionSvc.Create(r.Context(), pt); err != nil {
@@ -106,15 +115,18 @@ func (h *Handler) updatePlannedTransaction(w http.ResponseWriter, r *http.Reques
 	}
 
 	pt := &entity.PlannedTransaction{
-		ID:             id,
-		UserID:         userID,
-		Amount:         req.Amount,
-		Date:           req.Date,
-		Description:    req.Description,
-		CategoryID:     req.CategoryID,
-		Status:         req.Status,
-		IntervalMonths: req.IntervalMonths,
-		EndDate:        req.EndDate,
+		ID:                 id,
+		UserID:             userID,
+		Amount:             req.Amount,
+		Currency:           req.Currency,
+		Date:               req.Date,
+		Description:        req.Description,
+		CategoryID:         req.CategoryID,
+		BankAccountID:      req.BankAccountID,
+		Status:             req.Status,
+		IntervalMonths:     req.IntervalMonths,
+		SchedulingStrategy: req.SchedulingStrategy,
+		EndDate:            req.EndDate,
 	}
 
 	if err := h.plannedTransactionSvc.Update(r.Context(), pt); err != nil {

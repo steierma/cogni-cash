@@ -21,10 +21,89 @@ type SubscriptionRepository struct {
 }
 
 func NewSubscriptionRepository() *SubscriptionRepository {
-	return &SubscriptionRepository{
+	r := &SubscriptionRepository{
 		subscriptions: make(map[uuid.UUID]entity.Subscription),
 		events:        make(map[uuid.UUID][]entity.SubscriptionEvent),
 		feedback:      make(map[uuid.UUID][]entity.DiscoveryFeedback),
+	}
+	r.seedData()
+	return r
+}
+
+func (r *SubscriptionRepository) seedData() {
+	userID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+	now := time.Now()
+
+	// Helper to create string pointers
+	strPtr := func(s string) *string { return &s }
+	timePtr := func(t time.Time) *time.Time { return &t }
+
+	// 1. Netflix (matches seeded bank statements)
+	netID := uuid.New()
+	r.subscriptions[netID] = entity.Subscription{
+		ID:              netID,
+		UserID:          userID,
+		MerchantName:    "Netflix",
+		Amount:          17.99,
+		Currency:        "EUR",
+		BillingCycle:    "monthly",
+		BillingInterval: 1,
+		Status:          entity.SubscriptionStatusActive,
+		ContactWebsite:  strPtr("https://netflix.com"),
+		CancellationURL: strPtr("https://netflix.com/cancel"),
+		LastOccurrence:  timePtr(time.Date(now.Year(), now.Month(), 10, 0, 0, 0, 0, time.UTC)),
+		NextOccurrence:  timePtr(time.Date(now.Year(), now.Month()+1, 10, 0, 0, 0, 0, time.UTC)),
+		MatchingHashes:  []string{},
+		IgnoredHashes:   []string{},
+		LinkedMandates:  []string{},
+		LinkedIbans:     []string{},
+		CreatedAt:       now.Add(-365 * 24 * time.Hour),
+		UpdatedAt:       now,
+	}
+
+	// 2. Spotify (matches seeded bank statements)
+	spotID := uuid.New()
+	r.subscriptions[spotID] = entity.Subscription{
+		ID:              spotID,
+		UserID:          userID,
+		MerchantName:    "Spotify",
+		Amount:          10.99,
+		Currency:        "EUR",
+		BillingCycle:    "monthly",
+		BillingInterval: 1,
+		Status:          entity.SubscriptionStatusActive,
+		ContactWebsite:  strPtr("https://spotify.com"),
+		CancellationURL: strPtr("https://spotify.com/account/cancel"),
+		LastOccurrence:  timePtr(time.Date(now.Year(), now.Month(), 11, 0, 0, 0, 0, time.UTC)),
+		NextOccurrence:  timePtr(time.Date(now.Year(), now.Month()+1, 11, 0, 0, 0, 0, time.UTC)),
+		MatchingHashes:  []string{},
+		IgnoredHashes:   []string{},
+		LinkedMandates:  []string{},
+		LinkedIbans:     []string{},
+		CreatedAt:       now.Add(-700 * 24 * time.Hour),
+		UpdatedAt:       now,
+	}
+
+	// 3. Gym Membership
+	gymID := uuid.New()
+	r.subscriptions[gymID] = entity.Subscription{
+		ID:              gymID,
+		UserID:          userID,
+		MerchantName:    "McFit / RSG Group",
+		Amount:          24.90,
+		Currency:        "EUR",
+		BillingCycle:    "monthly",
+		BillingInterval: 1,
+		Status:          entity.SubscriptionStatusActive,
+		ContactWebsite:  strPtr("https://mcfit.com"),
+		LastOccurrence:  timePtr(time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)),
+		NextOccurrence:  timePtr(time.Date(now.Year(), now.Month()+1, 1, 0, 0, 0, 0, time.UTC)),
+		MatchingHashes:  []string{},
+		IgnoredHashes:   []string{},
+		LinkedMandates:  []string{"MND-123456789"},
+		LinkedIbans:     []string{},
+		CreatedAt:       now.Add(-150 * 24 * time.Hour),
+		UpdatedAt:       now,
 	}
 }
 

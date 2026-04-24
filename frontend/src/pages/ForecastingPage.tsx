@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import PlannedTransactionsList from '../components/forecasting/PlannedTransactionsList';
@@ -29,15 +29,21 @@ import {
 import { forecastingService } from '../api/services/forecastingService';
 import { categoryService } from '../api/services/categoryService';
 import { settingsService } from '../api/services/settingsService';
-import type { CashFlowForecast, PatternExclusion } from "../api/types/transaction";
+import type { CashFlowForecast } from "../api/types/transaction";
 import type { Category } from "../api/types/category";
-import { fmtCurrency, fmtDate } from '../utils/formatters';
+import { fmtCurrency, fmtDate, getLocalISODate } from '../utils/formatters';
 
 interface CustomTooltipProps {
     active?: boolean;
-    payload?: any[];
+    payload?: {
+        value: number;
+        payload: {
+            income: number;
+            expense: number;
+        };
+    }[];
     label?: string;
-    t: (key: string, options?: any) => string;
+    t: (key: string, options?: Record<string, unknown>) => string;
     baseCurrency: string;
 }
 
@@ -67,13 +73,13 @@ const CustomTooltip = ({ active, payload, label, t, baseCurrency }: CustomToolti
 
 export default function ForecastingPage() {
     const { t, i18n } = useTranslation();
-    const queryClient = useQueryClient();
     const [searchParams, setSearchParams] = useSearchParams();
 
-    const [range, setRange] = useState<'30' | '60' | '90' | '180' | '365'>(() => {
+    const [range, setRange] = useState<'30' | '60' | '90' | '180' | '365' | '730'>(() => {
         const r = searchParams.get('range');
-        if (['30', '60', '90', '180', '365'].includes(r || '')) return r as any;
-        return '30';
+        const validRanges = ['30', '60', '90', '180', '365', '730'];
+        if (r && validRanges.includes(r)) return r as '30' | '60' | '90' | '180' | '365' | '730';
+        return '90';
     });
     const [activeTab, setActiveTab] = useState<'forecast' | 'blocked'>(() => {
         const tab = searchParams.get('tab');
@@ -86,7 +92,7 @@ export default function ForecastingPage() {
     // Update URL when state changes
     useEffect(() => {
         const next = new URLSearchParams();
-        if (range !== '30') next.set('range', range);
+        if (range !== '90') next.set('range', range);
         if (activeTab !== 'forecast') next.set('tab', activeTab);
         if (search) next.set('search', search);
 
@@ -119,22 +125,17 @@ export default function ForecastingPage() {
     const toDateStr = useMemo(() => {
         const d = new Date();
         d.setDate(d.getDate() + parseInt(range));
-        return d.toISOString().split('T')[0];
+        return getLocalISODate(d);
     }, [range]);
 
     const forecastQuery = useQuery<CashFlowForecast>({
         queryKey: ['forecast', range, toDateStr],
         queryFn: () => {
-            const today = new Date().toISOString().split('T')[0];
+            const today = getLocalISODate();
             return forecastingService.fetchForecast(today, toDateStr);
         },
         staleTime: 5 * 60 * 1000,
         refetchInterval: 60000,
-    });
-
-    const blockedPatternsQuery = useQuery<PatternExclusion[]>({
-        queryKey: ['blocked-patterns'],
-        queryFn: () => forecastingService.fetchPatternExclusions(),
     });
 
     const categoriesQuery = useQuery<Category[]>({
@@ -147,42 +148,20 @@ export default function ForecastingPage() {
         queryFn: () => settingsService.fetchSettings().then((s) => s['BASE_DISPLAY_CURRENCY'] || 'EUR'),
     });
 
-    const excludeMutation = useMutation({
-        mutationFn: (id: string) => forecastingService.excludeProjection(id),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['forecast'] });
-        }
-    });
-
-    const includeMutation = useMutation({
-        mutationFn: (id: string) => forecastingService.includeProjection(id),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['forecast'] });
-        }
-    });
-
-    const includePatternMutation = useMutation({
-        mutationFn: (term: string) => forecastingService.includePattern(term),
-        onSuccess: () => {
-            queryClient.invalidateQueries({ queryKey: ['forecast'] });
-            queryClient.invalidateQueries({ queryKey: ['blocked-patterns'] });
-        }
-    });
-
     const forecast = forecastQuery.data;
     const isLoading = forecastQuery.isLoading;
     const isError = forecastQuery.isError;
 
     const chartData = forecast?.time_series ?? [];
-    
+
     // Stable sorted and filtered predictions
     const filteredPredictions = useMemo(() => {
         let p = [...(forecast?.predictions ?? [])];
-        
+
         if (search) {
             const s = search.toLowerCase();
-            p = p.filter(tx => 
-                tx.description.toLowerCase().includes(s) || 
+            p = p.filter(tx =>
+                tx.description.toLowerCase().includes(s) ||
                 tx.counterparty_name?.toLowerCase().includes(s) ||
                 (tx.category_id && categoriesQuery.data?.find(c => c.id === tx.category_id)?.name.toLowerCase().includes(s))
             );
@@ -195,8 +174,8 @@ export default function ForecastingPage() {
     const projectedBalance = chartData.length > 0 ? chartData[chartData.length - 1].expected_balance : currentBalance;
     const balanceDiff = projectedBalance - currentBalance;
 
-    const totalExpectedIncome = (forecast?.predictions ?? []).filter(p => !p.skip_forecasting && p.amount > 0).reduce((sum, p) => sum + p.amount, 0);
-    const totalExpectedExpense = (forecast?.predictions ?? []).filter(p => !p.skip_forecasting && p.amount < 0).reduce((sum, p) => sum + p.amount, 0);
+    const totalExpectedIncome = (forecast?.predictions ?? []).filter(p => p.amount > 0).reduce((sum, p) => sum + p.amount, 0);
+    const totalExpectedExpense = (forecast?.predictions ?? []).filter(p => p.amount < 0).reduce((sum, p) => sum + p.amount, 0);
 
     const formatXAxis = (tickItem: string) => {
         const date = new Date(tickItem);
@@ -220,13 +199,30 @@ export default function ForecastingPage() {
                     </p>
                 </div>
 
-                <div className="flex items-center gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
+                {/* Mobile Range Dropdown */}
+                <div className="sm:hidden w-full">
+                    <select
+                        value={range}
+                        onChange={(e) => setRange(e.target.value as any)}
+                        className="w-full px-4 py-2.5 bg-gray-100 dark:bg-gray-800 text-gray-900 dark:text-gray-100 border-transparent focus:ring-2 focus:ring-indigo-500/20 rounded-xl text-sm font-bold"
+                    >
+                        <option value="30">{t('forecasting.month1')}</option>
+                        <option value="60">{t('forecasting.months2')}</option>
+                        <option value="90">{t('forecasting.months3')}</option>
+                        <option value="180">{t('forecasting.months6')}</option>
+                        <option value="365">{t('forecasting.months12')}</option>
+                        <option value="730">{t('forecasting.months24')}</option>
+                    </select>
+                </div>
+
+                {/* Desktop Range Buttons */}
+                <div className="hidden sm:flex items-center gap-2 bg-gray-100 dark:bg-gray-800 p-1 rounded-xl">
                     <button
                         onClick={() => setRange('30')}
                         className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${range === '30'
                             ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                            }`}
+                        }`}
                     >
                         {t('forecasting.month1')}
                     </button>
@@ -235,7 +231,7 @@ export default function ForecastingPage() {
                         className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${range === '60'
                             ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                            }`}
+                        }`}
                     >
                         {t('forecasting.months2')}
                     </button>
@@ -244,7 +240,7 @@ export default function ForecastingPage() {
                         className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${range === '90'
                             ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                            }`}
+                        }`}
                     >
                         {t('forecasting.months3')}
                     </button>
@@ -253,7 +249,7 @@ export default function ForecastingPage() {
                         className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${range === '180'
                             ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                            }`}
+                        }`}
                     >
                         {t('forecasting.months6')}
                     </button>
@@ -262,9 +258,18 @@ export default function ForecastingPage() {
                         className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${range === '365'
                             ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
                             : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
-                            }`}
+                        }`}
                     >
                         {t('forecasting.months12')}
+                    </button>
+                    <button
+                        onClick={() => setRange('730')}
+                        className={`px-4 py-1.5 text-xs font-bold rounded-lg transition-all ${range === '730'
+                            ? 'bg-white dark:bg-gray-700 text-indigo-600 dark:text-indigo-300 shadow-sm'
+                            : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-200'
+                        }`}
+                    >
+                        {t('forecasting.months24')}
                     </button>
                 </div>
             </div>
@@ -408,24 +413,6 @@ export default function ForecastingPage() {
                                 {t('forecasting.upcomingTransactions', { days: range })}
                             </span>
                         </button>
-                        <button
-                            onClick={() => setActiveTab('blocked')}
-                            className={`pb-4 text-sm font-bold border-b-2 transition-colors ${
-                                activeTab === 'blocked'
-                                    ? 'border-rose-500 text-rose-600 dark:text-rose-400'
-                                    : 'border-transparent text-gray-500 hover:text-gray-700 dark:hover:text-gray-300'
-                            }`}
-                        >
-                            <span className="flex items-center gap-2">
-                                <AlertCircle size={16} className={activeTab === 'blocked' ? 'text-rose-500' : 'text-gray-400'} />
-                                {t('forecasting.blockedPatterns', 'Blocked Patterns')}
-                                {blockedPatternsQuery.data && blockedPatternsQuery.data.length > 0 && (
-                                    <span className="bg-rose-100 dark:bg-rose-900/30 text-rose-600 dark:text-rose-400 py-0.5 px-2 rounded-full text-xs">
-                                        {blockedPatternsQuery.data.length}
-                                    </span>
-                                )}
-                            </span>
-                        </button>
                     </div>
 
                     {activeTab === 'forecast' && (
@@ -452,14 +439,14 @@ export default function ForecastingPage() {
                             <div className="relative">
                                 <button
                                     onClick={() => setShowColMenu(!showColMenu)}
-                                    className={`p-1.5 rounded-lg border transition-all ${showColMenu 
-                                        ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400' 
+                                    className={`p-1.5 rounded-lg border transition-all ${showColMenu
+                                        ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400'
                                         : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
                                     title={t('transactions.columns', 'Columns')}
                                 >
                                     <Columns size={14} />
                                 </button>
-                                
+
                                 {showColMenu && (
                                     <>
                                         <div className="fixed inset-0 z-10" onClick={() => setShowColMenu(false)} />
@@ -488,75 +475,11 @@ export default function ForecastingPage() {
                 </div>
 
                 {activeTab === 'forecast' && (
-                    <ForecastTable 
+                    <ForecastTable
                         predictions={filteredPredictions}
                         isLoading={isLoading}
                         visibleCols={visibleCols}
-                        onInclude={(id) => includeMutation.mutate(id)}
-                        onExclude={(id) => excludeMutation.mutate(id)}
                     />
-                )}
-
-                {activeTab === 'blocked' && (
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden">
-                        {blockedPatternsQuery.isLoading ? (
-                            <div className="p-8 flex flex-col gap-4">
-                                {[1, 2].map(i => (
-                                    <div key={i} className="h-12 bg-gray-50 dark:bg-gray-800/50 rounded-xl animate-pulse" />
-                                ))}
-                            </div>
-                        ) : !blockedPatternsQuery.data || blockedPatternsQuery.data.length === 0 ? (
-                            <div className="p-12 flex flex-col items-center justify-center text-center">
-                                <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-full mb-4">
-                                    <AlertCircle size={32} className="text-gray-300 dark:text-gray-600" />
-                                </div>
-                                <h3 className="text-gray-900 dark:text-gray-100 font-semibold">{t('forecasting.noBlockedPatterns', 'No Blocked Patterns')}</h3>
-                                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1 max-w-xs">
-                                    {t('forecasting.noBlockedPatternsDesc', 'You have not muted any recurring patterns. You can mute patterns directly from the Transactions page.')}
-                                </p>
-                            </div>
-                        ) : (
-                            <div className="overflow-x-auto">
-                                <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-800/50">
-                                    <thead className="bg-gray-50 dark:bg-gray-800/50 text-xs uppercase text-gray-400 dark:text-gray-500 font-bold tracking-wider">
-                                        <tr>
-                                            <th className="px-6 py-4 text-left">{t('forecasting.patternMatchTerm', 'Match Term')}</th>
-                                            <th className="px-6 py-4 text-left">{t('common.date', 'Date Added')}</th>
-                                            <th className="px-6 py-4 text-right">{t('common.actions', 'Actions')}</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
-                                        {blockedPatternsQuery.data.map((pattern) => (
-                                            <tr key={pattern.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
-                                                <td className="px-6 py-4 whitespace-nowrap">
-                                                    <div className="flex items-center gap-2 text-sm font-medium text-gray-900 dark:text-gray-100">
-                                                        <AlertCircle size={16} className="text-rose-500" />
-                                                        "{pattern.match_term}"
-                                                    </div>
-                                                </td>
-                                                <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                                                    {fmtDate(pattern.created_at)}
-                                                </td>
-                                                <td className="px-6 py-4 text-right">
-                                                    <button
-                                                        onClick={() => includePatternMutation.mutate(pattern.match_term)}
-                                                        className="px-3 py-1.5 text-xs font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors"
-                                                    >
-                                                        {t('common.restore', 'Restore')}
-                                                    </button>
-                                                </td>
-                                            </tr>
-                                        ))}
-                                    </tbody>
-                                </table>
-                            </div>
-                        )}
-                        <div className="bg-gray-50 dark:bg-gray-800/50 px-6 py-4">
-                            <p className="text-xs text-gray-400 dark:text-gray-500 flex items-center gap-1.5">
-                                <Info size={14} /> {t('forecasting.blockedPatternsInfo', 'Muted patterns are completely ignored by the forecasting engine.')}
-                            </p>
-                        </div>
-                    </div>
                 )}
             </div>
         </div>

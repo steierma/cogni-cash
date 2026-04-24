@@ -1,4 +1,4 @@
-import { useState, useMemo, useEffect, useRef } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
@@ -81,17 +81,6 @@ export default function AnalyticsPage() {
     const [draft, setDraft] = useState<FilterState>(initialFilters);
     const [applied, setApplied] = useState<FilterState>(initialFilters);
 
-    // Default to full range if none specified in URL and transactions are loaded
-    const hasSetDefaults = useRef(false);
-    useEffect(() => {
-        if (!hasSetDefaults.current && minDate && maxDate && !initialFilters.from && !initialFilters.to) {
-            const defaultFilter = { ...initialFilters, from: minDate, to: maxDate };
-            setDraft(defaultFilter);
-            setApplied(defaultFilter);
-            hasSetDefaults.current = true;
-        }
-    }, [minDate, maxDate, initialFilters]);
-
     // Update URL when applied filters change
     useEffect(() => {
         const next = new URLSearchParams();
@@ -107,6 +96,14 @@ export default function AnalyticsPage() {
             setSearchParams(next, { replace: true });
         }
     }, [applied, setSearchParams, searchParams]);
+
+    // Derived effectively applied filters (handling defaults when no range specified)
+    const effectiveApplied = useMemo(() => {
+        if (!applied.from && !applied.to && minDate && maxDate) {
+            return { ...applied, from: minDate, to: maxDate };
+        }
+        return applied;
+    }, [applied, minDate, maxDate]);
 
     const isDirty = JSON.stringify({ ...draft, excludeIds: Array.from(draft.excludeIds).sort() }) !==
         JSON.stringify({ ...applied, excludeIds: Array.from(applied.excludeIds).sort() });
@@ -137,18 +134,18 @@ export default function AnalyticsPage() {
     // --- Data Processing ---
     const filteredTxns = useMemo(() => {
         return allTransactions.filter(t => {
-            if (applied.hideReconciled && t.is_reconciled) return false;
+            if (effectiveApplied.hideReconciled && t.is_reconciled) return false;
 
-            if (t.category_id && applied.excludeIds.has(t.category_id)) return false;
-            if (!t.category_id && applied.excludeIds.has('uncategorized')) return false;
+            if (t.category_id && effectiveApplied.excludeIds.has(t.category_id)) return false;
+            if (!t.category_id && effectiveApplied.excludeIds.has('uncategorized')) return false;
 
             const day = toIsoDate(t.booking_date);
-            if (applied.from && day < applied.from) return false;
-            if (applied.to && day > applied.to) return false;
+            if (effectiveApplied.from && day < effectiveApplied.from) return false;
+            if (effectiveApplied.to && day > effectiveApplied.to) return false;
 
             return true;
         });
-    }, [allTransactions, applied]);
+    }, [allTransactions, effectiveApplied]);
 
     // --- KPIs & Bar Chart Data ---
     const { expenseBarData, totalInc, totalExp } = useMemo(() => {
@@ -172,7 +169,7 @@ export default function AnalyticsPage() {
         });
 
         const barData = Object.entries(categoryNet)
-            .filter(([_, data]) => data.amount < 0) // Only show categories that are net expenses
+            .filter(([, data]) => data.amount < 0) // Only show categories that are net expenses
             .map(([name, data]) => ({ name, value: Math.abs(data.amount), color: data.color }))
             .sort((a, b) => b.value - a.value);
 
@@ -181,7 +178,7 @@ export default function AnalyticsPage() {
             totalInc: tInc,
             totalExp: tExp
         };
-    }, [filteredTxns, categories, t]);
+    }, [filteredTxns, categories]);
 
     // --- Trend Data (Area Chart & Waterfall) ---
     const trendData = useMemo(() => {

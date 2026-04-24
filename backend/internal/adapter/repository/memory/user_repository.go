@@ -21,10 +21,44 @@ type UserRepository struct {
 }
 
 func NewUserRepository() *UserRepository {
-	return &UserRepository{
+	r := &UserRepository{
 		users: make(map[uuid.UUID]entity.User),
 		order: make([]uuid.UUID, 0, maxUsers),
 	}
+	r.seedData()
+	return r
+}
+
+func (r *UserRepository) seedData() {
+	// The deterministic UUID that connects all our seeded memory data
+	testUserID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+
+	// 1. Seed the primary Test User
+	testUser := entity.User{
+		ID:       testUserID,
+		Username: "test",
+		Email:    "test@example.com",
+		FullName: "John Doe", // Matches the AccountHolder in BankStatement
+		// Pre-computed bcrypt hash for the password "password"
+		// This allows you to easily log in during development
+		PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy",
+	}
+
+	r.users[testUserID] = testUser
+	r.order = append(r.order, testUserID)
+
+	// 2. Seed an Admin User (required for GetAdminID to function properly)
+	adminID := uuid.New()
+	adminUser := entity.User{
+		ID:           adminID,
+		Username:     "admin",
+		Email:        "admin@example.com",
+		FullName:     "System Admin",
+		PasswordHash: "$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgcfl7p92ldGxad68LJZdL17lhWy", // password
+	}
+
+	r.users[adminID] = adminUser
+	r.order = append(r.order, adminID)
 }
 
 func (r *UserRepository) FindByUsername(ctx context.Context, username string) (entity.User, error) {

@@ -2,6 +2,8 @@ import type { Transaction } from './transaction';
 
 export interface BankStatement {
     id: string;
+    user_id: string;
+    bank_account_id?: string;
     account_holder: string;
     iban: string;
     statement_date: string;
@@ -33,7 +35,8 @@ export type ConnectionStatus = 'initialized' | 'linked' | 'expired' | 'failed';
 
 export interface BankAccount {
     id: string;
-    connection_id: string;
+    user_id: string;
+    connection_id?: string;
     provider_account_id: string;
     iban: string;
     name: string;
@@ -41,6 +44,9 @@ export interface BankAccount {
     balance: number;
     last_synced_at: string;
     account_type: 'giro' | 'credit_card' | 'extra_account';
+    is_shared: boolean;
+    shared_with?: string[];
+    owner_id: string;
 }
 
 export interface BankConnection {

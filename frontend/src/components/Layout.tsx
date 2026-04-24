@@ -4,13 +4,27 @@ import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
     ArrowLeftRight, BarChart3, Briefcase, ChevronLeft, ChevronRight, FileText, Landmark,
-    LayoutDashboard, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List, Zap, Archive, RefreshCcw
+    LayoutDashboard, LogOut, Menu, Monitor, Moon, Settings, Sun, Tag, Users, X, List, Zap, Archive, RefreshCcw,
+    type LucideIcon
 } from 'lucide-react';
 import {settingsService} from '../api/services/settingsService';
 import {authService} from '../api/services/authService';
 import type { User, SystemInfo } from "../api/types/system";
 
-const ALL_NAV_GROUPS = [
+interface NavItem {
+    to: string;
+    i18nKeyLabel: string;
+    Icon: LucideIcon;
+    adminOnly?: boolean;
+}
+
+interface NavGroup {
+    i18nKeyTitle: string;
+    adminOnly?: boolean;
+    items: NavItem[];
+}
+
+const ALL_NAV_GROUPS: NavGroup[] = [
     {
         i18nKeyTitle: 'layout.overview',
         items: [
@@ -141,14 +155,14 @@ export default function Layout({children}: { children?: React.ReactNode }) {
         if (group.adminOnly && currentUser?.role !== 'admin') return null;
 
         const visibleItems = group.items.filter(item => {
-            if ((item as any).adminOnly && currentUser?.role !== 'admin') return false;
+            if (item.adminOnly && currentUser?.role !== 'admin') return false;
             return true;
         });
 
         if (visibleItems.length === 0) return null;
 
         return {...group, items: visibleItems};
-    }).filter(group => group !== null) as typeof ALL_NAV_GROUPS;
+    }).filter(group => group !== null) as NavGroup[];
 
     return (
         <div className="min-h-[100dvh] flex bg-gray-50/50 dark:bg-gray-950 font-sans text-gray-900 dark:text-gray-100 transition-colors duration-200">

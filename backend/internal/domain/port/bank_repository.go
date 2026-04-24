@@ -24,4 +24,8 @@ type BankRepository interface {
 	GetAccountByProviderID(ctx context.Context, providerAccountID string, userID uuid.UUID) (*entity.BankAccount, error)
 	UpdateAccountBalance(ctx context.Context, id uuid.UUID, balance float64, syncedAt interface{}, errorMsg *string, userID uuid.UUID) error
 	UpdateAccountType(ctx context.Context, id uuid.UUID, accType entity.StatementType, userID uuid.UUID) error
+
+	SaveAccount(ctx context.Context, account *entity.BankAccount) error
+	FindAccountByIBAN(ctx context.Context, iban string, userID uuid.UUID) (*entity.BankAccount, error)
+	DeleteAccount(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 }

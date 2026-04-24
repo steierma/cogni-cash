@@ -70,6 +70,8 @@ type InvoiceUseCase interface {
 type BankStatementUseCase interface {
 	ImportFromFile(ctx context.Context, userID uuid.UUID, fileName string, fileBytes []byte, useAI bool, userStmtType entity.StatementType) (entity.BankStatement, error)
 	DeleteStatement(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
+	UpdateStatementAccount(ctx context.Context, statementID uuid.UUID, bankAccountID *uuid.UUID, userID uuid.UUID) error
+	GetTransactionsByAccountID(ctx context.Context, bankAccountID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error)
 }
 
 // TransactionUseCase covers analytics and batch categorization.
@@ -78,7 +80,7 @@ type TransactionUseCase interface {
 	GetTransactionAnalytics(ctx context.Context, filter entity.TransactionFilter) (entity.TransactionAnalytics, error)
 	UpdateCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
 	MarkAsReviewed(ctx context.Context, hash string, userID uuid.UUID) error
-	ToggleSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error
+	MarkAsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error
 
 	StartAutoCategorizeAsync(ctx context.Context, userID uuid.UUID, batchSize int) error
 	GetJobStatus() JobState
@@ -119,21 +121,23 @@ type BankUseCase interface {
 	GetConnections(ctx context.Context, userID uuid.UUID) ([]entity.BankConnection, error)
 	DeleteConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 
+	// Accounts
+	CreateVirtualAccount(ctx context.Context, account *entity.BankAccount) error
+
 	// Sync
 	SyncAccount(ctx context.Context, accountID uuid.UUID, userID uuid.UUID) error
 	SyncAllAccounts(ctx context.Context, userID uuid.UUID) error
 	UpdateAccountType(ctx context.Context, accountID uuid.UUID, accType entity.StatementType, userID uuid.UUID) error
+
+	// Sharing
+	ShareAccount(ctx context.Context, accountID, ownerID, sharedWithID uuid.UUID, permission string) error
+	RevokeShare(ctx context.Context, accountID, ownerID, sharedWithID uuid.UUID) error
+	ListShares(ctx context.Context, accountID, ownerID uuid.UUID) ([]uuid.UUID, error)
 }
 
 // ForecastingUseCase covers transaction forecasting and cash flow prediction.
 type ForecastingUseCase interface {
 	GetCashFlowForecast(ctx context.Context, userID uuid.UUID, fromDate, toDate time.Time) (entity.CashFlowForecast, error)
-	ExcludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error
-	IncludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error
-
-	ExcludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error
-	IncludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error
-	ListPatternExclusions(ctx context.Context, userID uuid.UUID) ([]entity.PatternExclusion, error)
 
 	CalculateCategoryAverage(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID, strategy string) (float64, error)
 }
@@ -207,5 +211,6 @@ type DiscoveryUseCase interface {
 
 	// Manual Linking
 	LinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error
+	LinkTransactions(ctx context.Context, userID, subID uuid.UUID, txnHashes []string) error
 	UnlinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error
 }

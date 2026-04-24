@@ -45,7 +45,7 @@ func (m *mockForecastingRepo) UpdateTransactionSubscription(_ context.Context, _
 func (m *mockForecastingRepo) MarkTransactionReviewed(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }
-func (m *mockForecastingRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string, _ bool, _ uuid.UUID) error {
+func (m *mockForecastingRepo) MarkTransactionsReviewedBulk(_ context.Context, _ []string, _ uuid.UUID) error {
 	return nil
 }
 func (m *mockForecastingRepo) UpdateTransactionBaseAmount(_ context.Context, _ string, _ float64, _ string, _ uuid.UUID) error {
@@ -64,6 +64,50 @@ func (m *mockForecastingRepo) LinkTransactionToStatement(_ context.Context, _ uu
 	return nil
 }
 func (m *mockForecastingRepo) CreateTransactions(_ context.Context, _ []entity.Transaction) error {
+	return nil
+}
+func (m *mockForecastingRepo) UpdateStatementAccount(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+func (m *mockForecastingRepo) GetTransactionsByAccountID(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]entity.Transaction, error) {
+	return nil, nil
+}
+
+// --- Simple stub SubscriptionRepository for forecasting tests ---
+
+type mockForecastSubRepo struct {
+	subs []entity.Subscription
+}
+
+func (m *mockForecastSubRepo) GetByID(_ context.Context, _ uuid.UUID, _ uuid.UUID) (entity.Subscription, error) {
+	return entity.Subscription{}, nil
+}
+func (m *mockForecastSubRepo) FindByUserID(_ context.Context, _ uuid.UUID) ([]entity.Subscription, error) {
+	return m.subs, nil
+}
+func (m *mockForecastSubRepo) Create(_ context.Context, sub entity.Subscription) (entity.Subscription, error) {
+	return sub, nil
+}
+func (m *mockForecastSubRepo) CreateWithBackfill(_ context.Context, sub entity.Subscription, _ []string) (entity.Subscription, error) {
+	return sub, nil
+}
+func (m *mockForecastSubRepo) Update(_ context.Context, sub entity.Subscription) (entity.Subscription, error) {
+	return sub, nil
+}
+func (m *mockForecastSubRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error { return nil }
+func (m *mockForecastSubRepo) LogEvent(_ context.Context, _ entity.SubscriptionEvent) error {
+	return nil
+}
+func (m *mockForecastSubRepo) GetEvents(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]entity.SubscriptionEvent, error) {
+	return nil, nil
+}
+func (m *mockForecastSubRepo) SetDiscoveryFeedback(_ context.Context, _ uuid.UUID, _ string, _ entity.DiscoveryFeedbackStatus, _ string) error {
+	return nil
+}
+func (m *mockForecastSubRepo) GetDiscoveryFeedback(_ context.Context, _ uuid.UUID) ([]entity.DiscoveryFeedback, error) {
+	return nil, nil
+}
+func (m *mockForecastSubRepo) DeleteDiscoveryFeedback(_ context.Context, _ uuid.UUID, _ string) error {
 	return nil
 }
 
@@ -142,6 +186,15 @@ func (m *mockForecastingBankRepo) UpdateAccountBalance(_ context.Context, _ uuid
 func (m *mockForecastingBankRepo) UpdateAccountType(_ context.Context, _ uuid.UUID, _ entity.StatementType, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockForecastingBankRepo) SaveAccount(_ context.Context, _ *entity.BankAccount) error {
+	return nil
+}
+func (m *mockForecastingBankRepo) FindAccountByIBAN(_ context.Context, _ string, _ uuid.UUID) (*entity.BankAccount, error) {
+	return nil, nil
+}
+func (m *mockForecastingBankRepo) DeleteAccount(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
 
 func TestForecastingService_VariableSpending(t *testing.T) {
 	now := time.Now()
@@ -184,7 +237,7 @@ func TestForecastingService_VariableSpending(t *testing.T) {
 		},
 	}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockForecastSubRepo{}, nil, nil, nil)
 
 	from := now
 	to := now.AddDate(0, 1, 0) // Forecast 1 month ahead
@@ -214,216 +267,200 @@ func TestForecastingService_VariableSpending(t *testing.T) {
 	}
 }
 
-type mockExclusionRepo struct {
-	exclusions []entity.ExcludedForecast
-}
-
-func (m *mockExclusionRepo) SaveExclusion(_ context.Context, e entity.ExcludedForecast) error {
-	m.exclusions = append(m.exclusions, e)
-	return nil
-}
-
-func (m *mockExclusionRepo) FindExclusions(_ context.Context, _ uuid.UUID) ([]entity.ExcludedForecast, error) {
-	return m.exclusions, nil
-}
-
-func (m *mockExclusionRepo) DeleteExclusion(_ context.Context, _ uuid.UUID, forecastID uuid.UUID) error {
-	for i, e := range m.exclusions {
-		if e.ForecastID == forecastID {
-			m.exclusions = append(m.exclusions[:i], m.exclusions[i+1:]...)
-			return nil
-		}
-	}
-	return nil
-}
-
-func (m *mockExclusionRepo) SavePatternExclusion(_ context.Context, _ entity.PatternExclusion) error {
-	return nil
-}
-
-func (m *mockExclusionRepo) FindPatternExclusions(_ context.Context, _ uuid.UUID) ([]entity.PatternExclusion, error) {
-	return nil, nil
-}
-
-func (m *mockExclusionRepo) DeletePatternExclusion(_ context.Context, _ uuid.UUID, _ string) error {
-	return nil
-}
-
-func TestForecastingService_GetCashFlowForecast(t *testing.T) {
-	now := time.Now()
+func TestForecastingService_SubscriptionProjection(t *testing.T) {
 	userID := uuid.New()
+	now := time.Now()
+	catID := uuid.New()
 
-	txns := []entity.Transaction{
-		// Rent: Recurring
+	nextOcc := time.Date(now.Year(), now.Month(), 15, 0, 0, 0, 0, time.UTC)
+	if nextOcc.Before(now) {
+		nextOcc = nextOcc.AddDate(0, 1, 0)
+	}
+
+	subID := uuid.New()
+	subs := []entity.Subscription{
 		{
-			Description: "Rent Payment",
-			Amount:      -1200.0,
-			BaseAmount:  -1200.0,
-			BookingDate: now.AddDate(0, -3, 0),
-		},
-		{
-			Description: "Rent Payment",
-			Amount:      -1200.0,
-			BaseAmount:  -1200.0,
-			BookingDate: now.AddDate(0, -2, 0),
-		},
-		{
-			Description: "Rent Payment",
-			Amount:      -1200.0,
-			BaseAmount:  -1200.0,
-			BookingDate: now.AddDate(0, -1, 0),
-		},
-		// Salary: Recurring
-		{
-			Description: "Salary",
-			Amount:      3000.0,
-			BaseAmount:  3000.0,
-			BookingDate: now.AddDate(0, -3, 0),
-		},
-		{
-			Description: "Salary",
-			Amount:      3000.0,
-			BaseAmount:  3000.0,
-			BookingDate: now.AddDate(0, -2, 0),
-		},
-		{
-			Description: "Salary",
-			Amount:      3000.0,
-			BaseAmount:  3000.0,
-			BookingDate: now.AddDate(0, -1, 0),
+			ID:              subID,
+			UserID:          userID,
+			MerchantName:    "Netflix",
+			Amount:          -12.99,
+			Currency:        "EUR",
+			BillingCycle:    "monthly",
+			BillingInterval: 1,
+			CategoryID:      &catID,
+			Status:          entity.SubscriptionStatusActive,
+			NextOccurrence:  &nextOcc,
 		},
 	}
 
-	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockForecastingBankRepo{
-		accounts: []entity.BankAccount{
-			{Balance: 5000.0},
-		},
-	}
+	repo := &mockForecastingRepo{}
+	bankRepo := &mockForecastingBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
 	catRepo := &mockCategoryRepo{saved: []entity.Category{}}
+	subRepo := &mockForecastSubRepo{subs: subs}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, subRepo, nil, nil, nil)
 
 	from := now
-	to := now.AddDate(0, 2, 0) // Forecast 2 months ahead
+	to := now.AddDate(0, 3, 0)
 
 	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, from, to)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	assert.NoError(t, err)
+
+	count := 0
+	for _, p := range forecast.Predictions {
+		if p.Description == "Netflix" {
+			count++
+			assert.Equal(t, -12.99, p.Amount)
+			assert.NotNil(t, p.SubscriptionID)
+			assert.Equal(t, subID, *p.SubscriptionID)
+		}
+	}
+	assert.GreaterOrEqual(t, count, 2, "Expected at least 2 Netflix predictions over 3 months")
+}
+
+func TestForecastingService_CancelledSubscriptionExcluded(t *testing.T) {
+	userID := uuid.New()
+	now := time.Now()
+	nextOcc := now.AddDate(0, 0, 15)
+
+	subs := []entity.Subscription{
+		{
+			ID:              uuid.New(),
+			UserID:          userID,
+			MerchantName:    "Cancelled Service",
+			Amount:          -9.99,
+			Currency:        "EUR",
+			BillingCycle:    "monthly",
+			BillingInterval: 1,
+			Status:          entity.SubscriptionStatusCancelled,
+			NextOccurrence:  &nextOcc,
+		},
 	}
 
-	if forecast.CurrentBalance != 5000.0 {
-		t.Errorf("expected current balance 5000.0, got %f", forecast.CurrentBalance)
+	subRepo := &mockForecastSubRepo{subs: subs}
+	svc := service.NewForecastingService(&mockForecastingRepo{}, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, subRepo, nil, nil, nil)
+
+	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, now, now.AddDate(0, 2, 0))
+	assert.NoError(t, err)
+	assert.Empty(t, forecast.Predictions, "Cancelled subscriptions should not appear in forecast")
+}
+
+func TestForecastingService_CancellationPendingWithEndDate(t *testing.T) {
+	userID := uuid.New()
+	now := time.Now()
+	nextOcc := now.AddDate(0, 0, 5)
+	endDate := now.AddDate(0, 1, 15) // ends in ~1.5 months
+
+	subs := []entity.Subscription{
+		{
+			ID:              uuid.New(),
+			UserID:          userID,
+			MerchantName:    "Expiring Service",
+			Amount:          -19.99,
+			Currency:        "EUR",
+			BillingCycle:    "monthly",
+			BillingInterval: 1,
+			Status:          entity.SubscriptionStatusCancellationPending,
+			NextOccurrence:  &nextOcc,
+			ContractEndDate: &endDate,
+		},
 	}
 
-	// We expect 2 recurring patterns (Rent and Salary)
-	// Each should appear 3 times (April, May, June) given the 2-month window from 'now'
-	if len(forecast.Predictions) != 6 {
-		t.Errorf("expected 6 predictions, got %d", len(forecast.Predictions))
+	subRepo := &mockForecastSubRepo{subs: subs}
+	svc := service.NewForecastingService(&mockForecastingRepo{}, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, subRepo, nil, nil, nil)
+
+	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, now, now.AddDate(0, 6, 0))
+	assert.NoError(t, err)
+
+	count := 0
+	for _, p := range forecast.Predictions {
+		if p.Description == "Expiring Service" {
+			count++
+			assert.True(t, !p.BookingDate.After(endDate), "Should not project past ContractEndDate")
+		}
+	}
+	assert.GreaterOrEqual(t, count, 1, "Should have at least 1 prediction before end date")
+	assert.LessOrEqual(t, count, 2, "Should have at most 2 predictions before end date")
+}
+
+func TestForecastingService_YearlySubscription(t *testing.T) {
+	userID := uuid.New()
+	now := time.Now()
+	nextOcc := now.AddDate(0, 2, 0) // 2 months from now
+
+	subs := []entity.Subscription{
+		{
+			ID:              uuid.New(),
+			UserID:          userID,
+			MerchantName:    "Annual Insurance",
+			Amount:          -600.0,
+			Currency:        "EUR",
+			BillingCycle:    "yearly",
+			BillingInterval: 1,
+			Status:          entity.SubscriptionStatusActive,
+			NextOccurrence:  &nextOcc,
+		},
 	}
 
-	// Verify balance trend
-	lastPoint := forecast.TimeSeries[len(forecast.TimeSeries)-1]
-	// Starting 5000.0 + 3*3000.0 (Income) - 3*1200.0 (Rent) = 10400.0
-	expectedFinalBalance := 5000.0 + 3*3000.0 - 3*1200.0
-	if math.Abs(lastPoint.ExpectedBalance-expectedFinalBalance) > 0.001 {
-		t.Errorf("expected final balance %f, got %f", expectedFinalBalance, lastPoint.ExpectedBalance)
+	subRepo := &mockForecastSubRepo{subs: subs}
+	svc := service.NewForecastingService(&mockForecastingRepo{}, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, subRepo, nil, nil, nil)
+
+	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, now, now.AddDate(0, 6, 0))
+	assert.NoError(t, err)
+
+	count := 0
+	for _, p := range forecast.Predictions {
+		if p.Description == "Annual Insurance" {
+			count++
+		}
+	}
+	assert.Equal(t, 1, count, "Yearly subscription should appear once in 6-month window")
+}
+
+func TestForecastingService_TrialSubscriptionProbability(t *testing.T) {
+	userID := uuid.New()
+	now := time.Now()
+	nextOcc := now.AddDate(0, 0, 10)
+
+	subs := []entity.Subscription{
+		{
+			ID:              uuid.New(),
+			UserID:          userID,
+			MerchantName:    "Trial App",
+			Amount:          -4.99,
+			Currency:        "EUR",
+			BillingCycle:    "monthly",
+			BillingInterval: 1,
+			Status:          entity.SubscriptionStatusActive,
+			IsTrial:         true,
+			NextOccurrence:  &nextOcc,
+		},
+	}
+
+	subRepo := &mockForecastSubRepo{subs: subs}
+	svc := service.NewForecastingService(&mockForecastingRepo{}, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, subRepo, nil, nil, nil)
+
+	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, now, now.AddDate(0, 1, 0))
+	assert.NoError(t, err)
+
+	for _, p := range forecast.Predictions {
+		if p.Description == "Trial App" {
+			assert.Equal(t, 0.7, p.Probability, "Trial subscriptions should have 0.7 probability")
+		}
 	}
 }
 
-func TestForecastingService_BonusForecasting(t *testing.T) {
-	now := time.Now()
+func TestForecastingService_NoSubscriptions(t *testing.T) {
 	userID := uuid.New()
+	now := time.Now()
 
-	// Bonus in month 11 (November) of last two years
-	// This should trigger a yearly pattern (2 occurrences + verified)
-	payslips := []entity.Payslip{
-		{
-			PeriodMonthNum: 11,
-			PeriodYear:     now.Year() - 2,
-			GrossPay:       5000.0,
-			BaseGrossPay:   5000.0,
-			NetPay:         3000.0,
-			BaseNetPay:     3000.0,
-			PayoutAmount:   3000.0,
-			BasePayoutAmount: 3000.0,
-			Bonuses: []entity.Bonus{
-				{Description: "Christmas Bonus", Amount: 2000.0, BaseAmount: 2000.0},
-			},
-		},
-		{
-			PeriodMonthNum: 11,
-			PeriodYear:     now.Year() - 1,
-			GrossPay:       5000.0,
-			BaseGrossPay:   5000.0,
-			NetPay:         3000.0,
-			BaseNetPay:     3000.0,
-			PayoutAmount:   3000.0,
-			BasePayoutAmount: 3000.0,
-			Bonuses: []entity.Bonus{
-				{Description: "Christmas Bonus", Amount: 2000.0, BaseAmount: 2000.0},
-			},
-		},
-	}
+	subRepo := &mockForecastSubRepo{}
+	svc := service.NewForecastingService(&mockForecastingRepo{}, &mockForecastingBankRepo{accounts: []entity.BankAccount{{Balance: 1000.0}}}, &mockCategoryRepo{}, nil, nil, subRepo, nil, nil, nil)
 
-	// Matching bank transactions
-	txns := []entity.Transaction{
-		{
-			ID:          uuid.New(),
-			UserID:      userID,
-			BookingDate: time.Date(now.Year()-2, 11, 28, 0, 0, 0, 0, time.UTC),
-			Description: "Employer Salary Payout",
-			Amount:      3000.0,
-			BaseAmount:  3000.0,
-		},
-		{
-			ID:          uuid.New(),
-			UserID:      userID,
-			BookingDate: time.Date(now.Year()-1, 11, 28, 0, 0, 0, 0, time.UTC),
-			Description: "Employer Salary Payout",
-			Amount:      3000.0,
-			BaseAmount:  3000.0,
-		},
-	}
-
-	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockForecastingBankRepo{
-		accounts: []entity.BankAccount{
-			{Balance: 1000.0},
-		},
-	}
-	catRepo := &mockCategoryRepo{saved: []entity.Category{}}
-	payslipRepo := &mockPayslipRepo{payslips: payslips}
-
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, payslipRepo, nil, &mockExclusionRepo{}, nil, nil, nil)
-
-	// Range covering November of current year
-	from := time.Date(now.Year(), 1, 1, 0, 0, 0, 0, time.UTC)
-	to := time.Date(now.Year(), 12, 31, 0, 0, 0, 0, time.UTC)
-
-	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, from, to)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-
-	foundBonus := false
-	for _, p := range forecast.Predictions {
-		// New logic uses "Bonus: Description"
-		if strings.Contains(p.Description, "Bonus: Christmas Bonus") {
-			foundBonus = true
-			expectedNet := 2000.0 * (3000.0 / 5000.0)
-			if p.Amount != expectedNet {
-				t.Errorf("expected net bonus amount %f, got %f", expectedNet, p.Amount)
-			}
-			if p.BookingDate.Month() != time.November {
-				t.Errorf("expected bonus in November, got %v", p.BookingDate.Month())
-			}
-		}
-	}
-
-	if !foundBonus {
-		t.Error("expected to find a bonus prediction for Christmas Bonus")
-	}
+	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, now, now.AddDate(0, 1, 0))
+	assert.NoError(t, err)
+	assert.Empty(t, forecast.Predictions)
+	assert.Equal(t, 1000.0, forecast.CurrentBalance)
 }
 
 // --- Mock PlannedTransactionRepository ---
@@ -456,6 +493,7 @@ func (m *mockPlannedTransactionRepo) FindPendingByUserID(ctx context.Context, us
 	}
 	return pending, nil
 }
+
 func TestForecastingService_RecurringPlannedTransactions(t *testing.T) {
 	userID := uuid.New()
 	now := time.Now()
@@ -477,7 +515,7 @@ func TestForecastingService_RecurringPlannedTransactions(t *testing.T) {
 	}
 
 	ptRepo := &mockPlannedTransactionRepo{planned: []entity.PlannedTransaction{pt}}
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil, nil, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockForecastSubRepo{}, nil, nil, nil)
 
 	// Forecast covering 3 months
 	from := pt.Date
@@ -497,63 +535,67 @@ func TestForecastingService_RecurringPlannedTransactions(t *testing.T) {
 	assert.Equal(t, 4, count)
 }
 
-func TestForecastingService_SoftSuppression(t *testing.T) {
+func TestForecastingService_PlannedTransactionsNoSupersession(t *testing.T) {
 	userID := uuid.New()
 	now := time.Now()
 	catID := uuid.New()
+	nextOcc := now.AddDate(0, 0, 1)
 
-	// 1. Auto-detected pattern for "Salary" (3000.0)
-	txns := []entity.Transaction{
-		{Description: "Salary", Amount: 3000.0, BaseAmount: 3000.0, BookingDate: now.AddDate(0, -3, 0), CategoryID: &catID},
-		{Description: "Salary", Amount: 3000.0, BaseAmount: 3000.0, BookingDate: now.AddDate(0, -2, 0), CategoryID: &catID},
-		{Description: "Salary", Amount: 3000.0, BaseAmount: 3000.0, BookingDate: now.AddDate(0, -1, 0), CategoryID: &catID},
+	// Active subscription for "Netflix"
+	subs := []entity.Subscription{
+		{
+			ID:              uuid.New(),
+			UserID:          userID,
+			MerchantName:    "Netflix",
+			Amount:          -12.99,
+			Currency:        "EUR",
+			BillingCycle:    "monthly",
+			BillingInterval: 1,
+			CategoryID:      &catID,
+			Status:          entity.SubscriptionStatusActive,
+			NextOccurrence:  &nextOcc,
+		},
 	}
 
-	// 2. Manual planned transaction for "Salary" (3000.0) in the same category
-	// One-off manual (IntervalMonths = 0) must be within 7 days of auto-forecast
+	// Manual planned transaction for same category
 	pt := entity.PlannedTransaction{
-		ID:             uuid.New(),
-		UserID:         userID,
-		Amount:         3000.0,
-		BaseAmount:     3000.0,
-		Date:           now.AddDate(0, 0, 1), // Tomorrow, very close to "now"
-		Description:    "Manual Salary Forecast",
-		Status:         entity.PlannedTransactionStatusPending,
-		CategoryID:     &catID,
-		IntervalMonths: 0,
+		ID:          uuid.New(),
+		UserID:      userID,
+		Amount:      -12.99,
+		BaseAmount:  -12.99,
+		Date:        now.AddDate(0, 0, 2),
+		Description: "Manual Netflix Override",
+		Status:      entity.PlannedTransactionStatusPending,
+		CategoryID:  &catID,
 	}
 
-	repo := &mockForecastingRepo{txns: txns}
-	bankRepo := &mockForecastingBankRepo{}
-	catRepo := &mockCategoryRepo{saved: []entity.Category{
-		{ID: catID, Name: "Income"},
-	}}
-	ptRepo := &mockPlannedTransactionRepo{planned: []entity.PlannedTransaction{pt}}
+	svc := service.NewForecastingService(
+		&mockForecastingRepo{}, &mockForecastingBankRepo{},
+		&mockCategoryRepo{saved: []entity.Category{{ID: catID, Name: "Entertainment"}}},
+		nil,
+		&mockPlannedTransactionRepo{planned: []entity.PlannedTransaction{pt}},
+		&mockForecastSubRepo{subs: subs},
+		nil, nil, nil,
+	)
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil, nil, nil)
-
-	from := now
-	to := now.AddDate(0, 1, 0)
-
-	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, from, to)
+	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, now, now.AddDate(0, 1, 0))
 	assert.NoError(t, err)
 
-	foundManual := false
-	foundAuto := false
+	// Both should appear — no supersession
+	foundSub := false
+	foundPlanned := false
 	for _, p := range forecast.Predictions {
-		if strings.Contains(p.Description, "Planned: Manual Salary Forecast") {
-			foundManual = true
-			assert.True(t, p.SkipForecasting, "Manual forecast should be suppressed")
-			assert.Contains(t, p.Description, "(Superseded by auto-forecast)")
+		if p.Description == "Netflix" {
+			foundSub = true
 		}
-		if p.Description == "Salary" {
-			foundAuto = true
-			assert.False(t, p.SkipForecasting, "Auto-forecast should NOT be suppressed")
+		if strings.Contains(p.Description, "Planned: Manual Netflix Override") {
+			foundPlanned = true
+			assert.NotContains(t, p.Description, "Superseded")
 		}
 	}
 
-	assert.True(t, foundManual, "Should find manual forecast")
-	assert.True(t, foundAuto, "Should find auto-forecast")
+	assert.True(t, foundSub, "Should find subscription prediction")
+	assert.True(t, foundPlanned, "Should find planned transaction prediction")
 }
 
 func TestForecastingService_WithPlannedTransactions(t *testing.T) {
@@ -569,14 +611,14 @@ func TestForecastingService_WithPlannedTransactions(t *testing.T) {
 		UserID:      userID,
 		Amount:      -150.0,
 		BaseAmount:  -150.0,
-		Date:        now.AddDate(0, 0, 5), // 5 days from now
+		Date:        now.AddDate(0, 0, 5),
 		Description: "Planned Bill",
 		Status:      entity.PlannedTransactionStatusPending,
 	}
 
 	ptRepo := &mockPlannedTransactionRepo{planned: []entity.PlannedTransaction{pt}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockExclusionRepo{}, nil, nil, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, ptRepo, &mockForecastSubRepo{}, nil, nil, nil)
 
 	from := now
 	to := now.AddDate(0, 1, 0)
@@ -698,7 +740,7 @@ func TestForecastingService_ForecastStrategies(t *testing.T) {
 		},
 	}}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, &mockForecastSubRepo{}, nil, nil, nil)
 
 	// Forecast for the next month
 	from := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, now.Location()).AddDate(0, 1, 0)
@@ -786,7 +828,7 @@ func TestForecastingService_CalculateCategoryAverage(t *testing.T) {
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	svc := service.NewForecastingService(repo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
+	svc := service.NewForecastingService(repo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockForecastSubRepo{}, nil, nil, nil)
 
 	tests := []struct {
 		name     string
@@ -794,29 +836,29 @@ func TestForecastingService_CalculateCategoryAverage(t *testing.T) {
 		expected float64
 	}{
 		{
-			name:     "Strategy 3m: Includes current month and Month -1",
+			name:     "Strategy 3m: Excludes current month, includes Month -1 and Month -3",
 			strategy: "3m",
-			expected: (-100.0 + -200.0) / 2.0, // = -150.0
+			expected: (-200.0 + -400.0) / 2.0, // = -300.0 (Feb is empty in this test data)
 		},
 		{
-			name:     "Strategy 6m: Includes everything up to Month -3",
+			name:     "Strategy 6m: Excludes current month, includes Month -1 and Month -3",
 			strategy: "6m",
-			expected: (-100.0 + -200.0 + -400.0) / 3.0, // = -233.333333
+			expected: (-200.0 + -400.0) / 2.0, // = -300.0
 		},
 		{
-			name:     "Strategy 1y: Includes everything up to Month -3",
+			name:     "Strategy 1y: Excludes current month, includes Month -1, -3 and -13",
 			strategy: "1y",
-			expected: (-100.0 + -200.0 + -400.0) / 3.0, // = -233.333333
+			expected: (-200.0 + -400.0 + -1200.0) / 3.0, // = -600.0
 		},
 		{
-			name:     "Strategy all: Includes all historical transactions",
+			name:     "Strategy all: Excludes current month, includes all historical transactions",
 			strategy: "all",
-			expected: (-100.0 + -200.0 + -400.0 + -1200.0) / 4.0, // = -475.0
+			expected: (-200.0 + -400.0 + -1200.0) / 3.0, // = -600.0
 		},
 		{
-			name:     "Strategy 1m: Includes only current month",
+			name:     "Strategy 1m: Excludes current month, includes only Month -1",
 			strategy: "1m",
-			expected: -100.0,
+			expected: -200.0,
 		},
 	}
 
@@ -834,7 +876,7 @@ func TestForecastingService_CalculateCategoryAverage(t *testing.T) {
 
 	t.Run("Empty history returns 0", func(t *testing.T) {
 		emptyRepo := &mockForecastingRepo{txns: []entity.Transaction{}}
-		svcEmpty := service.NewForecastingService(emptyRepo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
+		svcEmpty := service.NewForecastingService(emptyRepo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockForecastSubRepo{}, nil, nil, nil)
 		got, err := svcEmpty.CalculateCategoryAverage(context.Background(), userID, catID, "3m")
 		if err != nil {
 			t.Fatalf("unexpected error: %v", err)
@@ -857,14 +899,14 @@ func TestForecastingService_CalculateCategoryAverage_Grouping(t *testing.T) {
 	}
 
 	repo := &mockForecastingRepo{txns: txns}
-	svc := service.NewForecastingService(repo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockExclusionRepo{}, nil, nil, nil)
+	svc := service.NewForecastingService(repo, &mockForecastingBankRepo{}, &mockCategoryRepo{}, nil, nil, &mockForecastSubRepo{}, nil, nil, nil)
 
 	got, err := svc.CalculateCategoryAverage(context.Background(), userID, catID, "3m")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	expected := (-150.0 + -200.0) / 2.0 // = -175.0
+	expected := -200.0 // Current month is excluded, only Month -1 (-200) remains
 	if math.Abs(got-expected) > 1e-6 {
 		t.Errorf("got %f, expected %f", got, expected)
 	}

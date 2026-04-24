@@ -1,7 +1,7 @@
 import { useTranslation } from 'react-i18next';
-import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, BarChart3, Slash, Users, RefreshCcw, Link as LinkIcon } from 'lucide-react';
+import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, Users, RefreshCcw, Search } from 'lucide-react';
 import type { Category } from "../../api/types/category";
-import type { Transaction, PatternExclusion } from "../../api/types/transaction";
+import type { Transaction } from "../../api/types/transaction";
 import type { Subscription } from "../../api/types/subscription";
 import { fmtCurrency, fmtDate } from '../../utils/formatters';
 
@@ -14,7 +14,6 @@ interface TransactionTableProps {
     categories: Category[];
     subscriptions?: Subscription[];
     currentUserId?: string;
-    patternExclusions?: PatternExclusion[];
     selectedHashes: Set<string>;
     onToggleSelect: (hash: string) => void;
     onToggleSelectAll: () => void;
@@ -23,10 +22,10 @@ interface TransactionTableProps {
     onSort: (key: SortKey) => void;
     onCategoryChange: (hash: string, categoryId: string) => void;
     onMarkReviewed?: (hash: string) => void;
-    onTogglePatternExclusion?: (matchTerm: string, excluded: boolean) => void;
     onCreateSubscription?: (tx: Transaction) => void;
     onLinkSubscription?: (tx: Transaction) => void;
     onUnlinkSubscription?: (tx: Transaction) => void;
+    onSearchSimilar?: (tx: Transaction) => void;
     visibleCols: Record<TxColKey, boolean>;
 }
 
@@ -35,7 +34,6 @@ export default function TransactionTable({
                                              categories,
                                              subscriptions = [],
                                              currentUserId,
-                                             patternExclusions = [],
                                              selectedHashes,
                                              onToggleSelect,
                                              onToggleSelectAll,
@@ -44,19 +42,13 @@ export default function TransactionTable({
                                              onSort,
                                              onCategoryChange,
                                              onMarkReviewed,
-                                             onTogglePatternExclusion,
                                              onCreateSubscription,
                                              onLinkSubscription,
                                              onUnlinkSubscription,
+                                             onSearchSimilar,
                                              visibleCols
-                                         }: TransactionTableProps) {
-    const { t } = useTranslation();
+                                             }: TransactionTableProps) {    const { t } = useTranslation();
 
-    const normalize = (desc: string) => desc.trim().toLowerCase().slice(0, 25);
-
-    const isTermExcluded = (term: string) => {
-        return patternExclusions.some(pe => pe.match_term === term);
-    };
 
     const renderSortIcon = (k: SortKey) => {
         if (sortKey !== k) return null;
@@ -129,11 +121,8 @@ export default function TransactionTable({
                     {transactions.map((tx) => {
                         const isSelected = selectedHashes.has(tx.content_hash);
                         const currentCat = categories.find((c) => c.id === tx.category_id);
-                        const term = normalize(tx.description);
-                        const isSkipped = isTermExcluded(term);
-
                         return (
-                            <tr key={tx.content_hash} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''} ${tx.is_reconciled ? 'opacity-60' : ''} ${isSkipped ? 'opacity-70 bg-amber-50/5 dark:bg-amber-900/5' : ''} ${tx.is_prediction ? 'bg-indigo-50/10 dark:bg-indigo-900/5 border-l-2 border-l-indigo-500 dark:border-l-indigo-400' : ''}`}>
+                            <tr key={tx.content_hash} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''} ${tx.is_reconciled ? 'opacity-60' : ''} ${tx.is_prediction ? 'bg-indigo-50/10 dark:bg-indigo-900/5 border-l-2 border-l-indigo-500 dark:border-l-indigo-400' : ''}`}>
                                 <td className="px-4 py-3 align-top pt-4">
                                     <button
                                         type="button"
@@ -186,12 +175,17 @@ export default function TransactionTable({
                                                             <RefreshCcw size={9} /> {subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name ?? t('subscriptions.title')}
                                                         </span>
                                                     )}
-                                                    {!tx.bank_statement_id && (
-                                                        <span title={t('transactions.table.liveFeed')} className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0">
-                                                            {t('transactions.table.liveFeed')}
-                                                        </span>
-                                                    )}
                                                     <span className="truncate">{tx.description}</span>
+                                                    {onSearchSimilar && (
+                                                        <button 
+                                                            type="button" 
+                                                            onClick={(e) => { e.stopPropagation(); onSearchSimilar(tx); }}
+                                                            className="text-gray-300 dark:text-gray-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0 ml-1"
+                                                            title={t('transactions.searchSimilar')}
+                                                        >
+                                                            <Search size={12} />
+                                                        </button>
+                                                    )}
                                                 </span>
                                             )}
                                             <span className="text-gray-500 dark:text-gray-400 text-xs truncate max-w-[12rem]"
@@ -251,10 +245,10 @@ export default function TransactionTable({
                                 )}
 
                                 {visibleCols.amount && (
-                                    <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${isSkipped ? 'opacity-40' : tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                                    <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
                                             <span className="flex flex-col items-end">
                                                 <span className="inline-flex items-center gap-1 justify-end w-full">
-                                                    {tx.amount >= 0 ? <TrendingUp size={11} className={isSkipped ? '' : "text-green-500 dark:text-green-400"} /> : <TrendingDown size={11} className={isSkipped ? '' : "text-red-400 dark:text-red-500"} />}
+                                                    {tx.amount >= 0 ? <TrendingUp size={11} className="text-green-500 dark:text-green-400" /> : <TrendingDown size={11} className="text-red-400 dark:text-red-500" />}
                                                     {fmtCurrency(tx.amount, tx.currency)}
                                                 </span>
                                                 {tx.base_currency && tx.base_currency !== tx.currency && tx.base_amount !== 0 && (
@@ -267,18 +261,6 @@ export default function TransactionTable({
                                 )}
                                 <td className="px-4 py-3 text-right align-top pt-3.5 whitespace-nowrap">
                                     <div className="flex items-center justify-end gap-1">
-                                        <button
-                                            onClick={() => onTogglePatternExclusion?.(term, !isSkipped)}
-                                            className={`p-1.5 rounded-lg transition-colors relative ${isSkipped
-                                                ? 'text-amber-600 dark:text-amber-400 bg-amber-50 dark:bg-amber-900/30'
-                                                : 'text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20'}`}
-                                            title={isSkipped ? t('transactions.includePatternInForecasting') : t('transactions.excludePatternFromForecasting')}
-                                        >
-                                            <div className="relative">
-                                                <BarChart3 size={16} />
-                                                {isSkipped && <Slash size={10} className="absolute inset-0 m-auto text-amber-600 dark:text-amber-400" />}
-                                            </div>
-                                        </button>
 
                                         {!tx.reviewed && !tx.is_prediction && (
                                             <button
@@ -290,34 +272,35 @@ export default function TransactionTable({
                                             </button>
                                         )}
 
-                                        {tx.amount < 0 && !tx.subscription_id && !tx.is_prediction && (
-                                            <button
-                                                onClick={() => onCreateSubscription?.(tx)}
-                                                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                title={t('transactions.createSubscription', 'Create Subscription')}
-                                            >
-                                                <RefreshCcw size={16} />
-                                            </button>
-                                        )}
-
-                                        {tx.amount < 0 && !tx.subscription_id && !tx.is_prediction && onLinkSubscription && (
-                                            <button
-                                                onClick={() => onLinkSubscription(tx)}
-                                                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                title={t('subscriptions.linkTransaction', 'Link to Subscription')}
-                                            >
-                                                <LinkIcon size={16} />
-                                            </button>
-                                        )}
-
-                                        {tx.subscription_id && onUnlinkSubscription && (
-                                            <button
-                                                onClick={() => onUnlinkSubscription(tx)}
-                                                className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                                title={t('subscriptions.unlinkTransaction', 'Unlink from Subscription')}
-                                            >
-                                                <Unlink size={16} />
-                                            </button>
+                                        {tx.amount < 0 && !tx.is_prediction && (
+                                            <>
+                                                {!tx.subscription_id ? (
+                                                    <>
+                                                        <button
+                                                            onClick={() => onCreateSubscription?.(tx)}
+                                                            className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                            title={t('transactions.createSubscription', 'Create Subscription')}
+                                                        >
+                                                            <RefreshCcw size={16} />
+                                                        </button>
+                                                        <button
+                                                            onClick={() => onLinkSubscription?.(tx)}
+                                                            className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                                            title={t('subscriptions.linkManually', 'Link to existing Subscription')}
+                                                        >
+                                                            <Copy size={16} />
+                                                        </button>
+                                                    </>
+                                                ) : (
+                                                    <button
+                                                        onClick={() => onUnlinkSubscription?.(tx)}
+                                                        className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                                        title={t('subscriptions.unlinkManually', 'Unlink from Subscription')}
+                                                    >
+                                                        <Unlink size={16} />
+                                                    </button>
+                                                )}
+                                            </>
                                         )}
                                     </div>
                                 </td>

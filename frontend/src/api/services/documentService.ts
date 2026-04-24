@@ -6,7 +6,7 @@ export interface DocumentUpdatePayload {
     file_name?: string;
     type?: DocumentType;
     document_date?: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
 }
 
 export const documentService = {

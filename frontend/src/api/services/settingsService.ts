@@ -1,5 +1,5 @@
 import { api } from '../client';
-import type { SystemInfo, CreateBridgeTokenResponse } from "../types/system";
+import type { SystemInfo, CreateBridgeTokenResponse, BridgeAccessToken } from "../types/system";
 export const settingsService = {
     fetchSystemInfo: (): Promise<SystemInfo> =>
         api.get<SystemInfo>('system/info/').then(r => r.data),
@@ -21,8 +21,8 @@ export const settingsService = {
         api.put<{ level: string }>('system/log-level/', { level }).then(r => r.data),
 
     // Bridge Tokens
-    fetchBridgeTokens: (): Promise<any[]> =>
-        api.get<any[]>('bridge-tokens/').then(r => r.data ?? []),
+    fetchBridgeTokens: (): Promise<BridgeAccessToken[]> =>
+        api.get<BridgeAccessToken[]>('bridge-tokens/').then(r => r.data ?? []),
 
     createBridgeToken: (name: string): Promise<CreateBridgeTokenResponse> =>
         api.post<CreateBridgeTokenResponse>('bridge-tokens/', { name }).then(r => r.data),

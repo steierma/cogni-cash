@@ -9,7 +9,7 @@ export interface InvoiceUpdatePayload {
     amount?: number;
     currency?: string;
     issued_at?: string;
-    metadata?: Record<string, any>;
+    metadata?: Record<string, unknown>;
     splits?: Partial<InvoiceSplit>[];
 }
 

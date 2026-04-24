@@ -1,11 +1,32 @@
 import { useState, useMemo } from 'react';
 import { useTranslation, Trans } from 'react-i18next';
+import type { TFunction } from 'i18next';
 import { LineChart as LineChartIcon, ChevronDown, BarChart3 } from 'lucide-react';
 import { ResponsiveContainer, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip, ReferenceLine, BarChart, Bar, Legend } from 'recharts';
 import { fmtCurrency } from '../../utils/formatters';
 import { formatYearMonth, getAdjustedNetto } from './utils';
-import type { Payslip } from "../../api/types/payslip";
-const CustomChartTooltip = ({ active, payload, label, t }: any) => {
+import type { Payslip, Bonus } from "../../api/types/payslip";
+
+interface CustomTooltipProps {
+    active?: boolean;
+    payload?: Array<{
+        payload: {
+            bonusesThisMonth: Bonus[];
+            adjEur: number;
+            totalEur: number;
+            payoutEur: number;
+            grossEur: number;
+        };
+        dataKey: string | number;
+        color: string;
+        name: string;
+        value: number;
+    }>;
+    label?: string;
+    t: TFunction;
+}
+
+const CustomChartTooltip = ({ active, payload, label, t }: CustomTooltipProps) => {
     if (active && payload && payload.length) {
         const data = payload[0].payload;
         const bonusesThisMonth = data.bonusesThisMonth || [];
@@ -13,7 +34,7 @@ const CustomChartTooltip = ({ active, payload, label, t }: any) => {
         return (
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-3 rounded-xl shadow-lg text-sm z-50 min-w-[200px]">
                 <p className="font-medium text-gray-900 dark:text-gray-100 mb-2 border-b border-gray-100 dark:border-gray-700 pb-1">{label}</p>
-                {payload.map((entry: any, index: number) => {
+                {payload.map((entry, index: number) => {
                     let eurValue = 0;
                     if (entry.dataKey === 'adjGrowth') eurValue = entry.payload.adjEur;
                     else if (entry.dataKey === 'totalGrowth') eurValue = entry.payload.totalEur;
@@ -39,7 +60,7 @@ const CustomChartTooltip = ({ active, payload, label, t }: any) => {
                     <div className="mt-3 pt-2 border-t border-gray-100 dark:border-gray-700">
                         <p className="text-[10px] font-bold text-gray-400 uppercase tracking-wider mb-1">{t('payslips.chart.bonusesIncluded')}</p>
                         <div className="space-y-1">
-                            {bonusesThisMonth.map((b: any, idx: number) => (
+                            {bonusesThisMonth.map((b, idx: number) => (
                                 <div key={idx} className="flex justify-between items-center text-xs">
                                     <span className="text-gray-500 dark:text-gray-400 truncate max-w-[160px]" title={b.description}>{b.description}</span>
                                     <span className="font-mono text-gray-700 dark:text-gray-300 ml-3">{fmtCurrency(b.amount, 'EUR')}</span>
@@ -54,12 +75,22 @@ const CustomChartTooltip = ({ active, payload, label, t }: any) => {
     return null;
 };
 
-const YearlyTooltip = ({ active, payload, label }: any) => {
+interface YearlyTooltipProps {
+    active?: boolean;
+    payload?: Array<{
+        color: string;
+        name: string;
+        value: number;
+    }>;
+    label?: string;
+}
+
+const YearlyTooltip = ({ active, payload, label }: YearlyTooltipProps) => {
     if (active && payload && payload.length) {
         return (
             <div className="bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 p-3 rounded-xl shadow-lg text-sm z-50">
                 <p className="font-bold text-gray-900 dark:text-gray-100 mb-2 border-b border-gray-100 dark:border-gray-700 pb-1">{label}</p>
-                {payload.map((entry: any, index: number) => (
+                {payload.map((entry, index: number) => (
                     <div key={index} className="flex items-center justify-between gap-8 mb-1">
                         <div className="flex items-center gap-2">
                             <div className="w-3 h-3 rounded-full" style={{ backgroundColor: entry.color }} />

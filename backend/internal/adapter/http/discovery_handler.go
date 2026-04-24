@@ -391,6 +391,43 @@ func (h *Handler) CreateSubscriptionFromTransaction(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusCreated, sub)
 }
 
+func (h *Handler) LinkTransactions(w http.ResponseWriter, r *http.Request) {
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	subIDStr := chi.URLParam(r, "id")
+	subID, err := uuid.Parse(subIDStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid subscription id")
+		return
+	}
+
+	var req struct {
+		Hashes []string `json:"hashes"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.Hashes) == 0 {
+		writeError(w, http.StatusBadRequest, "hashes are required")
+		return
+	}
+
+	err = h.discoverySvc.LinkTransactions(r.Context(), userID, subID, req.Hashes)
+	if err != nil {
+		h.Logger.Error("failed to link transactions to subscription", "error", err, "user_id", userID, "sub_id", subID)
+		writeError(w, http.StatusInternalServerError, "failed to link transactions")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "linked"})
+}
+
 func (h *Handler) LinkTransaction(w http.ResponseWriter, r *http.Request) {
 	userID := h.getUserID(r.Context())
 	if userID == uuid.Nil {

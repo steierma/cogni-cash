@@ -23,8 +23,12 @@ type BankStatementRepository interface {
 	UpdateTransactionSubscription(ctx context.Context, contentHash string, subscriptionID *uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReviewed(ctx context.Context, contentHash string, userID uuid.UUID) error
-	UpdateTransactionSkipForecasting(ctx context.Context, contentHash string, skip bool, userID uuid.UUID) error
-	UpdateTransactionBaseAmount(ctx context.Context, contentHash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error
+	MarkTransactionsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error
+
+	UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error
+
+	UpdateStatementAccount(ctx context.Context, statementID uuid.UUID, bankAccountID *uuid.UUID, userID uuid.UUID) error
+	GetTransactionsByAccountID(ctx context.Context, bankAccountID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error)
 
 	LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error
 

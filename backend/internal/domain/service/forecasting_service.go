@@ -7,7 +7,6 @@ import (
 	"math"
 	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"cogni-cash/internal/domain/entity"
@@ -24,7 +23,7 @@ type ForecastingService struct {
 	catRepo      port.CategoryRepository
 	payslipRepo  port.PayslipRepository
 	ptRepo       port.PlannedTransactionRepository
-	forecastRepo port.ForecastingRepository
+	subRepo      port.SubscriptionRepository
 	settingsRepo port.SettingsRepository
 	ratePort     port.CurrencyExchangeRatePort
 	Logger       *slog.Logger
@@ -36,7 +35,7 @@ func NewForecastingService(
 	catRepo port.CategoryRepository,
 	payslipRepo port.PayslipRepository,
 	ptRepo port.PlannedTransactionRepository,
-	forecastRepo port.ForecastingRepository,
+	subRepo port.SubscriptionRepository,
 	settingsRepo port.SettingsRepository,
 	ratePort port.CurrencyExchangeRatePort,
 	logger *slog.Logger,
@@ -50,144 +49,36 @@ func NewForecastingService(
 		catRepo:      catRepo,
 		payslipRepo:  payslipRepo,
 		ptRepo:       ptRepo,
-		forecastRepo: forecastRepo,
+		subRepo:      subRepo,
 		settingsRepo: settingsRepo,
 		ratePort:     ratePort,
 		Logger:       logger,
 	}
 }
 
-type recurringPattern struct {
-	template entity.Transaction
-	interval int // in months
+// billingCycleToDays returns the number of days per interval for weekly subscriptions.
+// For monthly/yearly, returns 0 (use AddDate with months instead).
+func billingCycleToDays(cycle string, interval int) int {
+	if cycle == "weekly" {
+		return 7 * interval
+	}
+	return 0
 }
 
-// normalizeHistory decomposes bundled bank transactions (e.g. Salary + Bonus) based on payslip data.
-func (s *ForecastingService) normalizeHistory(ctx context.Context, userID uuid.UUID, history []entity.Transaction) []entity.Transaction {
-	if s.payslipRepo == nil {
-		return history
+// billingCycleToMonths returns the number of months per interval for monthly/yearly subscriptions.
+func billingCycleToMonths(cycle string, interval int) int {
+	switch cycle {
+	case "monthly":
+		return interval
+	case "yearly":
+		return interval * 12
+	default:
+		return interval
 	}
-
-	// 1. Fetch all payslips for the user
-	payslips, err := s.payslipRepo.FindAll(ctx, entity.PayslipFilter{UserID: userID})
-	if err != nil {
-		s.Logger.Warn("Could not fetch payslips for history normalization", "error", err)
-		return history
-	}
-
-	// 2. Map payslips by Period (Year-Month)
-	payslipMap := make(map[string]entity.Payslip)
-	for _, ps := range payslips {
-		key := fmt.Sprintf("%d-%02d", ps.PeriodYear, ps.PeriodMonthNum)
-		payslipMap[key] = ps
-	}
-
-	var normalized []entity.Transaction
-	for _, tx := range history {
-		// Only look at income transactions that could be salary
-		if tx.BaseAmount <= 0 {
-			normalized = append(normalized, tx)
-			continue
-		}
-
-		monthKey := tx.BookingDate.Format("2006-01")
-		ps, ok := payslipMap[monthKey]
-		if !ok {
-			normalized = append(normalized, tx)
-			continue
-		}
-
-		// 3. Matching logic: Is this bank transaction the payout for this payslip?
-		// We use BasePayoutAmount and BaseAmount because that is what actually hits the bank (after all deductions)
-		// and allows for cross-currency matching.
-		// We allow a small tolerance (e.g. ±2.00) for rounding or minor fee differences.
-		if math.Abs(tx.BaseAmount-ps.BasePayoutAmount) > 2.0 {
-			normalized = append(normalized, tx)
-			continue
-		}
-
-		// 4. Decomposition: If matched and contains bonuses, split it
-		if len(ps.Bonuses) == 0 {
-			// Tag it as verified even if no bonus
-			tx.IsPayslipVerified = true
-			normalized = append(normalized, tx)
-			continue
-		}
-
-		// Calculate net factor for this specific payslip to split gross bonuses accurately.
-		// We use BaseNetPay / BaseGrossPay as the "tax ratio" to find the approximate net component of the bonus.
-		netFactor := ps.BaseNetPay / ps.BaseGrossPay
-		bonusNetTotal := 0.0
-
-		for _, b := range ps.Bonuses {
-			netBonus := b.BaseAmount * netFactor
-			bonusNetTotal += netBonus
-
-			// Create a virtual transaction for the bonus
-			bonusTx := tx
-			bonusTx.ID = uuid.NewSHA1(uuid.NameSpaceOID, []byte(fmt.Sprintf("%s-vbonus-%s-%s", userID, b.Description, tx.ID)))
-			bonusTx.Description = fmt.Sprintf("Bonus: %s", b.Description)
-			bonusTx.Amount = b.Amount * netFactor // Keep original amount for completeness
-			bonusTx.BaseAmount = netBonus
-			bonusTx.IsPayslipVerified = true
-			normalized = append(normalized, bonusTx)
-		}
-
-		// The remaining amount is the "Base Salary"
-		baseSalaryTx := tx
-		baseSalaryTx.BaseAmount = tx.BaseAmount - bonusNetTotal
-		if tx.BaseAmount != 0 {
-			baseSalaryTx.Amount = tx.Amount - (bonusNetTotal * (tx.Amount / tx.BaseAmount))
-		} else {
-			baseSalaryTx.Amount = tx.Amount
-		}
-		baseSalaryTx.IsPayslipVerified = true
-		normalized = append(normalized, baseSalaryTx)
-	}
-
-	return normalized
 }
 
 func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uuid.UUID, fromDate, toDate time.Time) (entity.CashFlowForecast, error) {
-	// 0. Fetch exclusions
-	var exclusions []entity.ExcludedForecast
-	var patternExclusions []entity.PatternExclusion
-	if s.forecastRepo != nil {
-		ex, err := s.forecastRepo.FindExclusions(ctx, userID)
-		if err != nil {
-			s.Logger.Warn("Could not fetch forecast exclusions", "error", err, "user_id", userID)
-		} else {
-			exclusions = ex
-		}
-
-		pe, err := s.forecastRepo.FindPatternExclusions(ctx, userID)
-		if err != nil {
-			s.Logger.Warn("Could not fetch pattern exclusions", "error", err, "user_id", userID)
-		} else {
-			patternExclusions = pe
-		}
-	}
-	excludedMap := make(map[uuid.UUID]bool)
-	for _, ex := range exclusions {
-		excludedMap[ex.ForecastID] = true
-	}
-
-	patternExclusionMap := make(map[string]bool)
-	for _, pe := range patternExclusions {
-		patternExclusionMap[pe.MatchTerm] = true
-	}
-
-	// 1. Fetch historical transactions (last 3 years for pattern detection)
-	histStart := time.Now().AddDate(-3, 0, 0)
-	history, err := s.repo.FindTransactions(ctx, entity.TransactionFilter{
-		UserID:   userID,
-		FromDate: &histStart,
-	})
-	if err != nil {
-		return entity.CashFlowForecast{}, err
-	}
-
-	// 2. Fetch categories to identify variable ones
+	// 1. Fetch categories to identify variable ones
 	allCats, err := s.catRepo.FindAll(ctx, userID)
 	if err != nil {
 		s.Logger.Warn("Could not fetch categories for forecasting", "error", err)
@@ -199,19 +90,7 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 		}
 	}
 
-	// 3. Detect recurring patterns (excluding variable categories and pattern exclusions)
-	normalizedHistory := s.normalizeHistory(ctx, userID, history)
-	recurring := s.detectRecurring(normalizedHistory, varCats, patternExclusionMap)
-
-	// 4. Project discrete events into future
-	predictions := make([]entity.PredictedTransaction, 0)
-	predictions = append(predictions, s.projectFuture(userID, recurring, fromDate, toDate)...)
-
-	// 5. Add Variable Spending Budgets
-	budgetPredictions := s.calculateVariableBudgets(userID, history, varCats, fromDate, toDate)
-	predictions = append(predictions, budgetPredictions...)
-
-	// 5b. Determine base currency for multi-currency handling (moved up for planned transactions)
+	// 2. Determine base currency
 	baseCurrency := "EUR"
 	if s.settingsRepo != nil {
 		if val, _ := s.settingsRepo.Get(ctx, "BASE_DISPLAY_CURRENCY", userID); val != "" {
@@ -219,19 +98,73 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 		}
 	}
 
-	// 5c. Add Planned Transactions
+	// 3. Fetch bank accounts for balance and filtering
+	accounts := []entity.BankAccount{}
+	if s.bankRepo != nil {
+		var err error
+		accounts, err = s.bankRepo.GetAccountsByUserID(ctx, userID)
+		if err != nil {
+			s.Logger.Warn("Could not fetch bank accounts for forecasting", "error", err)
+		}
+	}
+
+	// 4. Project subscriptions (replaces pattern detection)
+	predictions := make([]entity.PredictedTransaction, 0)
+	subMonthlyByCat := make(map[uuid.UUID]float64) // monthly base-currency equivalent per category
+	if s.subRepo != nil {
+		subPredictions, monthlyByCat := s.projectSubscriptions(ctx, userID, fromDate, toDate, baseCurrency, varCats, accounts)
+		predictions = append(predictions, subPredictions...)
+		subMonthlyByCat = monthlyByCat
+	}
+
+	// 4. Add Variable Spending Budgets for ALL variable categories.
+	// For categories that also have active subscriptions the budget is reduced by the subscription
+	// monthly equivalent so the total (sub + variable) always matches the historical burn rate.
+	// The result is capped so it can never flip sign (i.e. never becomes income for an expense category).
+	// Reconciled transactions must not skew variable budget calculations.
+	histStart := time.Now().AddDate(-3, 0, 0)
+	excludeReconciled := false
+	history, err := s.repo.FindTransactions(ctx, entity.TransactionFilter{
+		UserID:        userID,
+		FromDate:      &histStart,
+		IsReconciled:  &excludeReconciled,
+		IncludeShared: true,
+	})
+	if err != nil {
+		return entity.CashFlowForecast{}, err
+	}
+
+	budgetPredictions := s.calculateVariableBudgets(userID, history, varCats, subMonthlyByCat, fromDate, toDate)
+	predictions = append(predictions, budgetPredictions...)
+
+	// 5. Add Planned Transactions (no supersession logic — clean pass-through)
 	if s.ptRepo != nil {
 		plannedTransactions, err := s.ptRepo.FindByUserID(ctx, userID)
 		if err != nil {
 			s.Logger.Warn("Could not fetch planned transactions for forecasting", "error", err)
 		} else {
+			// If we have accounts, we should only show planned transactions linked to THESE accounts
+			// OR those that are GLOBAL (bank_account_id is nil).
+			// If no accounts are provided, show all.
+			validAccIDs := make(map[uuid.UUID]bool)
+			for _, acc := range accounts {
+				validAccIDs[acc.ID] = true
+			}
+
 			for _, pt := range plannedTransactions {
-				// Only process Pending or Matched
 				if pt.Status != entity.PlannedTransactionStatusPending {
 					continue
 				}
 
-				// Calculate Base Amount dynamically for accurate superseding and forecasting
+				// Tenancy/Account Filter:
+				// Only include if:
+				// 1. PT is global (no bank account)
+				// 2. OR PT is linked to one of the accounts we are currently forecasting
+				if pt.BankAccountID != nil && len(accounts) > 0 && !validAccIDs[*pt.BankAccountID] {
+					continue
+				}
+
+				// Calculate Base Amount dynamically
 				baseAmt := pt.BaseAmount
 				if baseAmt == 0 {
 					if pt.Currency == baseCurrency {
@@ -241,63 +174,41 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 						if err == nil {
 							baseAmt = pt.Amount * rate
 						} else {
-							baseAmt = pt.Amount // Fallback
+							baseAmt = pt.Amount
 						}
 					} else {
-						baseAmt = pt.Amount // Fallback
-					}
-				}
-
-				// Soft Suppression: Check if this manual planned transaction overlaps with an auto-detected pattern
-				isSuperseded := false
-				for _, pred := range predictions {
-					// We only compare against auto-detected predictions
-					if !pred.IsPrediction || strings.HasPrefix(pred.Description, "Planned:") {
-						continue
-					}
-
-					if pt.CategoryID != nil && pred.CategoryID != nil && *pt.CategoryID == *pred.CategoryID {
-						// Amount similarity (±20%, min 50.0) based on base amounts
-						amtDiff := math.Abs(baseAmt - pred.BaseAmount)
-						maxAllowed := math.Max(math.Abs(pred.BaseAmount)*0.20, 50.0)
-
-						if amtDiff <= maxAllowed {
-							// Date proximity: Must be within the same month and roughly same day (±7 days)
-							dayDiff := math.Abs(pt.Date.Sub(pred.BookingDate).Hours() / 24)
-							if dayDiff <= 7 || (pt.Date.Month() == pred.BookingDate.Month() && pt.Date.Year() == pred.BookingDate.Year()) {
-								isSuperseded = true
-								break
-							}
-						}
+						baseAmt = pt.Amount
 					}
 				}
 
 				// Project occurrences
 				current := pt.Date
 				for {
-					if !current.After(toDate) && !current.Before(fromDate) {
-						idSeed := fmt.Sprintf("%s-pt-%s-%s", userID, pt.ID, current.Format("2006-01-02"))
+					projectionDate := current
+					if pt.SchedulingStrategy == entity.SchedulingStrategyLastBankDay {
+						projectionDate = GetLastBusinessDay(current.Year(), current.Month(), current.Location())
+					}
+
+					if !projectionDate.After(toDate) && (projectionDate.After(fromDate) || projectionDate.Equal(fromDate)) {
+						idSeed := fmt.Sprintf("%s-pt-%s-%s", userID, pt.ID, projectionDate.Format("2006-01-02"))
 						id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(idSeed))
 
 						desc := fmt.Sprintf("Planned: %s", pt.Description)
-						if isSuperseded {
-							desc += " (Superseded by auto-forecast)"
-						}
 
 						predictions = append(predictions, entity.PredictedTransaction{
 							Transaction: entity.Transaction{
-								ID:              id,
-								Description:     desc,
-								Amount:          pt.Amount,
-								Currency:        pt.Currency,
-								BaseAmount:      baseAmt,
-								BaseCurrency:    baseCurrency,
-								BookingDate:     current,
-								ValutaDate:      current,
-								CategoryID:      pt.CategoryID,
-								IsPrediction:    true,
-								Type:            templateType(pt.Amount),
-								SkipForecasting: isSuperseded,
+								ID:           id,
+								Description:  desc,
+								Amount:       pt.Amount,
+								Currency:     pt.Currency,
+								BaseAmount:   baseAmt,
+								BaseCurrency: baseCurrency,
+								BookingDate:  projectionDate,
+								ValutaDate:   projectionDate,
+								CategoryID:   pt.CategoryID,
+								BankAccountID: pt.BankAccountID,
+								IsPrediction: true,
+								Type:         templateType(pt.Amount),
 							},
 							Probability: 1.0,
 						})
@@ -306,7 +217,26 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 					if pt.IntervalMonths <= 0 {
 						break
 					}
-					current = current.AddDate(0, pt.IntervalMonths, 0)
+					// Always increment based on the calendar month to avoid day-drifting
+					// We use a safe way to add months: 
+					// 1. Move to the first of the month
+					// 2. Add the interval
+					// 3. Try to restore the original day, or use the last day of that month
+					year, month, _ := current.Date()
+					originalDay := pt.Date.Day()
+					
+					// Move to next target month
+					nextMonth := time.Date(year, month, 1, 0, 0, 0, 0, current.Location()).AddDate(0, pt.IntervalMonths, 0)
+					
+					// Try to restore original day
+					lastDayOfNext := time.Date(nextMonth.Year(), nextMonth.Month()+1, 0, 0, 0, 0, 0, current.Location()).Day()
+					targetDay := originalDay
+					if targetDay > lastDayOfNext {
+						targetDay = lastDayOfNext
+					}
+					
+					current = time.Date(nextMonth.Year(), nextMonth.Month(), targetDay, 0, 0, 0, 0, current.Location())
+
 					if current.After(toDate) || (pt.EndDate != nil && current.After(*pt.EndDate)) {
 						break
 					}
@@ -315,34 +245,26 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 		}
 	}
 
-	// Sort all predictions by date
-	sort.Slice(predictions, func(i, j int) bool {
-		return predictions[i].BookingDate.Before(predictions[j].BookingDate)
+	// Sort all predictions by date, then by ID as a stable tiebreaker so that
+	// rows with identical dates always appear in the same order across refreshes.
+	// (sort.Slice is not stable and Go map iteration is random, both cause jumping.)
+	sort.SliceStable(predictions, func(i, j int) bool {
+		di := predictions[i].BookingDate
+		dj := predictions[j].BookingDate
+		if !di.Equal(dj) {
+			return di.Before(dj)
+		}
+		return predictions[i].ID.String() < predictions[j].ID.String()
 	})
 
-	// 5d. Mark excluded forecasts so they are not counted but still returned for the UI
-	for i := range predictions {
-		if excludedMap[predictions[i].ID] {
-			predictions[i].SkipForecasting = true
-		}
-	}
-
 	// 6. Get current balance (convert to base currency)
-	accounts := []entity.BankAccount{}
-	if s.bankRepo != nil {
-		var err error
-		accounts, err = s.bankRepo.GetAccountsByUserID(ctx, userID)
-		if err != nil {
-			s.Logger.Warn("Could not fetch bank accounts for balance forecast", "error", err)
-		}
-	}
 	currentBalance := 0.0
 	for _, acc := range accounts {
 		if acc.Currency != baseCurrency && s.ratePort != nil {
 			rate, err := s.ratePort.GetRate(ctx, acc.Currency, baseCurrency, time.Now())
 			if err != nil {
 				s.Logger.Error("Could not fetch rate for account balance conversion", "acc", acc.ID, "error", err)
-				currentBalance += acc.Balance // Fallback: sum raw (incorrect but better than 0)
+				currentBalance += acc.Balance
 			} else {
 				currentBalance += acc.Balance * rate
 			}
@@ -351,7 +273,7 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 		}
 	}
 
-	// 7. Build time series (passing all predictions; buildTimeSeries will handle the SkipForecasting flag)
+	// 7. Build time series
 	timeSeries := s.buildTimeSeries(currentBalance, predictions, fromDate, toDate)
 
 	return entity.CashFlowForecast{
@@ -361,162 +283,193 @@ func (s *ForecastingService) GetCashFlowForecast(ctx context.Context, userID uui
 	}, nil
 }
 
-func (s *ForecastingService) ExcludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error {
-	if s.forecastRepo == nil {
-		return fmt.Errorf("forecasting repo not configured")
-	}
-	return s.forecastRepo.SaveExclusion(ctx, entity.ExcludedForecast{
-		UserID:     userID,
-		ForecastID: forecastID,
-		CreatedAt:  time.Now(),
-	})
-}
+// projectSubscriptions projects future occurrences for active/cancellation_pending subscriptions.
+// Returns predictions and a map of category ID → monthly base-currency equivalent of subscriptions
+// (used by calculateVariableBudgets to reduce the variable budget for covered categories).
+func (s *ForecastingService) projectSubscriptions(ctx context.Context, userID uuid.UUID, from, to time.Time, baseCurrency string, _ map[uuid.UUID]entity.Category, accounts []entity.BankAccount) ([]entity.PredictedTransaction, map[uuid.UUID]float64) {
+	var predictions []entity.PredictedTransaction
+	subMonthlyByCat := make(map[uuid.UUID]float64)
 
-func (s *ForecastingService) IncludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error {
-	if s.forecastRepo == nil {
-		return fmt.Errorf("forecasting repo not configured")
+	subs, err := s.subRepo.FindByUserID(ctx, userID)
+	if err != nil {
+		s.Logger.Warn("Could not fetch subscriptions for forecasting", "error", err, "user_id", userID)
+		return predictions, subMonthlyByCat
 	}
-	return s.forecastRepo.DeleteExclusion(ctx, userID, forecastID)
-}
 
-func (s *ForecastingService) ExcludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error {
-	if s.forecastRepo == nil {
-		return fmt.Errorf("forecasting repo not configured")
+	// For filtering
+	validAccIDs := make(map[uuid.UUID]bool)
+	for _, acc := range accounts {
+		validAccIDs[acc.ID] = true
 	}
-	return s.forecastRepo.SavePatternExclusion(ctx, entity.PatternExclusion{
-		UserID:    userID,
-		MatchTerm: matchTerm,
-		CreatedAt: time.Now(),
-	})
-}
 
-func (s *ForecastingService) IncludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error {
-	if s.forecastRepo == nil {
-		return fmt.Errorf("forecasting repo not configured")
-	}
-	return s.forecastRepo.DeletePatternExclusion(ctx, userID, matchTerm)
-}
+	now := time.Now()
 
-func (s *ForecastingService) ListPatternExclusions(ctx context.Context, userID uuid.UUID) ([]entity.PatternExclusion, error) {
-	if s.forecastRepo == nil {
-		return nil, fmt.Errorf("forecasting repo not configured")
-	}
-	return s.forecastRepo.FindPatternExclusions(ctx, userID)
-}
-
-func (s *ForecastingService) detectRecurring(history []entity.Transaction, varCats map[uuid.UUID]entity.Category, patternExclusions map[string]bool) []recurringPattern {
-	// Group by normalized description
-	groups := make(map[string][]entity.Transaction)
-	for _, tx := range history {
-		if tx.SkipForecasting {
+	for _, sub := range subs {
+		// Only project active or cancellation_pending
+		if sub.Status != entity.SubscriptionStatusActive && sub.Status != entity.SubscriptionStatusCancellationPending {
 			continue
 		}
 
-		desc := normalizeDescription(tx.Description)
-
-		// SKIP pattern-level exclusions
-		if patternExclusions[desc] {
+		// Tenancy/Account Filter:
+		// Only include if:
+		// 1. Subscription is global (no bank account)
+		// 2. OR Subscription is linked to one of the accounts we are currently forecasting
+		if sub.BankAccountID != nil && len(accounts) > 0 && !validAccIDs[*sub.BankAccountID] {
 			continue
 		}
 
-		// SKIP transactions in variable categories to avoid duplicates
-		if tx.CategoryID != nil {
-			if _, ok := varCats[*tx.CategoryID]; ok {
-				continue
-			}
-		}
-
-		groups[desc] = append(groups[desc], tx)
-	}
-
-	var recurring []recurringPattern
-	for _, group := range groups {
-		// Minimum 2 for verified, 3 for unverified
-		if len(group) < 2 {
+		// Skip zero-amount subscriptions
+		if sub.Amount == 0 {
+			s.Logger.Warn("Skipping zero-amount subscription", "sub_id", sub.ID, "merchant", sub.MerchantName)
 			continue
 		}
 
-		sort.Slice(group, func(i, j int) bool {
-			return group[i].BookingDate.Before(group[j].BookingDate)
-		})
+		// Determine the starting point for projection
+		startDate := s.resolveSubscriptionStart(sub, now)
+		if startDate.IsZero() {
+			s.Logger.Warn("Skipping subscription with no start date", "sub_id", sub.ID, "merchant", sub.MerchantName)
+			continue
+		}
 
-		var sequence []entity.Transaction
-		var detectedInterval int
-		for i := 0; i < len(group); i++ {
-			if len(sequence) == 0 {
-				sequence = append(sequence, group[i])
-				continue
+		// Staleness check: if start date is more than 2 intervals in the past, skip
+		days := billingCycleToDays(sub.BillingCycle, sub.BillingInterval)
+		months := billingCycleToMonths(sub.BillingCycle, sub.BillingInterval)
+		var stalenessLimit time.Time
+		if days > 0 {
+			stalenessLimit = startDate.AddDate(0, 0, days*2)
+		} else {
+			stalenessLimit = startDate.AddDate(0, months*2, 0)
+		}
+		if now.After(stalenessLimit) {
+			s.Logger.Warn("Skipping stale subscription", "sub_id", sub.ID, "merchant", sub.MerchantName,
+				"next_occurrence", sub.NextOccurrence, "last_occurrence", sub.LastOccurrence)
+			continue
+		}
+
+		// ContractEndDate guard for cancellation_pending
+		endDate := to
+		if sub.Status == entity.SubscriptionStatusCancellationPending && sub.ContractEndDate != nil {
+			if sub.ContractEndDate.Before(now) {
+				continue // Contract already ended
 			}
-
-			last := sequence[len(sequence)-1]
-			diff := group[i].BookingDate.Sub(last.BookingDate)
-			days := diff.Hours() / 24
-
-			interval := getIntervalFromDays(days, 3.0)
-
-			// Match existing interval or any new valid interval
-			if interval > 0 && (detectedInterval == 0 || interval == detectedInterval) {
-				amtDiff := math.Abs(group[i].Amount - last.Amount)
-				maxAllowed := math.Max(math.Abs(last.Amount)*0.20, 50.0)
-
-				if amtDiff <= maxAllowed {
-					sequence = append(sequence, group[i])
-					detectedInterval = interval
-					continue
-				}
+			if sub.ContractEndDate.Before(endDate) {
+				endDate = *sub.ContractEndDate
 			}
+		}
 
-			// No match: Break if we already have enough, otherwise reset
-			minRequired := 3
-			if isSequenceVerified(sequence) {
-				minRequired = 2
+		// Convert amount to base currency
+		baseAmt := sub.Amount
+		if sub.Currency != baseCurrency && s.ratePort != nil {
+			rate, err := s.ratePort.GetRate(ctx, sub.Currency, baseCurrency, now)
+			if err == nil {
+				baseAmt = sub.Amount * rate
 			}
+		}
 
-			if len(sequence) >= minRequired {
+		// Accumulate monthly base-currency equivalent for variable budget adjustment
+		if sub.CategoryID != nil {
+			subMonthlyByCat[*sub.CategoryID] += subBaseMonthly(baseAmt, sub.BillingCycle, sub.BillingInterval)
+		}
+
+		// Determine probability
+		probability := 0.95
+		if sub.IsTrial {
+			probability = 0.7
+		}
+
+		// Project occurrences
+		current := startDate
+		for {
+			if current.After(endDate) {
 				break
 			}
-			sequence = []entity.Transaction{group[i]}
-			detectedInterval = 0
-		}
 
-		minRequired := 3
-		if isSequenceVerified(sequence) {
-			minRequired = 2
-		}
+			if !current.After(to) && (current.After(from) || current.Equal(from)) {
+				idSeed := fmt.Sprintf("%s-sub-%s-%s", userID, sub.ID, current.Format("2006-01"))
+				id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(idSeed))
 
-		if len(sequence) >= minRequired && detectedInterval > 0 {
-			recurring = append(recurring, recurringPattern{
-				template: sequence[len(sequence)-1],
-				interval: detectedInterval,
-			})
+				predictions = append(predictions, entity.PredictedTransaction{
+					Transaction: entity.Transaction{
+						ID:              id,
+						Description:     sub.MerchantName,
+						Amount:          sub.Amount,
+						Currency:        sub.Currency,
+						BaseAmount:      baseAmt,
+						BaseCurrency:    baseCurrency,
+						BookingDate:     current,
+						ValutaDate:      current,
+						CategoryID:      sub.CategoryID,
+						BankAccountID:   sub.BankAccountID,
+						IsPrediction:    true,
+						Type:            templateType(sub.Amount),
+						SubscriptionID:  &sub.ID,
+					},
+					Probability: probability,
+				})
+			}
+
+			// Advance to next occurrence
+			if days > 0 {
+				current = current.AddDate(0, 0, days)
+			} else {
+				current = current.AddDate(0, months, 0)
+			}
 		}
 	}
 
-	return recurring
+	return predictions, subMonthlyByCat
 }
 
-func isSequenceVerified(seq []entity.Transaction) bool {
-	for _, tx := range seq {
-		if tx.IsPayslipVerified {
-			return true
-		}
+// subBaseMonthly converts a subscription's base-currency amount to a monthly equivalent.
+func subBaseMonthly(baseAmt float64, cycle string, interval int) float64 {
+	months := billingCycleToMonths(cycle, interval)
+	if months > 0 {
+		return baseAmt / float64(months)
 	}
-	return false
+	days := billingCycleToDays(cycle, interval)
+	if days > 0 {
+		return baseAmt * 30.0 / float64(days)
+	}
+	return baseAmt
+}
+
+// resolveSubscriptionStart determines the first projection date for a subscription.
+func (s *ForecastingService) resolveSubscriptionStart(sub entity.Subscription, now time.Time) time.Time {
+	if sub.NextOccurrence != nil {
+		return *sub.NextOccurrence
+	}
+	// Fallback: compute from LastOccurrence + 1 interval
+	if sub.LastOccurrence != nil {
+		days := billingCycleToDays(sub.BillingCycle, sub.BillingInterval)
+		if days > 0 {
+			return sub.LastOccurrence.AddDate(0, 0, days)
+		}
+		months := billingCycleToMonths(sub.BillingCycle, sub.BillingInterval)
+		return sub.LastOccurrence.AddDate(0, months, 0)
+	}
+	return time.Time{} // Zero — caller must skip
 }
 
 func (s *ForecastingService) CalculateCategoryAverage(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID, strategy string) (float64, error) {
 	// 1. Fetch historical transactions (last 3 years for pattern detection)
+	// Reconciled transactions (e.g. Kartenabrechnung credit-card settlements) are internal
+	// cashflow entries and must not skew the burn-rate / spending average.
 	histStart := time.Now().AddDate(-3, 0, 0)
+	excludeReconciled := false
 	history, err := s.repo.FindTransactions(ctx, entity.TransactionFilter{
-		UserID:     userID,
-		CategoryID: &categoryID,
-		FromDate:   &histStart,
+		UserID:        userID,
+		CategoryID:    &categoryID,
+		FromDate:      &histStart,
+		IsReconciled:  &excludeReconciled,
+		IncludeShared: true,
 	})
 	if err != nil {
 		return 0, err
 	}
 
-	startDate := getStartDateForStrategy(strategy, time.Now())
+	now := time.Now()
+	startDate := getStartDateForStrategy(strategy, now)
+	currentMonthKey := now.Format("2006-01")
 
 	// Group history by month
 	monthlyTotals := make(map[string]float64)
@@ -526,6 +479,11 @@ func (s *ForecastingService) CalculateCategoryAverage(ctx context.Context, userI
 		}
 		monthKey := tx.BookingDate.Format("2006-01")
 		monthlyTotals[monthKey] += tx.BaseAmount
+	}
+
+	// Exclude current month if we have other historical months to avoid skewing the average
+	if len(monthlyTotals) > 1 {
+		delete(monthlyTotals, currentMonthKey)
 	}
 
 	if len(monthlyTotals) == 0 {
@@ -551,18 +509,20 @@ func getStartDateForStrategy(strategy string, now time.Time) time.Time {
 		val, err := strconv.Atoi(valStr)
 		if err == nil && val > 0 {
 			if unit == 'm' {
-				return now.AddDate(0, -val, 0)
+				// Align to the start of the month val months ago
+				return time.Date(now.Year(), now.Month()-time.Month(val), 1, 0, 0, 0, 0, now.Location())
 			} else if unit == 'y' {
-				return now.AddDate(-val, 0, 0)
+				// Align to the start of the year val years ago
+				return time.Date(now.Year()-val, 1, 1, 0, 0, 0, 0, now.Location())
 			}
 		}
 	}
 
 	// Default fallback (3y)
-	return now.AddDate(-3, 0, 0)
+	return time.Date(now.Year()-3, 1, 1, 0, 0, 0, 0, now.Location())
 }
 
-func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history []entity.Transaction, varCats map[uuid.UUID]entity.Category, from, to time.Time) []entity.PredictedTransaction {
+func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history []entity.Transaction, varCats map[uuid.UUID]entity.Category, subMonthlyByCat map[uuid.UUID]float64, from, to time.Time) []entity.PredictedTransaction {
 	var predictions []entity.PredictedTransaction
 	if len(varCats) == 0 {
 		return predictions
@@ -600,13 +560,36 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 	}
 
 	catAverages := make(map[uuid.UUID]float64)
+	currentMonthKey := now.Format("2006-01")
 	for catID, months := range catMonthlyTotals {
+		// Exclude current month if we have other historical months
+		if len(months) > 1 {
+			delete(months, currentMonthKey)
+		}
+
 		sum := 0.0
 		for _, amt := range months {
 			sum += amt
 		}
 		if len(months) > 0 {
 			catAverages[catID] = sum / float64(len(months))
+		}
+	}
+
+	// Subtract the monthly subscription equivalent from the historical average so that the
+	// variable budget only covers spend *beyond* what subscriptions already project.
+	// The result is capped: it can never flip sign relative to the raw average
+	// (an expense category can never become a net income source here).
+	for catID, avg := range catAverages {
+		if subMonthly, ok := subMonthlyByCat[catID]; ok && subMonthly != 0 {
+			adjusted := avg - subMonthly
+			// Cap: prevent sign flip
+			if avg < 0 && adjusted > 0 {
+				adjusted = 0
+			} else if avg > 0 && adjusted < 0 {
+				adjusted = 0
+			}
+			catAverages[catID] = adjusted
 		}
 	}
 
@@ -678,50 +661,25 @@ func (s *ForecastingService) calculateVariableBudgets(userID uuid.UUID, history 
 	return predictions
 }
 
+// GetLastBusinessDay returns the last weekday (Mon-Fri) of the given month and year.
+// It does not account for public holidays as they are region-specific.
+func GetLastBusinessDay(year int, month time.Month, loc *time.Location) time.Time {
+	// Start at the last day of the month
+	lastDay := time.Date(year, month+1, 0, 0, 0, 0, 0, loc)
+
+	// Rewind if it's a weekend
+	for lastDay.Weekday() == time.Saturday || lastDay.Weekday() == time.Sunday {
+		lastDay = lastDay.AddDate(0, 0, -1)
+	}
+
+	return lastDay
+}
+
 func templateType(amt float64) entity.TransactionType {
 	if amt >= 0 {
 		return entity.TransactionTypeCredit
 	}
 	return entity.TransactionTypeDebit
-}
-
-func (s *ForecastingService) projectFuture(userID uuid.UUID, recurring []recurringPattern, from, to time.Time) []entity.PredictedTransaction {
-	var predictions []entity.PredictedTransaction
-
-	for _, rt := range recurring {
-		if rt.interval <= 0 {
-			continue // Safety: Only project patterns with a valid interval
-		}
-		template := rt.template
-		current := template.BookingDate
-		for {
-			current = current.AddDate(0, rt.interval, 0)
-			if current.After(to) {
-				break
-			}
-
-			if current.After(from) || current.Equal(from) {
-				// Create a deterministic ID for each future instance
-				// STABILITY: Use UserID (Salt), normalized description + target month + interval to survive new imports and prevent cross-user inference
-				descHash := normalizeDescription(template.Description)
-				idSeed := fmt.Sprintf("%s-recurring-%s-%s-%d", userID, descHash, current.Format("2006-01"), rt.interval)
-				id := uuid.NewSHA1(uuid.NameSpaceOID, []byte(idSeed))
-
-				pred := entity.PredictedTransaction{
-					Transaction: template,
-					Probability: 0.9,
-				}
-				pred.ID = id
-				pred.BookingDate = current
-				pred.ValutaDate = current
-				pred.IsPrediction = true
-				// Note: template already has BaseAmount and BaseCurrency populated from history
-				predictions = append(predictions, pred)
-			}
-		}
-	}
-
-	return predictions
 }
 
 func (s *ForecastingService) buildTimeSeries(startBalance float64, predictions []entity.PredictedTransaction, from, to time.Time) []entity.ForecastPoint {
@@ -743,10 +701,6 @@ func (s *ForecastingService) buildTimeSeries(startBalance float64, predictions [
 
 		if txns, ok := daily[dayStr]; ok {
 			for _, tx := range txns {
-				// SKIP marked predictions for balance calculation
-				if tx.SkipForecasting {
-					continue
-				}
 
 				if tx.BaseAmount > 0 {
 					dayIncome += tx.BaseAmount

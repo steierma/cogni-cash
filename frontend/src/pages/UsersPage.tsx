@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import axios from 'axios';
 import { userService } from '../api/services/userService';
 import { authService } from '../api/services/authService';
 import type { User } from "../api/types/system";
@@ -37,7 +38,10 @@ export default function UsersPage() {
             queryClient.invalidateQueries({ queryKey: ['users'] });
             closeModal();
         },
-        onError: (err: any) => setErrorMsg(err.response?.data?.error || 'Failed to create user')
+        onError: (err: unknown) => {
+            const msg = axios.isAxiosError(err) ? (err.response?.data?.error || t('common.error')) : t('common.error');
+            setErrorMsg(msg);
+        }
     });
 
     const updateMutation = useMutation({
@@ -46,7 +50,10 @@ export default function UsersPage() {
             queryClient.invalidateQueries({ queryKey: ['users'] });
             closeModal();
         },
-        onError: (err: any) => setErrorMsg(err.response?.data?.error || 'Failed to update user')
+        onError: (err: unknown) => {
+            const msg = axios.isAxiosError(err) ? (err.response?.data?.error || t('common.error')) : t('common.error');
+            setErrorMsg(msg);
+        }
     });
 
     const delMutation = useMutation({

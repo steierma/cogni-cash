@@ -19,7 +19,7 @@ api.interceptors.response.use(
                         const res = await axios.post<AuthResponse>('/api/v1/auth/refresh/', { refresh_token: refreshToken });
                         localStorage.setItem('refresh_token', res.data.refresh_token);
                         return api(originalRequest);
-                    } catch (refreshError) {
+                    } catch {
                         localStorage.removeItem('refresh_token');
                         window.location.href = '/login';
                     }

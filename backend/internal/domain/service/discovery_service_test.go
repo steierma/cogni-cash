@@ -21,8 +21,8 @@ type mockEnricher struct {
 	mock.Mock
 }
 
-func (m *mockEnricher) EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string) (port.SubscriptionEnrichmentResult, error) {
-	args := m.Called(ctx, userID, merchantName, transactionDescriptions)
+func (m *mockEnricher) EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string, language string) (port.SubscriptionEnrichmentResult, error) {
+	args := m.Called(ctx, userID, merchantName, transactionDescriptions, language)
 	return args.Get(0).(port.SubscriptionEnrichmentResult), args.Error(1)
 }
 
@@ -116,6 +116,7 @@ func mockDiscoverySettings(m *mockSettingsRepoForDiscovery, ctx context.Context,
 	m.On("Get", ctx, "subscription_discovery_amount_tolerance", userID).Return("0.10", nil).Maybe()
 	m.On("Get", ctx, "subscription_discovery_min_transactions_generic", userID).Return("3", nil).Maybe()
 	m.On("Get", ctx, "subscription_discovery_date_tolerance", userID).Return("3.0", nil).Maybe()
+	m.On("Get", ctx, "ui_language", userID).Return("DE", nil).Maybe()
 }
 
 type mockSubscriptionRepo struct {
@@ -213,6 +214,9 @@ func (m *mockDiscoveryBankStmtRepo) UpdateTransactionSubscription(ctx context.Co
 func (m *mockDiscoveryBankStmtRepo) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	return m.Called(ctx, hash, userID).Error(0)
 }
+func (m *mockDiscoveryBankStmtRepo) MarkTransactionsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error {
+	return m.Called(ctx, hashes, userID).Error(0)
+}
 func (m *mockDiscoveryBankStmtRepo) MarkTransactionReconciled(ctx context.Context, hash string, reconID uuid.UUID, userID uuid.UUID) error {
 	return m.Called(ctx, hash, reconID, userID).Error(0)
 }
@@ -230,11 +234,15 @@ func (m *mockDiscoveryBankStmtRepo) FindMatchingCategory(ctx context.Context, us
 	args := m.Called(ctx, userID, txn)
 	return args.Get(0).(*uuid.UUID), args.Error(1)
 }
-func (m *mockDiscoveryBankStmtRepo) UpdateTransactionSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
-	return m.Called(ctx, hash, skip, userID).Error(0)
-}
 func (m *mockDiscoveryBankStmtRepo) UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
 	return m.Called(ctx, hash, baseAmount, baseCurrency, userID).Error(0)
+}
+func (m *mockDiscoveryBankStmtRepo) UpdateStatementAccount(ctx context.Context, statementID uuid.UUID, bankAccountID *uuid.UUID, userID uuid.UUID) error {
+	return m.Called(ctx, statementID, bankAccountID, userID).Error(0)
+}
+func (m *mockDiscoveryBankStmtRepo) GetTransactionsByAccountID(ctx context.Context, bankAccountID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error) {
+	args := m.Called(ctx, bankAccountID, userID)
+	return args.Get(0).([]entity.Transaction), args.Error(1)
 }
 
 // --- Tests ---
@@ -278,7 +286,7 @@ func TestDiscoveryService_EnrichSubscription(t *testing.T) {
 			CancellationURL: "https://netflix.com/cancel",
 			Notes:           "Streaming service",
 		}
-		mockLLM.On("EnrichSubscription", ctx, userID, "Netflix", []string{"Netflix.com (Ref: SUB-123)"}).
+		mockLLM.On("EnrichSubscription", ctx, userID, "Netflix", []string{"Netflix.com (Ref: SUB-123)"}, "DE").
 			Return(enrichmentResult, nil)
 
 		mockSubRepo.On("Update", ctx, mock.MatchedBy(func(s entity.Subscription) bool {
@@ -426,6 +434,49 @@ func TestDiscoveryService_DeleteSubscription(t *testing.T) {
 
 		assert.Error(t, err)
 		assert.Equal(t, "delete failed", err.Error())
+	})
+}
+
+func TestDiscoveryService_CreateSubscriptionFromTransaction(t *testing.T) {
+	ctx := context.Background()
+	userID := uuid.New()
+	txnHash := "test-hash"
+
+	t.Run("creates subscription with correct negative amount for debit", func(t *testing.T) {
+		mockSubRepo := new(mockSubscriptionRepo)
+		mockTxRepo := new(mockDiscoveryBankStmtRepo)
+		mockSettingsRepo := new(mockSettingsRepoForDiscovery)
+		mockDiscoverySettings(mockSettingsRepo, ctx, userID)
+		svc := service.NewDiscoveryService(mockTxRepo, mockSubRepo, nil, mockSettingsRepo, nil, nil, nil, slog.Default())
+
+		sourceTx := entity.Transaction{
+			ContentHash:      txnHash,
+			Amount:           -49.99,
+			Currency:         "EUR",
+			CounterpartyName: "Test Merchant",
+			BookingDate:      time.Now(),
+		}
+
+		mockTxRepo.On("FindTransactions", ctx, mock.MatchedBy(func(f entity.TransactionFilter) bool {
+			return f.UserID == userID && f.IncludeShared == true
+		})).Return([]entity.Transaction{sourceTx}, nil)
+
+		mockSubRepo.On("CreateWithBackfill", ctx, mock.MatchedBy(func(s entity.Subscription) bool {
+			// CRITICAL: Ensure amount is -49.99, NOT 49.99
+			return s.MerchantName == "Test Merchant" && s.Amount == -49.99
+		}), []string{txnHash}).Return(entity.Subscription{Amount: -49.99}, nil)
+
+		mockSubRepo.On("LogEvent", ctx, mock.MatchedBy(func(e entity.SubscriptionEvent) bool {
+			return e.EventType == "subscription_created"
+		})).Return(nil)
+
+		result, err := svc.CreateSubscriptionFromTransaction(ctx, userID, txnHash, "", "monthly", 1)
+
+		assert.NoError(t, err)
+		assert.Equal(t, -49.99, result.Amount)
+		mockSubRepo.AssertExpectations(t)
+		mockTxRepo.AssertExpectations(t)
+		mockSettingsRepo.AssertExpectations(t)
 	})
 }
 

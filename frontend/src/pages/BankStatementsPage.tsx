@@ -213,7 +213,7 @@ export default function BankStatementsPage() {
 
     const sortedStatements = useMemo(() => {
         return [...filteredStatements].sort((a, b) => {
-            let valA: any, valB: any;
+            let valA: string | number, valB: string | number;
             switch (sortField) {
                 case 'statement_info': valA = a.iban; valB = b.iban; break;
                 case 'statement_type': valA = a.statement_type; valB = b.statement_type; break;
@@ -644,6 +644,7 @@ export default function BankStatementsPage() {
                         setPreviewData(null);
                     }}
                     onDownload={(id) => bankService.downloadStatement(id)}
+                    statement={statements?.find(s => s.id === previewData.statementId)}
                 />
             )}
         </div>
@@ -654,22 +655,68 @@ export default function BankStatementsPage() {
 function PreviewStatementModal({
                                    data,
                                    onClose,
-                                   onDownload
+                                   onDownload,
+                                   statement
                                }: {
     data: PreviewData,
     onClose: () => void,
-    onDownload: (id: string) => void
+    onDownload: (id: string) => void,
+    statement?: BankStatementSummary
 }) {
     const { t } = useTranslation();
+    const queryClient = useQueryClient();
+
+    // Fetch accounts for assignment
+    const { data: connections = [] } = useQuery({
+        queryKey: ['bank-connections'],
+        queryFn: bankService.fetchConnections,
+    });
+
+    const allAccounts = connections.flatMap(c => c.accounts || []);
+
+    const updateStmtMut = useMutation({
+        mutationFn: ({ id, accountId }: { id: string, accountId: string | null }) =>
+            bankService.updateStatement(id, accountId),
+        onSuccess: () => {
+            queryClient.invalidateQueries({ queryKey: ['bank-statements'] });
+            queryClient.invalidateQueries({ queryKey: ['transactions'] });
+        }
+    });
+
+    // Find if this statement is currently linked to an account
+    // (We need to check the full statement entity if summary doesn't have it)
+    // Actually, I should probably use the fetching logic or assume the IBAN match.
+    // For now, let's allow manual assignment.
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
             <div className="bg-white dark:bg-gray-900 rounded-2xl shadow-2xl w-full max-w-5xl h-[90vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
                 <div className="flex items-center justify-between p-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/50">
-                    <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
-                        {data.type?.includes('pdf') ? <FileText className="text-fuchsia-500" size={20} /> : data.type?.startsWith('image/') ? <Eye className="text-blue-500" size={20} /> : <FileSpreadsheet className="text-emerald-500" size={20} />}
-                        {t('bankStatements.modal.previewTitle')}
-                    </h3>
+                    <div className="flex items-center gap-4">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
+                            {data.type?.includes('pdf') ? <FileText className="text-fuchsia-500" size={20} /> : data.type?.startsWith('image/') ? <Eye className="text-blue-500" size={20} /> : <FileSpreadsheet className="text-emerald-500" size={20} />}
+                            {t('bankStatements.modal.previewTitle')}
+                        </h3>
+
+                        {/* Account Assignment Dropdown */}
+                        <div className="hidden sm:flex items-center gap-2 px-3 py-1 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg shadow-sm">
+                            <Landmark size={14} className="text-gray-400" />
+                            <select
+                                className="text-xs bg-transparent border-none p-0 focus:ring-0 font-medium text-gray-700 dark:text-gray-300 outline-none"
+                                onChange={(e) => updateStmtMut.mutate({ id: data.statementId, accountId: e.target.value || null })}
+                                defaultValue={allAccounts.find(a => a.iban === statement?.iban)?.id || ""}
+                            >
+                                <option value="">Unlinked / Manual</option>
+                                {allAccounts.map(acc => (
+                                    <option key={acc.id} value={acc.id}>
+                                        {acc.name} ({acc.iban})
+                                    </option>
+                                ))}
+                            </select>
+                            {updateStmtMut.isPending && <Loader2 size={12} className="animate-spin text-indigo-500" />}
+                            {updateStmtMut.isSuccess && <Check size={12} className="text-green-500" />}
+                        </div>
+                    </div>
                     <button onClick={onClose} className="text-gray-400 hover:text-gray-900 dark:hover:text-gray-100 p-1.5 rounded-lg hover:bg-gray-200 dark:hover:bg-gray-700 transition-colors">
                         <X size={20} />
                     </button>

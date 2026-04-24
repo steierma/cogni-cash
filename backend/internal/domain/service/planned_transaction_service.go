@@ -45,8 +45,17 @@ func (s *plannedTransactionService) Update(ctx context.Context, pt *entity.Plann
 		return err
 	}
 
-	// Preserve fields that shouldn't change
+	// Preserve fields that shouldn't change or weren't provided
 	pt.CreatedAt = existing.CreatedAt
+	if pt.Status == "" {
+		pt.Status = existing.Status
+	}
+	if pt.Currency == "" {
+		pt.Currency = existing.Currency
+	}
+	if pt.BankAccountID == nil {
+		pt.BankAccountID = existing.BankAccountID
+	}
 
 	return s.repo.Update(ctx, pt)
 }
@@ -108,9 +117,13 @@ func (s *plannedTransactionService) MatchTransactions(ctx context.Context, userI
 						ID:             uuid.New(),
 						UserID:         pt.UserID,
 						Amount:         pt.Amount,
+						Currency:       pt.Currency,
+						BaseAmount:     pt.BaseAmount,
+						BaseCurrency:   pt.BaseCurrency,
 						Date:           nextDate,
 						Description:    pt.Description,
 						CategoryID:     pt.CategoryID,
+						BankAccountID:  pt.BankAccountID,
 						Status:         entity.PlannedTransactionStatusPending,
 						IntervalMonths: pt.IntervalMonths,
 						EndDate:        pt.EndDate,

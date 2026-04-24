@@ -3,11 +3,12 @@ import { useTranslation } from 'react-i18next';
 import { Loader2, Save, Plus, Trash2, AlertCircle } from 'lucide-react';
 import type { Invoice, InvoiceSplit } from "../../api/types/invoice";
 import type { Category } from "../../api/types/category";
+import type { InvoiceUpdatePayload } from "../../api/services/invoiceService";
 
 interface InvoiceFormProps {
     initialData: Partial<Invoice>;
     categories: Category[];
-    onSubmit: (data: any) => void;
+    onSubmit: (data: InvoiceUpdatePayload) => void;
     isPending: boolean;
     submitLabel?: string;
 }

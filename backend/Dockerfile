@@ -12,33 +12,40 @@ COPY . .
 
 # Fully static binaries — no libc, no CGO.
 # -trimpath removes local file-system paths from the binary (smaller + safer).
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/cogni-cash-backend ./main.go
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/cogni-cash-migrate ./cmd/migrate
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/cogni-cash-healthcheck ./cmd/healthcheck
-RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/cogni-cash-resetpw ./cmd/resetpw
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/backend ./main.go
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/migrate ./cmd/migrate
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/healthcheck ./cmd/healthcheck
+RUN CGO_ENABLED=0 GOOS=linux go build -trimpath -ldflags="-s -w" -o /app/resetpw ./cmd/resetpw
 
 # ── Run stage ────────────────────────────────────────────────────────────────
-# distroless/static is ~2 MB, has no shell, no package manager, and runs as
-# a non-root user (uid 65532) out of the box.
-# It already bundles ca-certificates and tzdata so no apk install is needed.
-FROM gcr.io/distroless/static-debian12:nonroot
+# Use alpine:latest as a base image (often more accessible than gcr.io)
+# We manually add a non-root user (uid 65532) to maintain security.
+FROM alpine:latest
+
+# Install standard CA certificates and timezone data (equivalent to distroless/static)
+RUN apk add --no-cache ca-certificates tzdata \
+    && addgroup -S -g 65532 nonroot \
+    && adduser -S -u 65532 -G nonroot nonroot
 
 WORKDIR /app
 
 # Copy all binaries from the builder stage
-COPY --from=builder /app/cogni-cash-backend .
-COPY --from=builder /app/cogni-cash-migrate .
-COPY --from=builder /app/cogni-cash-healthcheck .
-COPY --from=builder /app/cogni-cash-resetpw .
+COPY --from=builder /app/backend .
+COPY --from=builder /app/migrate .
+COPY --from=builder /app/healthcheck .
+COPY --from=builder /app/resetpw .
 
-# Copy migration SQL files so the migrate binary can find them at ./migrations
+# Copy migration SQL files
 COPY --from=builder /app/migrations ./migrations
+
+# Switch to the non-root user
+USER 65532:65532
 
 EXPOSE 8080
 
 # The healthcheck binary makes a single HTTP GET to /health and exits 0/1.
 # This works in distroless because it is a static binary — no shell needed.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=15s --retries=3 \
-  CMD ["/app/cogni-cash-healthcheck"]
+  CMD ["/app/healthcheck"]
 
-ENTRYPOINT ["/app/cogni-cash-backend"]
+ENTRYPOINT ["/app/backend"]

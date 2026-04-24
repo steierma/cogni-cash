@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -18,8 +19,60 @@ type PayslipRepository struct {
 }
 
 func NewPayslipRepository() *PayslipRepository {
-	return &PayslipRepository{
+	r := &PayslipRepository{
 		payslips: make(map[string]entity.Payslip),
+	}
+	r.seedData()
+	return r
+}
+
+func (r *PayslipRepository) seedData() {
+	userID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+	baseGross := 4500.00
+	baseNet := 2900.00
+
+	// Seed 4 years: 2021 to 2024
+	for year := 2021; year <= 2024; year++ {
+		for month := 1; month <= 12; month++ {
+			id := uuid.New().String()
+			gross := baseGross
+			net := baseNet
+			var bonuses []entity.Bonus
+
+			// June and November Bonuses
+			if month == 6 {
+				b := baseGross * 0.5 // Half month holiday bonus
+				bonuses = append(bonuses, entity.Bonus{Description: "Holiday Bonus", Amount: b, BaseAmount: b})
+				gross += b
+				net += (b * 0.55) // Approximated net impact
+			} else if month == 11 {
+				b := baseGross * 0.8 // Christmas bonus
+				bonuses = append(bonuses, entity.Bonus{Description: "Christmas Bonus", Amount: b, BaseAmount: b})
+				gross += b
+				net += (b * 0.55)
+			}
+
+			p := entity.Payslip{
+				ID:               id,
+				UserID:           userID,
+				PeriodMonthNum:   month,
+				PeriodYear:       year,
+				EmployerName:     "Acme Corp",
+				Currency:         "EUR",
+				GrossPay:         gross,
+				BaseGrossPay:     baseGross,
+				NetPay:           net,
+				BaseNetPay:       baseNet,
+				PayoutAmount:     net,
+				BasePayoutAmount: baseNet,
+				Bonuses:          bonuses,
+				CreatedAt:        time.Date(year, time.Month(month), 28, 8, 0, 0, 0, time.UTC),
+			}
+			r.payslips[id] = p
+		}
+		// Yearly salary increase of ~2% (falls within 1.5 - 3%)
+		baseGross *= 1.02
+		baseNet *= 1.02
 	}
 }
 

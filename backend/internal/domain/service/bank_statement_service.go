@@ -30,6 +30,7 @@ var normalizeTxnTextRe = regexp.MustCompile(`[^a-z0-9]+`)
 type BankStatementService struct {
 	parsers          map[string][]port.BankStatementParser
 	repo             port.BankStatementRepository
+	bankRepo         port.BankRepository
 	plannedTxService port.PlannedTransactionUseCase
 	discoveryService port.DiscoveryUseCase
 	aiParser         port.BankStatementAIParser
@@ -37,14 +38,15 @@ type BankStatementService struct {
 	Logger           *slog.Logger
 }
 
-func NewBankStatementService(repo port.BankStatementRepository, logger *slog.Logger) *BankStatementService {
+func NewBankStatementService(repo port.BankStatementRepository, bankRepo port.BankRepository, logger *slog.Logger) *BankStatementService {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &BankStatementService{
-		parsers: make(map[string][]port.BankStatementParser),
-		repo:    repo,
-		Logger:  logger,
+		parsers:  make(map[string][]port.BankStatementParser),
+		repo:     repo,
+		bankRepo: bankRepo,
+		Logger:   logger,
 	}
 }
 
@@ -122,6 +124,7 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 						continue
 					}
 					parsedSuccessfully = true
+					s.Logger.Info("Bank statement parsed successfully", "parser", fmt.Sprintf("%T", parser), "file", fileName)
 					break
 				}
 
@@ -150,6 +153,16 @@ func (s *BankStatementService) ImportFromFile(ctx context.Context, userID uuid.U
 	}
 
 	stmt.UserID = userID
+
+	// Try to link with a BankAccount based on IBAN
+	if s.bankRepo != nil && stmt.IBAN != "" {
+		acc, err := s.bankRepo.FindAccountByIBAN(ctx, stmt.IBAN, userID)
+		if err == nil && acc != nil {
+			s.Logger.Info("Automatically linked bank statement to account", "iban", stmt.IBAN, "account_id", acc.ID, "user_id", userID)
+			stmt.BankAccountID = &acc.ID
+		}
+	}
+
 	if userStmtType != "" {
 		stmt.StatementType = userStmtType
 	} else if stmt.StatementType == "" {
@@ -376,6 +389,15 @@ func (s *BankStatementService) DeleteStatement(ctx context.Context, id uuid.UUID
 	}
 	s.Logger.Info("Deleting bank statement", "id", id, "user_id", userID)
 	return s.repo.Delete(ctx, id, userID)
+}
+
+func (s *BankStatementService) UpdateStatementAccount(ctx context.Context, statementID uuid.UUID, bankAccountID *uuid.UUID, userID uuid.UUID) error {
+	s.Logger.Info("Updating bank statement account", "statement_id", statementID, "bank_account_id", bankAccountID, "user_id", userID)
+	return s.repo.UpdateStatementAccount(ctx, statementID, bankAccountID, userID)
+}
+
+func (s *BankStatementService) GetTransactionsByAccountID(ctx context.Context, bankAccountID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error) {
+	return s.repo.GetTransactionsByAccountID(ctx, bankAccountID, userID)
 }
 
 func (s *BankStatementService) ImportFromDirectory(ctx context.Context, userID uuid.UUID, dirPath string) (int, []error) {

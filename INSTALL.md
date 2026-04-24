@@ -122,8 +122,8 @@ If you plan to use **Enable Banking**, you must place your private key file in t
 
 | Image                 | Base                        | Size   |
 |-----------------------|-----------------------------|--------|
-| `cogni-cash-backend`  | `distroless/static:nonroot` | ~10 MB |
-| `cogni-cash-frontend` | `nginx:1.27-alpine`         | ~21 MB |
+| `backend`             | `alpine:latest`             | ~15 MB |
+| `frontend`            | `nginx:1.27-alpine`         | ~21 MB |
 
 ### 5. Start the stack
 

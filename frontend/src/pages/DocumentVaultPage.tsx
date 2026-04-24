@@ -2,7 +2,8 @@ import { useState, useRef } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { Archive, FileUp, Search, Filter, Trash2, Download,
-    FileText, Briefcase, ShieldCheck, File, BrainCircuit, Pencil, Loader2
+    FileText, Briefcase, ShieldCheck, File, BrainCircuit, Pencil, Loader2,
+    type LucideIcon
 } from 'lucide-react';
 import { documentService } from '../api/services/documentService';
 import type { Document, DocumentType } from "../api/types/document";
@@ -10,7 +11,7 @@ import { fmtDate } from '../utils/formatters';
 import { NavLink } from 'react-router-dom';
 import { ImportDocumentModal, EditDocumentModal, PreviewDocumentModal } from '../components/documents/DocumentModals';
 
-const TYPE_ICONS: Record<string, any> = {
+const TYPE_ICONS: Record<string, LucideIcon> = {
     tax_certificate: ShieldCheck,
     receipt: FileText,
     contract: Briefcase,
@@ -255,7 +256,7 @@ export default function DocumentVaultPage() {
                         ) : (
                             documents.map((doc) => {
                                 const Icon = TYPE_ICONS[doc.type] || File;
-                                const docDate = doc.metadata?.date ? doc.metadata.date : doc.created_at;
+                                const docDate = String(doc.metadata?.date || doc.created_at);
                                 return (
                                     <tr key={doc.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors group">
                                         <td className="px-6 py-4">

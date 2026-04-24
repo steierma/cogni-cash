@@ -2,9 +2,13 @@ package memory
 
 import (
 	"context"
+	"crypto/sha256"
 	"errors"
+	"fmt"
+	"math"
 	"strings"
 	"sync"
+	"time"
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
@@ -27,11 +31,124 @@ type BankStatementRepository struct {
 }
 
 func NewBankStatementRepository() *BankStatementRepository {
-	return &BankStatementRepository{
+	r := &BankStatementRepository{
 		statements:   make(map[uuid.UUID]entity.BankStatement),
 		stmtOrder:    make([]uuid.UUID, 0, maxStatements),
 		transactions: make(map[string]entity.Transaction),
 		txOrder:      make([]string, 0, maxTransactions),
+	}
+	r.seedData()
+	return r
+}
+
+func (r *BankStatementRepository) seedData() {
+	userID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+	currentBalance := 5000.00
+	stmtNo := 1
+
+	for year := 2021; year <= 2024; year++ {
+		// Calculate the yearly increase (matches the payslip logic)
+		yearMultiplier := math.Pow(1.02, float64(year-2021))
+		baseGross := 4500.00 * yearMultiplier
+		baseNet := 2900.00 * yearMultiplier
+
+		for month := 1; month <= 12; month++ {
+			statementID := uuid.New()
+			stmtDate := time.Date(year, time.Month(month), 28, 23, 59, 59, 0, time.UTC)
+
+			stmt := entity.BankStatement{
+				ID:            statementID,
+				UserID:        userID,
+				AccountHolder: "John Doe",
+				IBAN:          "DE89370400440532013000",
+				StatementDate: stmtDate,
+				StatementNo:   stmtNo,
+				OldBalance:    currentBalance,
+				Currency:      "EUR",
+				StatementType: entity.StatementTypeGiro,
+				ImportedAt:    time.Now().Add(-time.Duration((2025-year)*8760) * time.Hour),
+			}
+
+			var txns []entity.Transaction
+
+			// 1. Salary Payment
+			payout := baseNet
+			desc := "Salary Acme Corp"
+			if month == 6 {
+				payout += (baseGross * 0.5 * 0.55) // Holiday Bonus
+				desc = "Salary Acme Corp + Holiday Bonus"
+			} else if month == 11 {
+				payout += (baseGross * 0.8 * 0.55) // Christmas Bonus
+				desc = "Salary Acme Corp + Christmas Bonus"
+			}
+
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 26, 8, 0, 0, 0, time.UTC), desc, payout, entity.TransactionTypeCredit))
+			currentBalance += payout
+
+			// 2. Rent
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 1, 9, 0, 0, 0, time.UTC), "Rent Payment", 1200.00, entity.TransactionTypeDebit))
+			currentBalance -= 1200.00
+
+			// 3. Groceries
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 5, 14, 0, 0, 0, time.UTC), "REWE Supermarket", 150.00, entity.TransactionTypeDebit))
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 15, 16, 0, 0, 0, time.UTC), "ALDI Nord", 120.00, entity.TransactionTypeDebit))
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 22, 10, 0, 0, 0, time.UTC), "EDEKA Supermarket", 180.00, entity.TransactionTypeDebit))
+			currentBalance -= 450.00
+
+			// 4. Utilities & Internet
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 3, 10, 0, 0, 0, time.UTC), "Stadtwerke Utilities", 150.00, entity.TransactionTypeDebit))
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 4, 10, 0, 0, 0, time.UTC), "Telekom Internet", 45.00, entity.TransactionTypeDebit))
+			currentBalance -= 195.00
+
+			// 5. Entertainment / Dining Out
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 12, 20, 0, 0, 0, time.UTC), "Restaurant Bella Italia", 85.00, entity.TransactionTypeDebit))
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 20, 19, 0, 0, 0, time.UTC), "CinemaxX", 35.00, entity.TransactionTypeDebit))
+			currentBalance -= 120.00
+
+			// 6. Subscriptions
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 10, 8, 0, 0, 0, time.UTC), "Netflix", 17.99, entity.TransactionTypeDebit))
+			txns = append(txns, r.createTx(statementID, userID, time.Date(year, time.Month(month), 11, 8, 0, 0, 0, time.UTC), "Spotify", 10.99, entity.TransactionTypeDebit))
+			currentBalance -= 28.98
+
+			stmt.NewBalance = currentBalance
+			stmt.Transactions = txns
+			stmt.ContentHash = fmt.Sprintf("%x", sha256.Sum256([]byte(fmt.Sprintf("%d-%d", year, month))))
+
+			r.statements[statementID] = stmt
+			r.stmtOrder = append(r.stmtOrder, statementID)
+			for _, tx := range txns {
+				r.transactions[tx.ContentHash] = tx
+			}
+
+			stmtNo++
+		}
+	}
+}
+
+func (r *BankStatementRepository) createTx(stmtID, userID uuid.UUID, date time.Time, desc string, amount float64, txType entity.TransactionType) entity.Transaction {
+	id := uuid.New()
+	hashStr := fmt.Sprintf("%s-%s-%f", date.Format(time.RFC3339), desc, amount)
+	hash := fmt.Sprintf("%x", sha256.Sum256([]byte(hashStr)))
+
+	return entity.Transaction{
+		ID:                id,
+		UserID:            userID,
+		BankStatementID:   &stmtID,
+		BookingDate:       date,
+		ValutaDate:        date,
+		Description:       desc,
+		CounterpartyName:  strings.Split(desc, " ")[0], // Simple heuristic for mock
+		Amount:            amount,
+		Currency:          "EUR",
+		BaseAmount:        amount,
+		BaseCurrency:      "EUR",
+		Type:              txType,
+		Reference:         "REF-" + id.String()[:8],
+		ContentHash:       hash,
+		IsReconciled:      true,
+		Reviewed:          true,
+		StatementType:     entity.StatementTypeGiro,
+		IsPayslipVerified: txType == entity.TransactionTypeCredit && strings.Contains(desc, "Salary"),
 	}
 }
 
@@ -254,6 +371,18 @@ func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, h
 	return nil
 }
 
+func (r *BankStatementRepository) MarkTransactionsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, hash := range hashes {
+		if tx, ok := r.transactions[hash]; ok && tx.UserID == userID {
+			tx.Reviewed = true
+			r.transactions[hash] = tx
+		}
+	}
+	return nil
+}
+
 func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
@@ -268,17 +397,6 @@ func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context,
 	return nil
 }
 
-func (r *BankStatementRepository) UpdateTransactionSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-	tx, ok := r.transactions[hash]
-	if !ok || tx.UserID != userID {
-		return nil
-	}
-	tx.SkipForecasting = skip
-	r.transactions[hash] = tx
-	return nil
-}
 
 func (r *BankStatementRepository) UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
 	r.mu.Lock()
@@ -292,7 +410,6 @@ func (r *BankStatementRepository) UpdateTransactionBaseAmount(ctx context.Contex
 	r.transactions[hash] = tx
 	return nil
 }
-
 
 func (r *BankStatementRepository) LinkTransactionToStatement(ctx context.Context, id uuid.UUID, statementID uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
@@ -366,8 +483,39 @@ func (r *BankStatementRepository) matchFilter(tx entity.Transaction, filter enti
 			return false
 		}
 	}
-	// Add more filter matches as needed (dates, amount, etc.)
 	return true
 }
 
 var _ port.BankStatementRepository = (*BankStatementRepository)(nil)
+
+func (r *BankStatementRepository) UpdateStatementAccount(ctx context.Context, statementID uuid.UUID, bankAccountID *uuid.UUID, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	stmt, ok := r.statements[statementID]
+	if !ok || stmt.UserID != userID {
+		return entity.ErrBankStatementNotFound
+	}
+	stmt.BankAccountID = bankAccountID
+	r.statements[statementID] = stmt
+	
+	// Cascade to transactions
+	for id, t := range r.transactions {
+		if t.BankStatementID == &statementID {
+			t.BankAccountID = bankAccountID
+			r.transactions[id] = t
+		}
+	}
+	return nil
+}
+
+func (r *BankStatementRepository) GetTransactionsByAccountID(ctx context.Context, bankAccountID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var txns []entity.Transaction
+	for _, t := range r.transactions {
+		if t.BankAccountID != nil && *t.BankAccountID == bankAccountID && t.UserID == userID {
+			txns = append(txns, t)
+		}
+	}
+	return txns, nil
+}

@@ -32,6 +32,7 @@ These instructions are foundational mandates for Gemini CLI. They take absolute 
 - **Trailing Slashes:** All API routes MUST have a trailing slash (e.g., `/api/v1/transactions/`).
 - **Isar Mapping (Mobile):** Manual `fromJson`/`toJson` is mandatory for Flutter entities.
 - **i18n Completeness:** Every new UI string MUST be added to all 4 languages (EN, DE, ES, FR).
+- **Frontend Type Safety:** Standard linting is insufficient. Every modification to a `.ts` or `.tsx` file MUST be followed by a full TypeScript validation (via `cd frontend && npm run build` which runs `tsc`) to catch ESM import and syntax errors.
 - **CORS:** Backend supports `ALLOWED_ORIGINS=*` in dev, but check `backend/.env` for production.
 
 ## 5. Specialized Tools Reference

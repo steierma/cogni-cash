@@ -4,6 +4,7 @@ import type { Invoice } from "../../api/types/invoice";
 import type { Category } from "../../api/types/category";
 import { InvoiceForm } from './InvoiceForm';
 import { FilePreview } from '../FilePreview';
+import type { InvoiceUpdatePayload } from '../../api/services/invoiceService';
 
 export function PreviewInvoiceModal({ 
     previewUrl, 
@@ -18,11 +19,10 @@ export function PreviewInvoiceModal({
     mimeType: string,
     invoice: Invoice,
     categories: Category[],
-    onClose: () => void,
-    onUpdate: (id: string, data: any) => void,
+    onClose: () => void, 
+    onUpdate: (id: string, data: InvoiceUpdatePayload) => void,
     isPending: boolean 
-}) {
-    const { t } = useTranslation();
+}) {    const { t } = useTranslation();
 
     return (
         <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/60 p-4 backdrop-blur-sm animate-in fade-in duration-200">
@@ -85,7 +85,7 @@ export function EditInvoiceModal({
 }: { 
     invoice: Invoice, 
     categories: Category[],
-    onUpdate: (id: string, data: any) => void, 
+    onUpdate: (id: string, data: InvoiceUpdatePayload) => void, 
     onClose: () => void,
     isPending: boolean 
 }) {

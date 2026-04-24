@@ -82,7 +82,7 @@ type SubscriptionEnrichmentResult struct {
 }
 
 type SubscriptionEnricher interface {
-	EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string) (SubscriptionEnrichmentResult, error)
+	EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string, language string) (SubscriptionEnrichmentResult, error)
 	VerifySubscriptionSuggestion(ctx context.Context, userID uuid.UUID, merchantName string, amount float64, currency string, billingCycle string) (bool, error)
 }
 

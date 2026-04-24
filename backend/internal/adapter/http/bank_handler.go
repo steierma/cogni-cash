@@ -99,6 +99,43 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
+func (h *Handler) createVirtualBankAccount(w http.ResponseWriter, r *http.Request) {
+	var req struct {
+		Name        string  `json:"name"`
+		IBAN        string  `json:"iban"`
+		Currency    string  `json:"currency"`
+		AccountType string  `json:"account_type"`
+		Balance     float64 `json:"balance"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	acc := &entity.BankAccount{
+		UserID:      userID,
+		Name:        req.Name,
+		IBAN:        req.IBAN,
+		Currency:    req.Currency,
+		AccountType: entity.StatementType(req.AccountType),
+		Balance:     req.Balance,
+	}
+
+	if err := h.bankSvc.CreateVirtualAccount(r.Context(), acc); err != nil {
+		h.Logger.Error("failed to create virtual bank account", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to create virtual account")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, acc)
+}
+
 func (h *Handler) listBankConnections(w http.ResponseWriter, r *http.Request) {
 	userID := h.getUserID(r.Context())
 	if userID == uuid.Nil {
@@ -185,4 +222,75 @@ func (h *Handler) updateBankAccountType(w http.ResponseWriter, r *http.Request) 
 	}
 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
+}
+
+func (h *Handler) shareBankAccount(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accountID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	var req struct {
+		SharedWithID uuid.UUID `json:"shared_with_user_id"`
+		Permission   string    `json:"permission_level"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	if err := h.bankSvc.ShareAccount(r.Context(), accountID, userID, req.SharedWithID, req.Permission); err != nil {
+		h.Logger.Error("Failed to share bank account", "error", err, "account_id", accountID)
+		writeError(w, http.StatusInternalServerError, "failed to share bank account")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "shared"})
+}
+
+func (h *Handler) revokeBankAccountShare(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accountID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	sharedWithStr := chi.URLParam(r, "user_id")
+	sharedWithID, err := uuid.Parse(sharedWithStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid user id")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	if err := h.bankSvc.RevokeShare(r.Context(), accountID, userID, sharedWithID); err != nil {
+		h.Logger.Error("Failed to revoke bank account share", "error", err, "account_id", accountID)
+		writeError(w, http.StatusInternalServerError, "failed to revoke share")
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) listBankAccountShares(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	accountID, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid account id")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	shares, err := h.bankSvc.ListShares(r.Context(), accountID, userID)
+	if err != nil {
+		h.Logger.Error("Failed to list bank account shares", "error", err, "account_id", accountID)
+		writeError(w, http.StatusInternalServerError, "failed to list shares")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, shares)
 }

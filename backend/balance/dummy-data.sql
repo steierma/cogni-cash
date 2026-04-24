@@ -28,6 +28,44 @@ BEGIN
         RAISE EXCEPTION 'Admin user not found. Please run migrations and ensure admin user exists.';
     END IF;
 
+    -- ---------------------------------------------------------
+    -- Seed 'test' User (Test / Test)
+    -- ---------------------------------------------------------
+    DECLARE
+        test_id UUID;
+        test_cat_income UUID;
+        test_cat_rent UUID;
+        test_cat_misc UUID;
+        test_stmt_id UUID;
+        test_curr_date DATE := '2018-01-01'; -- 8 years of data
+    BEGIN
+        INSERT INTO users (username, email, password_hash, full_name, role)
+        VALUES ('test', 'test@localhost', '$2a$10$N9qo8uLOickgx2ZMRZoMyeIjZAgNoTfQjZ4mE7.v4/e0G7X0.m1t2', 'Test User', 'manager')
+        ON CONFLICT (username) DO UPDATE SET full_name = EXCLUDED.full_name
+        RETURNING id INTO test_id;
+
+        INSERT INTO categories (name, color, user_id, is_variable_spending, forecast_strategy) VALUES ('Salary', '#4caf50', test_id, false, '3y') ON CONFLICT (name, user_id) DO UPDATE SET name=EXCLUDED.name RETURNING id INTO test_cat_income;
+        INSERT INTO categories (name, color, user_id, is_variable_spending, forecast_strategy) VALUES ('Monthly Rent', '#f44336', test_id, false, '3y') ON CONFLICT (name, user_id) DO UPDATE SET name=EXCLUDED.name RETURNING id INTO test_cat_rent;
+        INSERT INTO categories (name, color, user_id, is_variable_spending, forecast_strategy) VALUES ('Lifestyle', '#9c27b0', test_id, true, '6m') ON CONFLICT (name, user_id) DO UPDATE SET name=EXCLUDED.name RETURNING id INTO test_cat_misc;
+
+        WHILE test_curr_date <= end_date LOOP
+            INSERT INTO bank_statements (id, user_id, account_holder, iban, statement_date, content_hash, statement_type)
+            VALUES (gen_random_uuid(), test_id, 'Test User', 'DE112233445566778899', test_curr_date + interval '28 days', md5(gen_random_uuid()::text), 'giro')
+            RETURNING id INTO test_stmt_id;
+
+            INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, statement_type, reviewed)
+            VALUES (test_id, test_stmt_id, test_curr_date + interval '1 day', test_curr_date + interval '1 day', 'Salary Test Corp', 4200.00, 4200.00, 'EUR', 'credit', test_cat_income, md5(gen_random_uuid()::text), 'giro', true);
+
+            INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, statement_type, reviewed)
+            VALUES (test_id, test_stmt_id, test_curr_date + interval '2 days', test_curr_date + interval '2 days', 'Rent Payment (Test)', -950.00, -950.00, 'EUR', 'debit', test_cat_rent, md5(gen_random_uuid()::text), 'giro', true);
+
+            INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, statement_type, reviewed)
+            VALUES (test_id, test_stmt_id, test_curr_date + interval '15 days', test_curr_date + interval '15 days', 'Amazon.de Purchase', -120.00, -120.00, 'EUR', 'debit', test_cat_misc, md5(gen_random_uuid()::text), 'giro', true);
+
+            test_curr_date := test_curr_date + interval '1 month';
+        END LOOP;
+    END;
+
     -- 1. Fetch existing core categories
     SELECT id INTO cat_income FROM categories WHERE name = 'Einkommen' AND user_id = admin_id;
     SELECT id INTO cat_housing FROM categories WHERE name = 'Haus und Hausrat' AND user_id = admin_id;
@@ -143,35 +181,40 @@ BEGIN
     END LOOP;
 
     -- ---------------------------------------------------------
-    -- Bank Connections & Accounts (API Sync)
+    -- Bank Connections & Accounts (API Sync & Virtual)
     -- ---------------------------------------------------------
     INSERT INTO bank_connections (id, user_id, institution_id, institution_name, provider, requisition_id, reference_id, status, created_at, expires_at)
     VALUES (gen_random_uuid(), admin_id, 'SANDBOX_ID', 'Sandbox Bank', 'enablebanking', 'dummy_requisition', 'dummy_ref', 'linked', NOW(), NOW() + interval '90 days');
 
-    INSERT INTO bank_accounts (id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type, last_sync_error)
-    SELECT gen_random_uuid(), id, 'dummy_acc_id', 'DE12345678901234567890', 'Main Giro', 'EUR', 5000.00, NOW(), 'giro', NULL
+    INSERT INTO bank_accounts (id, connection_id, provider_account_id, iban, name, user_id, currency, balance, last_synced_at, account_type, last_sync_error)
+    SELECT gen_random_uuid(), id, 'dummy_acc_id', 'DE12345678901234567890', 'Main Giro', admin_id, 'EUR', 5000.00, NOW(), 'giro', NULL
     FROM bank_connections WHERE institution_id = 'SANDBOX_ID' AND user_id = admin_id;
+
+    -- Add a Virtual Account (e.g. Amazon Visa)
+    INSERT INTO bank_accounts (id, connection_id, provider_account_id, iban, name, user_id, currency, balance, account_type)
+    VALUES (gen_random_uuid(), NULL, 'virtual_visa_123', 'DE_VIRTUAL_VISA', 'Amazon Visa (Virtual)', admin_id, 'EUR', -450.00, 'credit_card');
 
     -- ---------------------------------------------------------
     -- Planned Transactions (Manual Forecasts)
     -- ---------------------------------------------------------
-    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date, is_superseded)
-    VALUES (gen_random_uuid(), admin_id, -800.00, 'EUR', -800.00, 'EUR', (CURRENT_DATE + interval '1 month')::DATE, 'Summer Vacation', cat_misc, 'pending', 0, NULL, false);
+    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date)
+    VALUES (gen_random_uuid(), admin_id, -800.00, 'EUR', -800.00, 'EUR', (CURRENT_DATE + interval '1 month')::DATE, 'Summer Vacation', cat_misc, 'pending', 0, NULL);
 
-    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date, is_superseded)
-    VALUES (gen_random_uuid(), admin_id, 300.00, 'EUR', 300.00, 'EUR', (CURRENT_DATE + interval '2 months')::DATE, 'Tax Refund', cat_income, 'pending', 0, NULL, false);
+    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date)
+    VALUES (gen_random_uuid(), admin_id, 300.00, 'EUR', 300.00, 'EUR', (CURRENT_DATE + interval '2 months')::DATE, 'Tax Refund', cat_income, 'pending', 0, NULL);
 
-    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date, is_superseded)
-    VALUES (gen_random_uuid(), admin_id, -50.00, 'EUR', -50.00, 'EUR', (CURRENT_DATE + interval '15 days')::DATE, 'Recurring Subscription', cat_misc, 'pending', 1, (CURRENT_DATE + interval '1 year')::DATE, false);
+    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date)
+    VALUES (gen_random_uuid(), admin_id, -50.00, 'EUR', -50.00, 'EUR', (CURRENT_DATE + interval '15 days')::DATE, 'Recurring Subscription', cat_misc, 'pending', 1, (CURRENT_DATE + interval '1 year')::DATE);
 
     -- ---------------------------------------------------------
     -- Subscriptions (New Feature Sample)
     -- ---------------------------------------------------------
-    INSERT INTO subscriptions (user_id, merchant_name, amount, billing_cycle, billing_interval, category_id, status, last_occurrence, next_occurrence, matching_hashes, ignored_hashes, linked_mandates, linked_ibans)
-    VALUES (admin_id, 'Hetzner Online GmbH', 25.00, 'monthly', 1, cat_tech, 'active', CURRENT_DATE - interval '12 days', CURRENT_DATE + interval '18 days', '{}', '{}', '{}', '{}');
+    INSERT INTO subscriptions (user_id, merchant_name, amount, billing_cycle, billing_interval, category_id, status, last_occurrence, next_occurrence, matching_hashes, ignored_hashes, linked_mandates, linked_ibans, bank_account_id)
+    SELECT admin_id, 'Hetzner Online GmbH', -25.00, 'monthly', 1, cat_tech, 'active', CURRENT_DATE - interval '12 days', CURRENT_DATE + interval '18 days', '{}', '{}', '{}', '{}', id
+    FROM bank_accounts WHERE user_id = admin_id AND iban = 'DE12345678901234567890' LIMIT 1;
 
     INSERT INTO subscriptions (user_id, merchant_name, amount, billing_cycle, billing_interval, category_id, status, last_occurrence, next_occurrence, matching_hashes, ignored_hashes, linked_mandates, linked_ibans)
-    VALUES (admin_id, 'Netflix', 17.99, 'monthly', 1, cat_misc, 'active', CURRENT_DATE - interval '5 days', CURRENT_DATE + interval '25 days', '{}', '{}', '{}', '{}');
+    VALUES (admin_id, 'Netflix', -17.99, 'monthly', 1, cat_misc, 'active', CURRENT_DATE - interval '5 days', CURRENT_DATE + interval '25 days', '{}', '{}', '{}', '{}');
 
 END $$;
 
@@ -268,5 +311,18 @@ BEGIN
     INSERT INTO subscription_discovery_feedback (user_id, merchant_name, status, source)
     VALUES (admin_id, 'Netflix.com', 'ALLOWED', 'AI')
     ON CONFLICT DO NOTHING;
+
+    -- 7. Create a Shared Bank Account relationship
+    -- Admin shares the 'Main Giro' with Demo
+    DECLARE
+        shared_acc_id UUID;
+    BEGIN
+        SELECT id INTO shared_acc_id FROM bank_accounts WHERE user_id = admin_id AND iban = 'DE12345678901234567890' LIMIT 1;
+        IF shared_acc_id IS NOT NULL THEN
+            INSERT INTO shared_bank_accounts (bank_account_id, owner_user_id, shared_with_user_id, permission_level)
+            VALUES (shared_acc_id, admin_id, demo_id, 'view')
+            ON CONFLICT DO NOTHING;
+        END IF;
+    END;
 
 END $$;

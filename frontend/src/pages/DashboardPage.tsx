@@ -16,7 +16,7 @@ import { settingsService } from '../api/services/settingsService';
 import type { BankStatementSummary } from "../api/types/bank";
 import type { Transaction, TransactionAnalytics, CashFlowForecast } from "../api/types/transaction";
 import type { Payslip } from "../api/types/payslip";
-import {fmtCurrency, fmtDate} from '../utils/formatters';
+import { fmtCurrency, fmtDate, getLocalISODate } from '../utils/formatters';
 import CategoryBadge from '../components/CategoryBadge';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -31,7 +31,7 @@ function formatChartMonth(yyyyMM: string, locale: string) {
     }
 }
 
-function getGreeting(t: any) {
+function getGreeting(t: (key: string) => string) {
     const hour = new Date().getHours();
     if (hour < 12) return t('dashboard.greeting.morning');
     if (hour < 18) return t('dashboard.greeting.afternoon');
@@ -208,7 +208,7 @@ function ForecastingWidget() {
         queryFn: () => {
             const toDate = new Date();
             toDate.setDate(toDate.getDate() + 30);
-            return forecastingService.fetchForecast(undefined, toDate.toISOString().split('T')[0]);
+            return forecastingService.fetchForecast(undefined, getLocalISODate(toDate));
         },
     });
 

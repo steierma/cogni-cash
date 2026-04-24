@@ -2,17 +2,17 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
-import {
-    ShieldCheck, ArrowLeft, FileText,
+import { ShieldCheck, ArrowLeft, FileText,
     Briefcase, TrendingUp, Calculator,
-    File, Download, Trash2, Pencil, Loader2, Archive
+    File, Download, Trash2, Pencil, Loader2, Archive,
+    type LucideIcon
 } from 'lucide-react';
 import { documentService } from '../api/services/documentService';
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 import type { Document, DocumentType } from '../api/types';
 import { EditDocumentModal, PreviewDocumentModal } from '../components/documents/DocumentModals';
 
-const TYPE_ICONS: Record<string, any> = {
+const TYPE_ICONS: Record<string, LucideIcon> = {
     tax_certificate: ShieldCheck,
     receipt: FileText,
     contract: Briefcase,
@@ -207,7 +207,7 @@ export default function TaxYearViewPage() {
                                 ) : (
                                     summary.documents.map((doc) => {
                                         const Icon = TYPE_ICONS[doc.type] || File;
-                                        const docDate = doc.metadata?.date ? doc.metadata.date : doc.created_at;
+                                        const docDate = String(doc.metadata?.date || doc.created_at);
                                         return (
                                             <tr key={doc.id} className="hover:bg-gray-50 dark:hover:bg-gray-800/30 transition-colors group">
                                                 <td className="px-6 py-4">

@@ -19,12 +19,14 @@ type SharingRepository struct {
 	mu             sync.RWMutex
 	categoryShares map[string]sharedItem
 	invoiceShares  map[string]sharedItem
+	accountShares  map[string]sharedItem
 }
 
 func NewSharingRepository() *SharingRepository {
 	return &SharingRepository{
 		categoryShares: make(map[string]sharedItem),
 		invoiceShares:  make(map[string]sharedItem),
+		accountShares:  make(map[string]sharedItem),
 	}
 }
 
@@ -94,6 +96,42 @@ func (r *SharingRepository) ListInvoiceShares(ctx context.Context, invoiceID, ow
 	var userIDs []uuid.UUID
 	for _, share := range r.invoiceShares {
 		if share.ItemID == invoiceID && share.OwnerID == ownerID {
+			userIDs = append(userIDs, share.SharedWithID)
+		}
+	}
+	return userIDs, nil
+}
+
+func (r *SharingRepository) ShareBankAccount(ctx context.Context, bankAccountID, ownerID, sharedWithID uuid.UUID, permission string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := fmt.Sprintf("%s:%s:%s", bankAccountID, ownerID, sharedWithID)
+	r.accountShares[key] = sharedItem{
+		ItemID:          bankAccountID,
+		OwnerID:         ownerID,
+		SharedWithID:    sharedWithID,
+		PermissionLevel: permission,
+	}
+	return nil
+}
+
+func (r *SharingRepository) RevokeBankAccountShare(ctx context.Context, bankAccountID, ownerID, sharedWithID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	key := fmt.Sprintf("%s:%s:%s", bankAccountID, ownerID, sharedWithID)
+	if _, ok := r.accountShares[key]; !ok {
+		return fmt.Errorf("bank account share not found")
+	}
+	delete(r.accountShares, key)
+	return nil
+}
+
+func (r *SharingRepository) ListBankAccountShares(ctx context.Context, bankAccountID, ownerID uuid.UUID) ([]uuid.UUID, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var userIDs []uuid.UUID
+	for _, share := range r.accountShares {
+		if share.ItemID == bankAccountID && share.OwnerID == ownerID {
 			userIDs = append(userIDs, share.SharedWithID)
 		}
 	}

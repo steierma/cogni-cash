@@ -265,6 +265,7 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Post("/{id}/preview-cancellation/", h.PreviewCancellation)
 				r.Post("/{id}/cancel/", h.CancelSubscription)
 				r.Get("/{id}/events/", h.GetSubscriptionEvents)
+				r.Post("/{id}/transactions/link/", h.LinkTransactions)
 				r.Post("/{id}/transactions/{hash}/link/", h.LinkTransaction)
 				r.Delete("/{id}/transactions/{hash}/unlink/", h.UnlinkTransaction)
 				r.Post("/from-transaction/", h.CreateSubscriptionFromTransaction)
@@ -275,23 +276,18 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Get("/", h.listBankStatements)
 				r.Get("/{id}/", h.getBankStatement)
 				r.Post("/import/", h.importBankStatement)
+				r.Patch("/{id}/", h.updateBankStatement)
 				r.Delete("/{id}/", h.deleteBankStatement)
 			})
 
 			r.Route("/transactions/", func(r chi.Router) {
 				r.Get("/analytics/", h.getTransactionAnalytics)
 				r.Get("/forecast/", h.getForecast)
-				r.Post("/forecast/exclude/{id}/", h.excludeForecast)
-				r.Post("/forecast/include/{id}/", h.includeForecast)
-
-				r.Get("/forecast/patterns/exclusions/", h.listPatternExclusions)
-				r.Post("/forecast/patterns/exclude/", h.excludePattern)
-				r.Post("/forecast/patterns/include/", h.includePattern)
 
 				r.Get("/", h.listTransactions)
+				r.Patch("/bulk-review/", h.markTransactionsReviewedBulk)
 				r.Patch("/{hash}/category/", h.updateTransactionCategory)
 				r.Patch("/{hash}/review/", h.markTransactionReviewed)
-				r.Patch("/{hash}/skip-forecasting/", h.toggleTransactionSkipForecasting)
 				r.Post("/auto-categorize/start/", h.startAutoCategorize)
 				r.Get("/auto-categorize/status/", h.getAutoCategorizeStatus)
 				r.Post("/auto-categorize/cancel/", h.cancelAutoCategorize)
@@ -347,7 +343,13 @@ func (h *Handler) RegisterRoutes(r chi.Router) {
 				r.Post("/sync/", h.syncAllBankAccounts)
 
 				r.Route("/accounts/", func(r chi.Router) {
+					r.Post("/virtual/", h.createVirtualBankAccount)
 					r.Put("/{id}/type/", h.updateBankAccountType)
+
+					// Sharing
+					r.Post("/{id}/share/", h.shareBankAccount)
+					r.Delete("/{id}/share/{user_id}/", h.revokeBankAccountShare)
+					r.Get("/{id}/shares/", h.listBankAccountShares)
 				})
 
 				r.Route("/connections/", func(r chi.Router) {

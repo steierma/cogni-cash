@@ -63,7 +63,7 @@ export function PreviewDocumentModal({
                                 initialData={{
                                     file_name: document.file_name,
                                     type: document.type,
-                                    document_date: document.metadata?.date || ''
+                                    document_date: String(document.metadata?.date || '')
                                 }} 
                                 onSubmit={(data) => onUpdate(document.id, data)}
                                 isPending={isPending}
@@ -177,7 +177,7 @@ export function EditDocumentModal({
                         initialData={{
                             file_name: document.file_name,
                             type: document.type,
-                            document_date: document.metadata?.date || ''
+                            document_date: String(document.metadata?.date || '')
                         }} 
                         onSubmit={(data) => onUpdate(document.id, data)}
                         isPending={isPending}

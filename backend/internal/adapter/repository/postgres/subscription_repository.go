@@ -35,16 +35,18 @@ func (r *SubscriptionRepository) GetByID(ctx context.Context, id uuid.UUID, user
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
 			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
-			created_at, updated_at
+			created_at, updated_at, bank_account_id
 		FROM subscriptions
-		WHERE id = $1 AND user_id = $2`, id, userID).
+		WHERE id = $1 AND (user_id = $2 
+		   OR bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $2)
+		   OR category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $2))`, id, userID).
 		Scan(
 			&s.ID, &s.UserID, &s.MerchantName, &s.Amount, &s.Currency, &s.BillingCycle, &s.BillingInterval,
 			&s.CategoryID, &s.CustomerNumber, &s.ContactEmail, &s.ContactPhone, &s.ContactWebsite,
 			&s.SupportURL, &s.CancellationURL, &s.Status, &s.NoticePeriodDays, &s.ContractEndDate,
 			&s.IsTrial, &s.PaymentMethod, &s.LastOccurrence, &s.NextOccurrence, &s.Notes,
 			&s.MatchingHashes, &s.IgnoredHashes, &s.LinkedMandates, &s.LinkedIbans,
-			&s.CreatedAt, &s.UpdatedAt,
+			&s.CreatedAt, &s.UpdatedAt, &s.BankAccountID,
 		)
 	if err != nil {
 		return entity.Subscription{}, fmt.Errorf("subscription repo: get by id: %w", err)
@@ -60,9 +62,11 @@ func (r *SubscriptionRepository) FindByUserID(ctx context.Context, userID uuid.U
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
 			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
-			created_at, updated_at
+			created_at, updated_at, bank_account_id
 		FROM subscriptions
-		WHERE user_id = $1
+		WHERE user_id = $1 
+		   OR bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $1)
+		   OR category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $1)
 		ORDER BY next_occurrence ASC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("subscription repo: find by user id: %w", err)
@@ -78,7 +82,7 @@ func (r *SubscriptionRepository) FindByUserID(ctx context.Context, userID uuid.U
 			&s.SupportURL, &s.CancellationURL, &s.Status, &s.NoticePeriodDays, &s.ContractEndDate,
 			&s.IsTrial, &s.PaymentMethod, &s.LastOccurrence, &s.NextOccurrence, &s.Notes,
 			&s.MatchingHashes, &s.IgnoredHashes, &s.LinkedMandates, &s.LinkedIbans,
-			&s.CreatedAt, &s.UpdatedAt,
+			&s.CreatedAt, &s.UpdatedAt, &s.BankAccountID,
 		); err != nil {
 			return nil, fmt.Errorf("subscription repo: scan: %w", err)
 		}
@@ -119,16 +123,16 @@ func (r *SubscriptionRepository) Create(ctx context.Context, s entity.Subscripti
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
 			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
-			created_at, updated_at
+			created_at, updated_at, bank_account_id
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
 		) RETURNING created_at, updated_at`,
 		s.ID, s.UserID, s.MerchantName, s.Amount, s.Currency, s.BillingCycle, s.BillingInterval,
 		s.CategoryID, s.CustomerNumber, s.ContactEmail, s.ContactPhone, s.ContactWebsite,
 		s.SupportURL, s.CancellationURL, s.Status, s.NoticePeriodDays, s.ContractEndDate,
 		s.IsTrial, s.PaymentMethod, s.LastOccurrence, s.NextOccurrence, s.Notes,
 		s.MatchingHashes, s.IgnoredHashes, s.LinkedMandates, s.LinkedIbans,
-		s.CreatedAt, s.UpdatedAt,
+		s.CreatedAt, s.UpdatedAt, s.BankAccountID,
 	).Scan(&s.CreatedAt, &s.UpdatedAt)
 
 	if err != nil {
@@ -172,16 +176,16 @@ func (r *SubscriptionRepository) CreateWithBackfill(ctx context.Context, sub ent
 			support_url, cancellation_url, status, notice_period_days, contract_end_date,
 			is_trial, payment_method, last_occurrence, next_occurrence, notes,
 			matching_hashes, ignored_hashes, linked_mandates, linked_ibans,
-			created_at, updated_at
+			created_at, updated_at, bank_account_id
 		) VALUES (
-			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28
+			$1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23, $24, $25, $26, $27, $28, $29
 		) RETURNING created_at, updated_at`,
 		sub.ID, sub.UserID, sub.MerchantName, sub.Amount, sub.Currency, sub.BillingCycle, sub.BillingInterval,
 		sub.CategoryID, sub.CustomerNumber, sub.ContactEmail, sub.ContactPhone, sub.ContactWebsite,
 		sub.SupportURL, sub.CancellationURL, sub.Status, sub.NoticePeriodDays, sub.ContractEndDate,
 		sub.IsTrial, sub.PaymentMethod, sub.LastOccurrence, sub.NextOccurrence, sub.Notes,
 		sub.MatchingHashes, sub.IgnoredHashes, sub.LinkedMandates, sub.LinkedIbans,
-		sub.CreatedAt, sub.UpdatedAt,
+		sub.CreatedAt, sub.UpdatedAt, sub.BankAccountID,
 	).Scan(&sub.CreatedAt, &sub.UpdatedAt)
 	if err != nil {
 		return entity.Subscription{}, fmt.Errorf("subscription repo: insert: %w", err)
@@ -228,14 +232,14 @@ func (r *SubscriptionRepository) Update(ctx context.Context, s entity.Subscripti
 			support_url = $11, cancellation_url = $12, status = $13, notice_period_days = $14, contract_end_date = $15,
 			is_trial = $16, payment_method = $17, last_occurrence = $18, next_occurrence = $19, notes = $20,
 			matching_hashes = $21, ignored_hashes = $22, linked_mandates = $23, linked_ibans = $24,
-			updated_at = $25
-		WHERE id = $26 AND user_id = $27`,
+			updated_at = $25, bank_account_id = $26
+		WHERE id = $27 AND user_id = $28`,
 		s.MerchantName, s.Amount, s.Currency, s.BillingCycle, s.BillingInterval,
 		s.CategoryID, s.CustomerNumber, s.ContactEmail, s.ContactPhone, s.ContactWebsite,
 		s.SupportURL, s.CancellationURL, s.Status, s.NoticePeriodDays, s.ContractEndDate,
 		s.IsTrial, s.PaymentMethod, s.LastOccurrence, s.NextOccurrence, s.Notes,
 		s.MatchingHashes, s.IgnoredHashes, s.LinkedMandates, s.LinkedIbans,
-		s.UpdatedAt, s.ID, s.UserID,
+		s.UpdatedAt, s.BankAccountID, s.ID, s.UserID,
 	)
 	if err != nil {
 		return entity.Subscription{}, fmt.Errorf("subscription repo: update: %w", err)

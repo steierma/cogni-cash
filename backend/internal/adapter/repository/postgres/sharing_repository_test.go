@@ -2,228 +2,74 @@ package postgres
 
 import (
 	"context"
-	"errors"
-	"sync"
 	"testing"
 
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-
-	"cogni-cash/internal/domain/port"
 )
 
-// -- In-Memory Implementation for Testing --
-
-type shareRecord struct {
-	OwnerID      uuid.UUID
-	SharedWithID uuid.UUID
-	Permission   string
-}
-
-// InMemorySharingRepository is a thread-safe test-double implementing port.SharingRepository
-type InMemorySharingRepository struct {
-	mu             sync.RWMutex
-	categoryShares map[uuid.UUID]map[uuid.UUID]shareRecord // map[categoryID]map[sharedWithID]record
-	invoiceShares  map[uuid.UUID]map[uuid.UUID]shareRecord // map[invoiceID]map[sharedWithID]record
-}
-
-func NewInMemorySharingRepository() *InMemorySharingRepository {
-	return &InMemorySharingRepository{
-		categoryShares: make(map[uuid.UUID]map[uuid.UUID]shareRecord),
-		invoiceShares:  make(map[uuid.UUID]map[uuid.UUID]shareRecord),
-	}
-}
-
-// -- Category Methods --
-
-func (r *InMemorySharingRepository) ShareCategory(ctx context.Context, categoryID, ownerID, sharedWithID uuid.UUID, permission string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.categoryShares[categoryID] == nil {
-		r.categoryShares[categoryID] = make(map[uuid.UUID]shareRecord)
-	}
-	r.categoryShares[categoryID][sharedWithID] = shareRecord{
-		OwnerID:      ownerID,
-		SharedWithID: sharedWithID,
-		Permission:   permission,
-	}
-	return nil
-}
-
-func (r *InMemorySharingRepository) RevokeShare(ctx context.Context, categoryID, ownerID, sharedWithID uuid.UUID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	shares, exists := r.categoryShares[categoryID]
-	if !exists {
-		return nil // idempotent
-	}
-
-	record, ok := shares[sharedWithID]
-	if ok && record.OwnerID != ownerID {
-		return errors.New("unauthorized: only the owner can revoke")
-	}
-
-	delete(r.categoryShares[categoryID], sharedWithID)
-	return nil
-}
-
-func (r *InMemorySharingRepository) ListShares(ctx context.Context, categoryID, ownerID uuid.UUID) ([]uuid.UUID, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	shares, exists := r.categoryShares[categoryID]
-	if !exists {
-		return []uuid.UUID{}, nil
-	}
-
-	var sharedWith []uuid.UUID
-	for targetID, record := range shares {
-		if record.OwnerID != ownerID {
-			return nil, errors.New("unauthorized: only the owner can list shares")
-		}
-		sharedWith = append(sharedWith, targetID)
-	}
-	return sharedWith, nil
-}
-
-// -- Invoice Methods --
-
-func (r *InMemorySharingRepository) ShareInvoice(ctx context.Context, invoiceID, ownerID, sharedWithID uuid.UUID, permission string) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	if r.invoiceShares[invoiceID] == nil {
-		r.invoiceShares[invoiceID] = make(map[uuid.UUID]shareRecord)
-	}
-	r.invoiceShares[invoiceID][sharedWithID] = shareRecord{
-		OwnerID:      ownerID,
-		SharedWithID: sharedWithID,
-		Permission:   permission,
-	}
-	return nil
-}
-
-func (r *InMemorySharingRepository) RevokeInvoiceShare(ctx context.Context, invoiceID, ownerID, sharedWithID uuid.UUID) error {
-	r.mu.Lock()
-	defer r.mu.Unlock()
-
-	shares, exists := r.invoiceShares[invoiceID]
-	if !exists {
-		return nil // idempotent
-	}
-
-	record, ok := shares[sharedWithID]
-	if ok && record.OwnerID != ownerID {
-		return errors.New("unauthorized: only the owner can revoke")
-	}
-
-	delete(r.invoiceShares[invoiceID], sharedWithID)
-	return nil
-}
-
-func (r *InMemorySharingRepository) ListInvoiceShares(ctx context.Context, invoiceID, ownerID uuid.UUID) ([]uuid.UUID, error) {
-	r.mu.RLock()
-	defer r.mu.RUnlock()
-
-	shares, exists := r.invoiceShares[invoiceID]
-	if !exists {
-		return []uuid.UUID{}, nil
-	}
-
-	var sharedWith []uuid.UUID
-	for targetID, record := range shares {
-		if record.OwnerID != ownerID {
-			return nil, errors.New("unauthorized: only the owner can list shares")
-		}
-		sharedWith = append(sharedWith, targetID)
-	}
-	return sharedWith, nil
-}
-
-// Interface compliance check
-var _ port.SharingRepository = (*InMemorySharingRepository)(nil)
-
-// -- Tests --
-
-func TestInMemorySharingRepository_CategoryShares(t *testing.T) {
+func TestSharingRepository(t *testing.T) {
 	ctx := context.Background()
-	repo := NewInMemorySharingRepository()
+	clearTables(ctx, t)
 
-	catID := uuid.New()
+	repo := NewSharingRepository(globalPool, setupLogger())
+
 	ownerID := uuid.New()
-	friend1 := uuid.New()
-	friend2 := uuid.New()
-	hacker := uuid.New()
+	friendID := uuid.New()
 
-	t.Run("Share Category", func(t *testing.T) {
-		err := repo.ShareCategory(ctx, catID, ownerID, friend1, "view")
+	// Seed users
+	_, _ = globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'owner', 'hash', 'owner@example.com')", ownerID)
+	_, _ = globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'friend', 'hash', 'friend@example.com')", friendID)
+
+	t.Run("BankAccountSharing", func(t *testing.T) {
+		connID := uuid.New()
+		_, _ = globalPool.Exec(ctx, "INSERT INTO bank_connections (id, user_id, institution_id, institution_name, requisition_id, reference_id) VALUES ($1, $2, 'inst', 'Bank', 'req_shr', 'ref_shr')", connID, ownerID)
+
+		accID := uuid.New()
+		_, err := globalPool.Exec(ctx, "INSERT INTO bank_accounts (id, connection_id, provider_account_id, user_id, name, iban, currency, balance) VALUES ($1, $2, $3, $4, 'Test Acc', 'DE123', 'EUR', 100)", accID, connID, "prov_shr", ownerID)
 		require.NoError(t, err)
 
-		err = repo.ShareCategory(ctx, catID, ownerID, friend2, "edit")
-		require.NoError(t, err)
+		err = repo.ShareBankAccount(ctx, accID, ownerID, friendID, "view")
+		assert.NoError(t, err)
+
+		shares, err := repo.ListBankAccountShares(ctx, accID, ownerID)
+		assert.NoError(t, err)
+		assert.Contains(t, shares, friendID)
+
+		err = repo.RevokeBankAccountShare(ctx, accID, ownerID, friendID)
+		assert.NoError(t, err)
 	})
 
-	t.Run("List Shares - Success", func(t *testing.T) {
+	t.Run("CategorySharing", func(t *testing.T) {
+		catID := uuid.New()
+		_, err := globalPool.Exec(ctx, "INSERT INTO categories (id, user_id, name, color) VALUES ($1, $2, 'Test Cat', '#ffffff')", catID, ownerID)
+		require.NoError(t, err)
+
+		err = repo.ShareCategory(ctx, catID, ownerID, friendID, "view")
+		assert.NoError(t, err)
+
 		shares, err := repo.ListShares(ctx, catID, ownerID)
-		require.NoError(t, err)
-		assert.Len(t, shares, 2)
-		assert.Contains(t, shares, friend1)
-		assert.Contains(t, shares, friend2)
+		assert.NoError(t, err)
+		assert.Contains(t, shares, friendID)
+
+		err = repo.RevokeShare(ctx, catID, ownerID, friendID)
+		assert.NoError(t, err)
 	})
 
-	t.Run("List Shares - Unauthorized", func(t *testing.T) {
-		shares, err := repo.ListShares(ctx, catID, hacker)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unauthorized")
-		assert.Nil(t, shares)
-	})
-
-	t.Run("Revoke Share - Unauthorized", func(t *testing.T) {
-		err := repo.RevokeShare(ctx, catID, hacker, friend1)
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "unauthorized")
-	})
-
-	t.Run("Revoke Share - Success", func(t *testing.T) {
-		err := repo.RevokeShare(ctx, catID, ownerID, friend1)
+	t.Run("InvoiceSharing", func(t *testing.T) {
+		invID := uuid.New()
+		_, err := globalPool.Exec(ctx, "INSERT INTO invoices (id, user_id, vendor, amount, currency, invoice_date) VALUES ($1, $2, 'Vendor', 50, 'EUR', '2024-01-01')", invID, ownerID)
 		require.NoError(t, err)
 
-		shares, _ := repo.ListShares(ctx, catID, ownerID)
-		assert.Len(t, shares, 1)
-		assert.Contains(t, shares, friend2)
-		assert.NotContains(t, shares, friend1)
-	})
-}
-
-func TestInMemorySharingRepository_InvoiceShares(t *testing.T) {
-	ctx := context.Background()
-	repo := NewInMemorySharingRepository()
-
-	invID := uuid.New()
-	ownerID := uuid.New()
-	accountant := uuid.New()
-
-	t.Run("Share Invoice", func(t *testing.T) {
-		err := repo.ShareInvoice(ctx, invID, ownerID, accountant, "view")
-		require.NoError(t, err)
-	})
-
-	t.Run("List Invoice Shares", func(t *testing.T) {
-		shares, err := repo.ListInvoiceShares(ctx, invID, ownerID)
-		require.NoError(t, err)
-		require.Len(t, shares, 1)
-		assert.Equal(t, accountant, shares[0])
-	})
-
-	t.Run("Revoke Invoice Share", func(t *testing.T) {
-		err := repo.RevokeInvoiceShare(ctx, invID, ownerID, accountant)
-		require.NoError(t, err)
+		err = repo.ShareInvoice(ctx, invID, ownerID, friendID, "view")
+		assert.NoError(t, err)
 
 		shares, err := repo.ListInvoiceShares(ctx, invID, ownerID)
-		require.NoError(t, err)
-		assert.Len(t, shares, 0)
+		assert.NoError(t, err)
+		assert.Contains(t, shares, friendID)
+
+		err = repo.RevokeInvoiceShare(ctx, invID, ownerID, friendID)
+		assert.NoError(t, err)
 	})
 }

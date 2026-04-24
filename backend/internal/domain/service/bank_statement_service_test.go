@@ -15,6 +15,8 @@ import (
 	"cogni-cash/internal/domain/service"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/mock"
 )
 
 func setupLogger() *slog.Logger {
@@ -31,6 +33,7 @@ func (m *mockParser) Parse(_ context.Context, _ uuid.UUID, _ []byte) (entity.Ban
 }
 
 type mockRepo struct {
+	mock.Mock
 	saveErr        error
 	saved          []entity.BankStatement
 	existingTxns   []entity.Transaction
@@ -82,6 +85,12 @@ func (m *mockRepo) FindTransactions(_ context.Context, f entity.TransactionFilte
 func (m *mockRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockRepo) UpdateStatementAccount(ctx context.Context, id uuid.UUID, accountID *uuid.UUID, userID uuid.UUID) error {
+	return nil
+}
+func (m *mockRepo) GetTransactionsByAccountID(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]entity.Transaction, error) {
+	return nil, nil
+}
 
 func (m *mockRepo) SearchTransactions(_ context.Context, _ entity.TransactionFilter) ([]entity.Transaction, error) {
 	return m.existingTxns, nil
@@ -126,9 +135,10 @@ func (m *mockRepo) MarkTransactionReviewed(_ context.Context, _ string, _ uuid.U
 	return nil
 }
 
-func (m *mockRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string, _ bool, _ uuid.UUID) error {
+func (m *mockRepo) MarkTransactionsReviewedBulk(_ context.Context, _ []string, _ uuid.UUID) error {
 	return nil
 }
+
 
 func (m *mockRepo) UpdateTransactionBaseAmount(_ context.Context, _ string, _ float64, _ string, _ uuid.UUID) error {
 	return nil
@@ -170,7 +180,7 @@ func (m *mockCategorizer) CategorizeTransactionsBatch(ctx context.Context, _ uui
 }
 
 func setupTestBankStatementService(p port.BankStatementParser, repo port.BankStatementRepository) *service.BankStatementService {
-	svc := service.NewBankStatementService(repo, setupLogger())
+	svc := service.NewBankStatementService(repo, nil, setupLogger())
 	if p != nil {
 		svc.RegisterParser(".pdf", p)
 		svc.RegisterParser(".csv", p)
@@ -391,7 +401,7 @@ func TestBankStatementService_ImportFromFile_SkipsDuplicatesWithNormalizedText(t
 
 func TestBankStatementService_DeleteStatement(t *testing.T) {
 	repo := &mockRepo{}
-	svc := service.NewBankStatementService(repo, setupLogger())
+	svc := service.NewBankStatementService(repo, nil, setupLogger())
 
 	err := svc.DeleteStatement(context.Background(), uuid.New(), uuid.New())
 	if err != nil {
@@ -638,7 +648,7 @@ func TestStartAutoCategorizeAsync_Success(t *testing.T) {
 	for i := 0; i < 25; i++ {
 		pendingTxns = append(pendingTxns, entity.Transaction{
 			ContentHash: uuid.NewString(),
-			Description: "Test Vendor",
+			Description: uuid.NewString(),
 			Amount:      -10.0,
 			BaseAmount:  -10.0,
 			CategoryID:  nil,
@@ -697,4 +707,18 @@ Validate:
 	if status.Processed != 25 {
 		t.Errorf("expected 25 processed items, got %d", status.Processed)
 	}
+}
+
+func TestBankStatementService_UpdateAccount(t *testing.T) {
+	repo := new(mockRepo)
+	svc := service.NewBankStatementService(repo, nil, setupLogger())
+	
+	stmtID := uuid.New()
+	accID := uuid.New()
+	userID := uuid.New()
+
+	t.Run("UpdateStatementAccount", func(t *testing.T) {
+		err := svc.UpdateStatementAccount(context.Background(), stmtID, &accID, userID)
+		assert.NoError(t, err)
+	})
 }

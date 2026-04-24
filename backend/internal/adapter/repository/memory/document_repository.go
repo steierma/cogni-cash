@@ -2,6 +2,7 @@ package memory
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"time"
@@ -21,9 +22,45 @@ type DocumentRepository struct {
 }
 
 func NewDocumentRepository() *DocumentRepository {
-	return &DocumentRepository{
+	r := &DocumentRepository{
 		documents: make(map[uuid.UUID]entity.Document),
 		order:     make([]uuid.UUID, 0, maxDocuments),
+	}
+	r.seedData()
+	return r
+}
+
+func (r *DocumentRepository) seedData() {
+	userID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+
+	// Employment contract
+	contractID := uuid.New()
+	contract := entity.Document{
+		ID:               contractID,
+		UserID:           userID,
+		Type:             entity.DocTypeContract,
+		OriginalFileName: "Employment_Contract_AcmeCorp.pdf",
+		MimeType:         "application/pdf",
+		ExtractedText:    "Employment Contract Acme Corp Full Time position starting 2021...",
+		CreatedAt:        time.Date(2020, 12, 1, 10, 0, 0, 0, time.UTC),
+	}
+	r.documents[contractID] = contract
+	r.order = append(r.order, contractID)
+
+	// Yearly Tax Certificates matching payslips
+	for year := 2021; year <= 2023; year++ {
+		docID := uuid.New()
+		doc := entity.Document{
+			ID:               docID,
+			UserID:           userID,
+			Type:             entity.DocTypeTaxCertificate,
+			OriginalFileName: fmt.Sprintf("Tax_Certificate_%d.pdf", year),
+			MimeType:         "application/pdf",
+			ExtractedText:    fmt.Sprintf("Annual Income Tax Certificate for the year %d", year),
+			CreatedAt:        time.Date(year+1, 2, 15, 10, 0, 0, 0, time.UTC),
+		}
+		r.documents[docID] = doc
+		r.order = append(r.order, docID)
 	}
 }
 

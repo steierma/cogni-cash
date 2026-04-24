@@ -87,6 +87,9 @@ func (m *mockDiscoveryUseCase) LinkTransaction(ctx context.Context, userID, subI
 func (m *mockDiscoveryUseCase) UnlinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error {
 	return m.Called(ctx, userID, subID, txnHash).Error(0)
 }
+func (m *mockDiscoveryUseCase) LinkTransactions(ctx context.Context, userID, subID uuid.UUID, txnHashes []string) error {
+	return m.Called(ctx, userID, subID, txnHashes).Error(0)
+}
 
 type mockCategoryUseCase struct {
 	mock.Mock
@@ -152,6 +155,19 @@ func (m *mockBankUseCase) SyncAllAccounts(ctx context.Context, userID uuid.UUID)
 }
 func (m *mockBankUseCase) UpdateAccountType(ctx context.Context, id uuid.UUID, accType entity.StatementType, userID uuid.UUID) error {
 	return m.Called(ctx, id, accType, userID).Error(0)
+}
+func (m *mockBankUseCase) CreateVirtualAccount(ctx context.Context, account *entity.BankAccount) error {
+	return m.Called(ctx, account).Error(0)
+}
+func (m *mockBankUseCase) ShareAccount(ctx context.Context, id, ownerID, sharedWithID uuid.UUID, perm string) error {
+	return m.Called(ctx, id, ownerID, sharedWithID, perm).Error(0)
+}
+func (m *mockBankUseCase) RevokeShare(ctx context.Context, id, ownerID, sharedWithID uuid.UUID) error {
+	return m.Called(ctx, id, ownerID, sharedWithID).Error(0)
+}
+func (m *mockBankUseCase) ListShares(ctx context.Context, id, ownerID uuid.UUID) ([]uuid.UUID, error) {
+	args := m.Called(ctx, id, ownerID)
+	return args.Get(0).([]uuid.UUID), args.Error(1)
 }
 
 type mockInvoiceUseCase struct {

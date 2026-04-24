@@ -44,6 +44,9 @@ export const bankService = {
     deleteStatement: (id: string): Promise<void> =>
         api.delete(`bank-statements/${id}/`).then(() => undefined),
 
+    updateStatement: (id: string, bankAccountId: string | null): Promise<void> =>
+        api.patch(`bank-statements/${id}/`, { bank_account_id: bankAccountId }).then(() => undefined),
+
     // Connections & Accounts
     fetchInstitutions: (country: string = 'DE', sandbox: boolean = false): Promise<BankInstitution[]> =>
         api.get<BankInstitution[]>('bank/institutions/', { params: { country, sandbox } }).then(r => r.data ?? []),
@@ -63,6 +66,19 @@ export const bankService = {
     updateAccountType: (accountId: string, accountType: string): Promise<void> =>
         api.put(`bank/accounts/${accountId}/type/`, { account_type: accountType }).then(() => undefined),
 
+    createVirtualAccount: (name: string, iban: string, currency: string, accountType: string, balance: number): Promise<void> =>
+        api.post('bank/accounts/virtual/', { name, iban, currency, account_type: accountType, balance }).then(() => undefined),
+
     syncAccounts: (): Promise<{ message: string }> =>
-        api.post<{ message: string }>('bank/sync/').then(r => r.data)
-};
+        api.post<{ message: string }>('bank/sync/').then(r => r.data),
+
+    // Sharing
+    shareAccount: (accountId: string, sharedWithUserId: string, permissionLevel: string): Promise<void> =>
+        api.post(`bank/accounts/${accountId}/share/`, { shared_with_user_id: sharedWithUserId, permission_level: permissionLevel }).then(() => undefined),
+
+    revokeShare: (accountId: string, userId: string): Promise<void> =>
+        api.delete(`bank/accounts/${accountId}/share/${userId}/`).then(() => undefined),
+
+    listShares: (accountId: string): Promise<string[]> =>
+        api.get<string[]>(`bank/accounts/${accountId}/shares/`).then(r => r.data ?? [])
+    };

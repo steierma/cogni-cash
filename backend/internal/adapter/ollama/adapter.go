@@ -25,7 +25,10 @@ Use EXACTLY ONE category from: [{{CATEGORIES}}].
 Return ONLY a valid JSON object. Do not include explanations.
 
 JSON Schema:
-{"category_name": "string", "vendor_name": "string", "amount": 12.34, "currency": "EUR", "invoice_date": "YYYY-MM-DD", "description": "string"}
+{"category_name": "string", "vendor_name": "string", "amount": 12.34, "currency": "string (ISO 4217, e.g. {{DEFAULT_CURRENCY}})", "invoice_date": "YYYY-MM-DD", "description": "string"}
+
+INSTRUCTION:
+Extract the actual currency from the document. If no currency is found, use {{DEFAULT_CURRENCY}}.
 
 TEXT:
 {{TEXT}}`
@@ -47,7 +50,7 @@ JSON Schema:
 {
   "account_holder": "string",
   "iban": "string",
-  "currency": "EUR",
+  "currency": "string (ISO 4217, e.g. {{DEFAULT_CURRENCY}})",
   "statement_date": "YYYY-MM-DD",
   "statement_no": 123,
   "new_balance": 1234.56,
@@ -64,6 +67,9 @@ JSON Schema:
     }
   ]
 }
+
+INSTRUCTION:
+Extract the actual currency from the bank statement. If no currency is found, use {{DEFAULT_CURRENCY}}.
 
 TEXT:
 {{TEXT}}`
@@ -125,6 +131,7 @@ const defaultSubscriptionPromptTemplate = `Analyze the merchant and transaction 
 Return ONLY a valid JSON object. Do not include explanations or markdown formatting outside of the JSON block.
 
 Merchant: {{MERCHANT}}
+Language: {{LANGUAGE}}
 Transactions:
 {{TRANSACTIONS}}
 
@@ -138,7 +145,7 @@ JSON Schema:
   "support_url": "string (direct link to help/support page)",
   "cancellation_url": "string (direct link to cancellation or account management page)",
   "is_trial": "boolean (true if these transactions look like a free trial phase)",
-  "notes": "string (short summary of the service)"
+  "notes": "string (short summary of the service in the requested language)"
 }
 
 If a field is unknown, return an empty string or null for boolean.`
@@ -343,15 +350,22 @@ func (a *Adapter) ParseBankStatement(ctx context.Context, userID uuid.UUID, file
 		promptTemplate = defaultStatementPromptTemplate
 	}
 
+	fallbackCurrency, _ := a.settingsRepo.Get(ctx, "currency", userID)
+	if strings.TrimSpace(fallbackCurrency) == "" {
+		fallbackCurrency = "EUR"
+	}
+
+	promptTemplate = strings.ReplaceAll(promptTemplate, "{{DEFAULT_CURRENCY}}", fallbackCurrency)
+
 	rawResp, err := a.processFileWithAI(ctx, userID, baseURL, token, model, mimeType, fileBytes, promptTemplate)
 	if err != nil {
 		return entity.BankStatement{}, err
 	}
 
-	return a.unmarshalBankStatement(rawResp)
+	return a.unmarshalBankStatement(rawResp, fallbackCurrency)
 }
 
-func (a *Adapter) unmarshalBankStatement(rawResp string) (entity.BankStatement, error) {
+func (a *Adapter) unmarshalBankStatement(rawResp string, fallbackCurrency string) (entity.BankStatement, error) {
 	rawResp = cleanJSONResponse(rawResp)
 
 	type llmTx struct {
@@ -388,7 +402,7 @@ func (a *Adapter) unmarshalBankStatement(rawResp string) (entity.BankStatement, 
 	stmt := entity.BankStatement{
 		AccountHolder: res.AccountHolder,
 		IBAN:          res.IBAN,
-		Currency:      res.Currency,
+		Currency:      a.normalizeCurrency(res.Currency, fallbackCurrency),
 		StatementDate: stmtDate,
 		StatementNo:   res.StatementNo,
 		NewBalance:    res.NewBalance,
@@ -408,6 +422,7 @@ func (a *Adapter) unmarshalBankStatement(rawResp string) (entity.BankStatement, 
 			CounterpartyIban:    tx.CounterpartyIban,
 			BankTransactionCode: tx.BankTransactionCode,
 			MandateReference:    tx.MandateReference,
+			Currency:            stmt.Currency, // Inherit from statement
 		})
 	}
 
@@ -491,8 +506,14 @@ func (a *Adapter) CategorizeInvoice(ctx context.Context, userID uuid.UUID, req p
 		promptTemplate = defaultSinglePromptTemplate
 	}
 
+	fallbackCurrency, _ := a.settingsRepo.Get(ctx, "currency", userID)
+	if strings.TrimSpace(fallbackCurrency) == "" {
+		fallbackCurrency = "EUR"
+	}
+
 	prompt := strings.ReplaceAll(promptTemplate, "{{CATEGORIES}}", strings.Join(req.Categories, ", "))
 	prompt = strings.ReplaceAll(prompt, "{{TEXT}}", req.RawText)
+	prompt = strings.ReplaceAll(prompt, "{{DEFAULT_CURRENCY}}", fallbackCurrency)
 
 	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
@@ -517,10 +538,18 @@ func (a *Adapter) CategorizeInvoice(ctx context.Context, userID uuid.UUID, req p
 		InvoiceName: strings.TrimSpace(res.CategoryName),
 		VendorName:  strings.TrimSpace(res.VendorName),
 		Amount:      res.Amount,
-		Currency:    res.Currency,
+		Currency:    a.normalizeCurrency(res.Currency, fallbackCurrency),
 		InvoiceDate: res.InvoiceDate,
 		Description: res.Description,
 	}, nil
+}
+
+func (a *Adapter) normalizeCurrency(extracted, fallback string) string {
+	extracted = strings.TrimSpace(strings.ToUpper(extracted))
+	if len(extracted) == 3 {
+		return extracted
+	}
+	return strings.ToUpper(fallback)
 }
 
 func (a *Adapter) CategorizeInvoiceImage(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, imageBytes []byte, categories []string) (port.InvoiceCategorizationResult, error) {
@@ -534,11 +563,17 @@ func (a *Adapter) CategorizeInvoiceImage(ctx context.Context, userID uuid.UUID, 
 		promptTemplate = defaultSinglePromptTemplate
 	}
 
+	fallbackCurrency, _ := a.settingsRepo.Get(ctx, "currency", userID)
+	if strings.TrimSpace(fallbackCurrency) == "" {
+		fallbackCurrency = "EUR"
+	}
+
 	catStr := strings.Join(categories, ", ")
 	systemPrompt := strings.ReplaceAll(promptTemplate, "{{CATEGORIES}}", catStr)
 	systemPrompt = strings.ReplaceAll(systemPrompt, "\n\nTEXT:\n{{TEXT}}", "")
 	systemPrompt = strings.ReplaceAll(systemPrompt, "\nTEXT:\n{{TEXT}}", "")
 	systemPrompt = strings.ReplaceAll(systemPrompt, "{{TEXT}}", "")
+	systemPrompt = strings.ReplaceAll(systemPrompt, "{{DEFAULT_CURRENCY}}", fallbackCurrency)
 
 	var rawResp string
 	isGemini := strings.Contains(baseURL, "googleapis.com")
@@ -565,7 +600,7 @@ func (a *Adapter) CategorizeInvoiceImage(ctx context.Context, userID uuid.UUID, 
 		InvoiceName: strings.TrimSpace(res.CategoryName),
 		VendorName:  strings.TrimSpace(res.VendorName),
 		Amount:      res.Amount,
-		Currency:    res.Currency,
+		Currency:    a.normalizeCurrency(res.Currency, fallbackCurrency),
 		InvoiceDate: res.InvoiceDate,
 		Description: res.Description,
 	}, nil
@@ -701,8 +736,8 @@ func (a *Adapter) VerifySubscriptionSuggestion(ctx context.Context, userID uuid.
 	return res.IsSubscription, nil
 }
 
-func (a *Adapter) EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string) (port.SubscriptionEnrichmentResult, error) {
-	a.logger.Info("AI subscription enrichment initiated", "merchant", merchantName, "user_id", userID)
+func (a *Adapter) EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string, language string) (port.SubscriptionEnrichmentResult, error) {
+	a.logger.Info("AI subscription enrichment initiated", "merchant", merchantName, "user_id", userID, "language", language)
 
 	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
@@ -714,9 +749,22 @@ func (a *Adapter) EnrichSubscription(ctx context.Context, userID uuid.UUID, merc
 		promptTemplate = defaultSubscriptionPromptTemplate
 	}
 
+	// Use full language names for better AI context
+	langName := language
+	if strings.ToLower(language) == "de" {
+		langName = "deutsch"
+	} else if strings.ToLower(language) == "en" {
+		langName = "english"
+	} else if strings.ToLower(language) == "es" {
+		langName = "spanish"
+	} else if strings.ToLower(language) == "fr" {
+		langName = "french"
+	}
+
 	txText := strings.Join(transactionDescriptions, "\n- ")
 	prompt := strings.ReplaceAll(promptTemplate, "{{MERCHANT}}", merchantName)
 	prompt = strings.ReplaceAll(prompt, "{{TRANSACTIONS}}", txText)
+	prompt = strings.ReplaceAll(prompt, "{{LANGUAGE}}", langName)
 
 	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
 	if err != nil {

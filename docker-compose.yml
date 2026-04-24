@@ -8,7 +8,7 @@ services:
   postgres:
     image: postgres:16-alpine
     pull_policy: if_not_present
-    container_name: cogni-cash-db
+    container_name: db
     restart: unless-stopped
     env_file: backend/.env
     ports:
@@ -26,13 +26,13 @@ services:
 
   # ── Database Migrations (one-shot) ─────────────────────────────────────────
   migrate:
-    image: ghcr.io/steierma/cogni-cash-backend${IMAGE_SUFFIX:-}:${TAG:-latest}
+    image: backend:${TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
     pull_policy: if_not_present
-    container_name: cogni-cash-migrate
-    entrypoint: ["/app/cogni-cash-migrate"]
+    container_name: migrate
+    entrypoint: ["/app/migrate"]
     env_file: backend/.env
     environment:
       DATABASE_HOST: postgres
@@ -46,12 +46,12 @@ services:
 
   # ── Backend ────────────────────────────────────────────────────────────────
   backend:
-    image: ghcr.io/steierma/cogni-cash-backend${IMAGE_SUFFIX:-}:${TAG:-latest}
+    image: backend:${TAG:-latest}
     build:
       context: ./backend
       dockerfile: Dockerfile
     pull_policy: if_not_present
-    container_name: cogni-cash-backend
+    container_name: backend
     restart: unless-stopped
     env_file: backend/.env
     environment:
@@ -71,7 +71,7 @@ services:
       migrate:
         condition: service_completed_successfully
     healthcheck:
-      test: ["CMD", "/app/cogni-cash-healthcheck"]
+      test: ["CMD", "/app/healthcheck"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -81,12 +81,12 @@ services:
 
   # ── Frontend ───────────────────────────────────────────────────────────────
   frontend:
-    image: ghcr.io/steierma/cogni-cash-frontend${IMAGE_SUFFIX:-}:${TAG:-latest}
+    image: frontend:${TAG:-latest}
     build:
       context: ./frontend
       dockerfile: Dockerfile
     pull_policy: if_not_present
-    container_name: cogni-cash-frontend
+    container_name: frontend
     restart: unless-stopped
     depends_on:
       backend:
@@ -97,7 +97,7 @@ services:
   # ── Caddy (Reverse Proxy & HTTPS) ──────────────────────────────────────────
   caddy:
     image: caddy:2-alpine
-    container_name: cogni-cash-caddy
+    container_name: caddy
     restart: unless-stopped
     ports:
       - "80:80"
@@ -116,7 +116,7 @@ services:
   adminer:
     image: adminer:latest
     pull_policy: if_not_present
-    container_name: cogni-cash-adminer
+    container_name: adminer
     restart: unless-stopped
     ports:
       - "8081:8080"

@@ -54,7 +54,6 @@ type Transaction struct {
 	Reviewed            bool            `json:"reviewed"`
 	StatementType       StatementType   `json:"statement_type"`
 	IsPrediction        bool            `json:"is_prediction"`       // <-- NEW Field
-	SkipForecasting     bool            `json:"skip_forecasting"`    // <-- NEW Field: Exclude historical pattern
 	IsPayslipVerified   bool            `json:"is_payslip_verified"` // <-- NEW Field: Verified against payslip
 	IsShared            bool            `json:"is_shared"`           // Collaborative Finance: Is category shared
 	OwnerID             *uuid.UUID      `json:"owner_id,omitempty"`  // Collaborative Finance: Original owner of the transaction
@@ -65,6 +64,7 @@ type Transaction struct {
 type BankStatement struct {
 	ID                  uuid.UUID     `json:"id"`
 	UserID              uuid.UUID     `json:"user_id"`
+	BankAccountID       *uuid.UUID    `json:"bank_account_id,omitempty"`
 	AccountHolder       string        `json:"account_holder"`
 	IBAN                string        `json:"iban"`
 	StatementDate       time.Time     `json:"statement_date"`

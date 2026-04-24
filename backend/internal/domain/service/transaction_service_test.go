@@ -25,6 +25,7 @@ type mockTxnSvcBankStatementRepo struct {
 	SearchTransactionsFunc        func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
 	UpdateTransactionCategoryFunc func(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReviewedFunc   func(ctx context.Context, hash string, userID uuid.UUID) error
+	MarkTransactionsReviewedBulkFunc func(ctx context.Context, hashes []string, userID uuid.UUID) error
 	FindMatchingCategoryFunc      func(ctx context.Context, userID uuid.UUID, tx port.TransactionToCategorize) (*uuid.UUID, error)
 	GetCategorizationExamplesFunc func(ctx context.Context, userID uuid.UUID, limit int) ([]entity.CategorizationExample, error)
 }
@@ -50,6 +51,12 @@ func (m *mockTxnSvcBankStatementRepo) UpdateTransactionCategory(ctx context.Cont
 func (m *mockTxnSvcBankStatementRepo) MarkTransactionReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	if m.MarkTransactionReviewedFunc != nil {
 		return m.MarkTransactionReviewedFunc(ctx, hash, userID)
+	}
+	return nil
+}
+func (m *mockTxnSvcBankStatementRepo) MarkTransactionsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error {
+	if m.MarkTransactionsReviewedBulkFunc != nil {
+		return m.MarkTransactionsReviewedBulkFunc(ctx, hashes, userID)
 	}
 	return nil
 }

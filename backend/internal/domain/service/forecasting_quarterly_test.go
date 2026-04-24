@@ -9,61 +9,49 @@ import (
 	"cogni-cash/internal/domain/service"
 
 	"github.com/google/uuid"
+	"github.com/stretchr/testify/assert"
 )
 
-func TestForecastingService_QuarterlyPattern(t *testing.T) {
+func TestForecastingService_QuarterlySubscription(t *testing.T) {
 	now := time.Now()
 	userID := uuid.New()
 
-	// 1. Setup quarterly transaction template (every 3 months)
-	txns := []entity.Transaction{
+	// Quarterly subscription (every 3 months)
+	nextOcc := now.AddDate(0, 1, 0) // next occurrence in 1 month
+	subs := []entity.Subscription{
 		{
-			UserID:      userID,
-			Description: "Quarterly Insurance",
-			Amount: -300.0, BaseAmount: -300.0,
-			BookingDate: now.AddDate(0, -9, 0),
-			ContentHash: "ins-1",
-		},
-		{
-			UserID:      userID,
-			Description: "Quarterly Insurance",
-			Amount: -300.0, BaseAmount: -300.0,
-			BookingDate: now.AddDate(0, -6, 0),
-			ContentHash: "ins-2",
-		},
-		{
-			UserID:      userID,
-			Description: "Quarterly Insurance",
-			Amount: -300.0, BaseAmount: -300.0,
-			BookingDate: now.AddDate(0, -3, 0),
-			ContentHash: "ins-3",
+			ID:              uuid.New(),
+			UserID:          userID,
+			MerchantName:    "Quarterly Insurance",
+			Amount:          -300.0,
+			Currency:        "EUR",
+			BillingCycle:    "monthly",
+			BillingInterval: 3, // every 3 months
+			Status:          entity.SubscriptionStatusActive,
+			NextOccurrence:  &nextOcc,
 		},
 	}
 
-	repo := &mockForecastingRepo{txns: txns}
+	repo := &mockForecastingRepo{}
 	bankRepo := &mockForecastingBankRepo{accounts: []entity.BankAccount{{Balance: 5000.0}}}
 	catRepo := &mockCategoryRepo{}
-	exRepo := &mockExclusionRepo{}
+	subRepo := &mockForecastSubRepo{subs: subs}
 
-	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, exRepo, nil, nil, nil)
+	svc := service.NewForecastingService(repo, bankRepo, catRepo, nil, nil, subRepo, nil, nil, nil)
 
-	// 2. Generate forecast
 	from := now
-	to := now.AddDate(0, 6, 0) // Should find one in 0 months (now) and one in 3 months
-	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, from, to)
-	if err != nil {
-		t.Fatalf("failed to get forecast: %v", err)
-	}
+	to := now.AddDate(0, 7, 0) // 7 months — should find ~2 occurrences (at month+1 and month+4)
 
-	found := false
+	forecast, err := svc.GetCashFlowForecast(context.Background(), userID, from, to)
+	assert.NoError(t, err)
+
+	count := 0
 	for _, p := range forecast.Predictions {
 		if p.Description == "Quarterly Insurance" {
-			found = true
-			break
+			count++
+			assert.Equal(t, -300.0, p.Amount)
 		}
 	}
 
-	if !found {
-		t.Error("expected to find Quarterly Insurance prediction, but it was not detected")
-	}
+	assert.GreaterOrEqual(t, count, 2, "Expected at least 2 quarterly predictions in 7-month window")
 }

@@ -170,23 +170,6 @@ var defaultCategories = []entity.Category{
 
 var dummyUserID = uuid.New()
 
-type mockSharingRepo struct{}
-
-func (m *mockSharingRepo) ShareCategory(_ context.Context, _, _, _ uuid.UUID, _ string) error {
-	return nil
-}
-func (m *mockSharingRepo) RevokeShare(_ context.Context, _, _, _ uuid.UUID) error { return nil }
-func (m *mockSharingRepo) ListShares(_ context.Context, _, _ uuid.UUID) ([]uuid.UUID, error) {
-	return nil, nil
-}
-func (m *mockSharingRepo) ShareInvoice(_ context.Context, _, _, _ uuid.UUID, _ string) error {
-	return nil
-}
-func (m *mockSharingRepo) RevokeInvoiceShare(_ context.Context, _, _, _ uuid.UUID) error { return nil }
-func (m *mockSharingRepo) ListInvoiceShares(_ context.Context, _, _ uuid.UUID) ([]uuid.UUID, error) {
-	return nil, nil
-}
-
 type mockNotification struct{}
 
 func (m *mockNotification) SendWelcomeEmail(_ context.Context, _ entity.User) error { return nil }
@@ -220,7 +203,7 @@ func (m *mockUserRepo) Delete(_ context.Context, _ uuid.UUID) error             
 func newTestInvoiceSvc(aiCategorizer port.InvoiceAICategorizer, repo *mockInvoiceRepo) *service.InvoiceService {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true}))
 	catRepo := &mockCatRepo{cats: defaultCategories}
-	return service.NewInvoiceService(repo, aiCategorizer, &mockInvoiceParser{text: "extracted text"}, catRepo, &mockSharingRepo{}, logger)
+	return service.NewInvoiceService(repo, aiCategorizer, &mockInvoiceParser{text: "extracted text"}, catRepo, new(mockSharingRepo), logger)
 }
 
 // ── CategorizeDocument tests ─────────────────────────────────────────────────

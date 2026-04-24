@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
@@ -557,33 +557,25 @@ function DiscoverySettings() {
         queryFn: settingsService.fetchSettings
     });
 
+    const [formChanges, setFormChanges] = useState<Record<string, string>>({});
+    
+    const form = {
+        subscription_lookback_years: settings.subscription_lookback_years || '3',
+        subscription_discovery_amount_tolerance: settings.subscription_discovery_amount_tolerance || '0.10',
+        subscription_discovery_min_transactions_generic: settings.subscription_discovery_min_transactions_generic || '3',
+        subscription_discovery_date_tolerance: settings.subscription_discovery_date_tolerance || '3.0',
+        ...formChanges
+    };
+
     const updateMutation = useMutation({
         mutationFn: settingsService.updateSettings,
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['settings'] });
             queryClient.invalidateQueries({ queryKey: ['suggestedSubscriptions'] });
+            setFormChanges({});
             setIsOpen(false);
         }
     });
-
-    const [form, setForm] = useState({
-        subscription_lookback_years: '3',
-        subscription_discovery_amount_tolerance: '0.10',
-        subscription_discovery_min_transactions_generic: '3',
-        subscription_discovery_date_tolerance: '3.0'
-    });
-
-    // Sync form when settings are loaded
-    useEffect(() => {
-        if (Object.keys(settings).length > 0) {
-            setForm({
-                subscription_lookback_years: settings.subscription_lookback_years || '3',
-                subscription_discovery_amount_tolerance: settings.subscription_discovery_amount_tolerance || '0.10',
-                subscription_discovery_min_transactions_generic: settings.subscription_discovery_min_transactions_generic || '3',
-                subscription_discovery_date_tolerance: settings.subscription_discovery_date_tolerance || '3.0'
-            });
-        }
-    }, [settings]);
 
     const handleSave = () => {
         updateMutation.mutate(form);
@@ -614,7 +606,7 @@ function DiscoverySettings() {
                                 <input 
                                     type="range" min="1" max="10" 
                                     value={form.subscription_lookback_years}
-                                    onChange={(e) => setForm({...form, subscription_lookback_years: e.target.value})}
+                                    onChange={(e) => setFormChanges({...formChanges, subscription_lookback_years: e.target.value})}
                                     className="flex-1 accent-indigo-600"
                                 />
                                 <span className="font-bold min-w-[3ch]">{form.subscription_lookback_years}y</span>
@@ -630,7 +622,7 @@ function DiscoverySettings() {
                                 <input 
                                     type="range" min="0.01" max="0.5" step="0.01"
                                     value={form.subscription_discovery_amount_tolerance}
-                                    onChange={(e) => setForm({...form, subscription_discovery_amount_tolerance: e.target.value})}
+                                    onChange={(e) => setFormChanges({...formChanges, subscription_discovery_amount_tolerance: e.target.value})}
                                     className="flex-1 accent-indigo-600"
                                 />
                                 <span className="font-bold min-w-[3ch]">{Math.round(parseFloat(form.subscription_discovery_amount_tolerance) * 100)}%</span>
@@ -646,7 +638,7 @@ function DiscoverySettings() {
                                 <input 
                                     type="range" min="2" max="6" 
                                     value={form.subscription_discovery_min_transactions_generic}
-                                    onChange={(e) => setForm({...form, subscription_discovery_min_transactions_generic: e.target.value})}
+                                    onChange={(e) => setFormChanges({...formChanges, subscription_discovery_min_transactions_generic: e.target.value})}
                                     className="flex-1 accent-indigo-600"
                                 />
                                 <span className="font-bold min-w-[3ch]">{form.subscription_discovery_min_transactions_generic}</span>
@@ -662,7 +654,7 @@ function DiscoverySettings() {
                                 <input 
                                     type="range" min="1" max="7" step="0.5"
                                     value={form.subscription_discovery_date_tolerance}
-                                    onChange={(e) => setForm({...form, subscription_discovery_date_tolerance: e.target.value})}
+                                    onChange={(e) => setFormChanges({...formChanges, subscription_discovery_date_tolerance: e.target.value})}
                                     className="flex-1 accent-indigo-600"
                                 />
                                 <span className="font-bold min-w-[3ch]">{form.subscription_discovery_date_tolerance}d</span>

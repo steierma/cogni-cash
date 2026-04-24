@@ -9,7 +9,7 @@
 // Usage (Dockerfile HEALTHCHECK):
 //
 //	HEALTHCHECK --interval=10s --timeout=5s --retries=3 \
-//	  CMD ["/app/cogni-cash-healthcheck"]
+//	  CMD ["/app/healthcheck"]
 package main
 
 import (

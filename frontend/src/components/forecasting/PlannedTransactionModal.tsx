@@ -2,7 +2,9 @@ import React, { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { X, Save } from 'lucide-react';
 import { useQuery } from '@tanstack/react-query';
+import { getLocalISODate } from '../../utils/formatters';
 import { categoryService } from '../../api/services/categoryService';
+import { bankService } from '../../api/services/bankService';
 import type { Category } from "../../api/types/category";
 import type { PlannedTransaction, CreatePlannedTransactionRequest, UpdatePlannedTransactionRequest } from "../../api/types/transaction";
 
@@ -20,7 +22,9 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
     const [date, setDate] = useState<string>('');
     const [description, setDescription] = useState<string>('');
     const [categoryId, setCategoryId] = useState<string>('');
+    const [bankAccountId, setBankAccountId] = useState<string>('');
     const [intervalMonths, setIntervalMonths] = useState<number>(0);
+    const [schedulingStrategy, setSchedulingStrategy] = useState<'fixed_day' | 'last_bank_day'>('fixed_day');
     const [endDate, setEndDate] = useState<string>('');
     const [isSaving, setIsSaving] = useState(false);
     
@@ -30,6 +34,13 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
         staleTime: 5 * 60 * 1000,
     });
 
+    const { data: connections = [] } = useQuery({
+        queryKey: ['bank-connections'],
+        queryFn: bankService.fetchConnections,
+    });
+
+    const allAccounts = connections.flatMap(c => c.accounts || []);
+
     useEffect(() => {
         if (isOpen) {
             if (initialData) {
@@ -38,15 +49,18 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                 setDate(initialData.date.split('T')[0]);
                 setDescription(initialData.description);
                 setCategoryId(initialData.category_id || '');
+                setBankAccountId(initialData.bank_account_id || '');
                 setIntervalMonths(initialData.interval_months || 0);
+                setSchedulingStrategy(initialData.scheduling_strategy || 'fixed_day');
                 setEndDate(initialData.end_date ? initialData.end_date.split('T')[0] : '');
             } else {
                 setAmount('');
                 setCurrency('EUR');
-                setDate(new Date().toISOString().split('T')[0]);
+                setDate(getLocalISODate());
                 setDescription('');
                 setCategoryId('');
                 setIntervalMonths(0);
+                setSchedulingStrategy('fixed_day');
                 setEndDate('');
             }
         }
@@ -56,16 +70,18 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
         e.preventDefault();
         setIsSaving(true);
         try {
-            const payload: any = {
+            const payload: CreatePlannedTransactionRequest | UpdatePlannedTransactionRequest = {
                 amount: parseFloat(amount),
                 currency,
                 date: new Date(date).toISOString(),
                 description,
                 category_id: categoryId || null,
+                bank_account_id: bankAccountId || null,
                 interval_months: intervalMonths,
+                scheduling_strategy: schedulingStrategy,
                 end_date: intervalMonths > 0 && endDate ? new Date(endDate).toISOString() : undefined,
             };
-            if (initialData) {
+            if (initialData && 'status' in payload) {
                 payload.status = initialData.status;
             }
             await onSave(payload);
@@ -164,17 +180,31 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                             </select>
                         </div>
                         <div>
-                            <label className={`block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 ${intervalMonths === 0 ? 'opacity-50' : ''}`}>
-                                {t('forecasting.endDate', 'End Date')}
+                            <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                                {t('forecasting.schedulingStrategy', 'Scheduling Strategy')}
                             </label>
-                            <input
-                                type="date"
-                                disabled={intervalMonths === 0}
-                                value={endDate}
-                                onChange={e => setEndDate(e.target.value)}
-                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
-                            />
+                            <select
+                                value={schedulingStrategy}
+                                onChange={e => setSchedulingStrategy(e.target.value as 'fixed_day' | 'last_bank_day')}
+                                className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white"
+                            >
+                                <option value="fixed_day">{t('forecasting.strategy_fixed_day', 'Fixed Day')}</option>
+                                <option value="last_bank_day">{t('forecasting.strategy_last_bank_day', 'Last Bank Day')}</option>
+                            </select>
                         </div>
+                    </div>
+
+                    <div>
+                        <label className={`block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 ${intervalMonths === 0 ? 'opacity-50' : ''}`}>
+                            {t('forecasting.endDate', 'End Date')}
+                        </label>
+                        <input
+                            type="date"
+                            disabled={intervalMonths === 0}
+                            value={endDate}
+                            onChange={e => setEndDate(e.target.value)}
+                            className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white disabled:opacity-50 disabled:cursor-not-allowed"
+                        />
                     </div>
 
                     <div>
@@ -189,6 +219,22 @@ export default function PlannedTransactionModal({ isOpen, onClose, onSave, initi
                             <option value="">-- {t('transactions.form.noCategory')} --</option>
                             {categories.filter(c => !c.deleted_at || c.id === categoryId).map(c => (
                                 <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    <div>
+                        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
+                            Source Bank Account
+                        </label>
+                        <select
+                            value={bankAccountId}
+                            onChange={e => setBankAccountId(e.target.value)}
+                            className="w-full px-3 py-2 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-gray-900 dark:text-white"
+                        >
+                            <option value="">-- All Accounts (Global) --</option>
+                            {allAccounts.map(acc => (
+                                <option key={acc.id} value={acc.id}>{acc.name} ({acc.iban})</option>
                             ))}
                         </select>
                     </div>

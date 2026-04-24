@@ -98,6 +98,7 @@ func (s *DiscoveryService) UpdateSubscription(ctx context.Context, sub entity.Su
 	current.CancellationURL = sub.CancellationURL
 	current.IsTrial = sub.IsTrial
 	current.Notes = sub.Notes
+	current.BankAccountID = sub.BankAccountID
 	current.UpdatedAt = time.Now()
 
 	// 3. Persist
@@ -141,8 +142,9 @@ func (s *DiscoveryService) GetSuggestedSubscriptions(ctx context.Context, userID
 	// 1. Fetch historical transactions
 	histStart := time.Now().AddDate(-lookbackYears, 0, 0)
 	history, err := s.txRepo.FindTransactions(ctx, entity.TransactionFilter{
-		UserID:   userID,
-		FromDate: &histStart,
+		UserID:        userID,
+		FromDate:      &histStart,
+		IncludeShared: true,
 	})
 	if err != nil {
 		return nil, err
@@ -236,18 +238,36 @@ func (s *DiscoveryService) GetSuggestedSubscriptions(ctx context.Context, userID
 			continue
 		}
 
-		// Filter based on feedback
-		if fb, ok := feedbackMap[normDesc]; ok {
-			if fb.Status == entity.DiscoveryStatusDeclined || fb.Status == entity.DiscoveryStatusAIRejected {
+		// Filter based on feedback (Hybrid Fuzzy Matching)
+		isRejected := false
+		for fbName, fb := range feedbackMap {
+			if fb.Status != entity.DiscoveryStatusDeclined && fb.Status != entity.DiscoveryStatusAIRejected {
 				continue
 			}
-		}
-		if normCounterparty != "" {
-			if fb, ok := feedbackMap[normCounterparty]; ok {
-				if fb.Status == entity.DiscoveryStatusDeclined || fb.Status == entity.DiscoveryStatusAIRejected {
-					continue
+
+			// Hybrid Threshold: 90% for <= 8 chars, 80% for > 8 chars
+			getThreshold := func(s1, s2 string) float64 {
+				maxLen := len(s1)
+				if len(s2) > maxLen {
+					maxLen = len(s2)
 				}
+				if maxLen <= 8 {
+					return 0.90
+				}
+				return 0.80
 			}
+
+			if calculateSimilarity(fbName, normDesc) >= getThreshold(fbName, normDesc) {
+				isRejected = true
+				break
+			}
+			if normCounterparty != "" && calculateSimilarity(fbName, normCounterparty) >= getThreshold(fbName, normCounterparty) {
+				isRejected = true
+				break
+			}
+		}
+		if isRejected {
+			continue
 		}
 
 		cycle, interval := getBillingCycle(rt.interval)
@@ -294,6 +314,7 @@ func (s *DiscoveryService) GetSuggestedSubscriptions(ctx context.Context, userID
 			MatchingHashes:   rt.matchingHashes,
 			BaseTransactions: rt.baseTransactions,
 			CategoryID:       rt.template.CategoryID,
+			BankAccountID:    rt.template.BankAccountID,
 		})
 	}
 
@@ -318,6 +339,7 @@ func (s *DiscoveryService) ApproveSubscription(ctx context.Context, userID uuid.
 		BillingCycle:    suggestion.BillingCycle,
 		BillingInterval: suggestion.BillingInterval,
 		CategoryID:      suggestion.CategoryID,
+		BankAccountID:   suggestion.BankAccountID,
 		Status:          entity.SubscriptionStatusActive,
 		LastOccurrence:  &suggestion.LastOccurrence,
 		NextOccurrence:  &suggestion.NextOccurrence,
@@ -327,7 +349,8 @@ func (s *DiscoveryService) ApproveSubscription(ctx context.Context, userID uuid.
 	// The discovery engine is strict to avoid false positives, but once a user confirms
 	// "Yes, this is a subscription", we want to link ALL historical transactions that match.
 	txns, err := s.txRepo.FindTransactions(ctx, entity.TransactionFilter{
-		UserID: userID,
+		UserID:        userID,
+		IncludeShared: true,
 	})
 	if err == nil {
 		normSub := normalizeDescription(suggestion.MerchantName)
@@ -429,6 +452,7 @@ func (s *DiscoveryService) EnrichSubscription(ctx context.Context, userID, subID
 	txns, err := s.txRepo.FindTransactions(ctx, entity.TransactionFilter{
 		UserID:         userID,
 		SubscriptionID: &subID,
+		IncludeShared:  true,
 	})
 	if err != nil {
 		s.Logger.Warn("Could not fetch linked transactions for enrichment", "error", err)
@@ -443,13 +467,19 @@ func (s *DiscoveryService) EnrichSubscription(ctx context.Context, userID, subID
 		}
 	}
 
-	// 3. Call AI to enrich
-	enrichment, err := s.llm.EnrichSubscription(ctx, userID, sub.MerchantName, descriptions)
+	// 3. Get user language
+	language, _ := s.settingsRepo.Get(ctx, "ui_language", userID)
+	if language == "" {
+		language = "DE" // Default
+	}
+
+	// 4. Call AI to enrich
+	enrichment, err := s.llm.EnrichSubscription(ctx, userID, sub.MerchantName, descriptions, language)
 	if err != nil {
 		return entity.Subscription{}, err
 	}
 
-	// 4. Update the subscription entity with new data
+	// 5. Update the subscription entity with new data
 	if enrichment.MerchantName != "" {
 		sub.MerchantName = enrichment.MerchantName
 	}
@@ -502,7 +532,8 @@ func (s *DiscoveryService) CreateSubscriptionFromTransaction(ctx context.Context
 	// We fetch ALL transactions for the user to ensure we find the one with the matching hash,
 	// even if it's already reconciled or doesn't match a search proxy.
 	txns, err := s.txRepo.FindTransactions(ctx, entity.TransactionFilter{
-		UserID: userID,
+		UserID:        userID,
+		IncludeShared: true,
 	})
 	if err != nil {
 		return entity.Subscription{}, err
@@ -538,12 +569,13 @@ func (s *DiscoveryService) CreateSubscriptionFromTransaction(ctx context.Context
 		ID:              uuid.New(),
 		UserID:          userID,
 		MerchantName:    merchant,
-		Amount:          math.Abs(sourceTx.Amount),
+		Amount:          sourceTx.Amount,
 		Currency:        sourceTx.Currency,
 		BillingCycle:    billingCycle,
 		BillingInterval: billingInterval,
 		Status:          entity.SubscriptionStatusActive,
 		CategoryID:      sourceTx.CategoryID,
+		BankAccountID:   sourceTx.BankAccountID,
 		LastOccurrence:  &sourceTx.BookingDate,
 		LinkedMandates:  []string{},
 		LinkedIbans:     []string{},
@@ -839,6 +871,70 @@ func (s *DiscoveryService) MatchTransactions(ctx context.Context, userID uuid.UU
 	return nil
 }
 
+func (s *DiscoveryService) LinkTransactions(ctx context.Context, userID, subID uuid.UUID, txnHashes []string) error {
+	if len(txnHashes) == 0 {
+		return nil
+	}
+
+	// 1. Fetch Subscription
+	sub, err := s.subRepo.GetByID(ctx, subID, userID)
+	if err != nil {
+		return err
+	}
+
+	// 2. Modify IgnoredHashes and MatchingHashes
+	ignoredMap := make(map[string]bool)
+	for _, h := range sub.IgnoredHashes {
+		ignoredMap[h] = true
+	}
+
+	matchingMap := make(map[string]bool)
+	for _, h := range sub.MatchingHashes {
+		matchingMap[h] = true
+	}
+
+	for _, hash := range txnHashes {
+		delete(ignoredMap, hash)
+		matchingMap[hash] = true
+	}
+
+	sub.IgnoredHashes = make([]string, 0, len(ignoredMap))
+	for h := range ignoredMap {
+		sub.IgnoredHashes = append(sub.IgnoredHashes, h)
+	}
+
+	sub.MatchingHashes = make([]string, 0, len(matchingMap))
+	for h := range matchingMap {
+		sub.MatchingHashes = append(sub.MatchingHashes, h)
+	}
+
+	// 3. Update Subscription
+	if _, err := s.subRepo.Update(ctx, sub); err != nil {
+		return fmt.Errorf("failed to update subscription matching hashes: %w", err)
+	}
+
+	// 4. Link All Transactions
+	for _, hash := range txnHashes {
+		if err := s.txRepo.UpdateTransactionSubscription(ctx, hash, &subID, userID); err != nil {
+			s.Logger.Warn("Failed to link transaction in batch", "hash", hash, "error", err)
+			// We continue even if one fails, but it shouldn't ideally.
+		}
+	}
+
+	// 5. Log Event
+	_ = s.subRepo.LogEvent(ctx, entity.SubscriptionEvent{
+		ID:             uuid.New(),
+		SubscriptionID: subID,
+		UserID:         userID,
+		EventType:      "transaction_linked_manually",
+		Title:          "Manual Batch Transaction Link",
+		Content:        fmt.Sprintf("%d transactions were manually linked to this subscription.", len(txnHashes)),
+		CreatedAt:      time.Now(),
+	})
+
+	return nil
+}
+
 func (s *DiscoveryService) LinkTransaction(ctx context.Context, userID, subID uuid.UUID, txnHash string) error {
 	// 1. Fetch Subscription
 	sub, err := s.subRepo.GetByID(ctx, subID, userID)
@@ -941,14 +1037,6 @@ func (s *DiscoveryService) UnlinkTransaction(ctx context.Context, userID, subID 
 	})
 
 	return nil
-}
-
-func isAmountClose(a, b, tolerancePercent float64) bool {
-	if b == 0 {
-		return math.Abs(a) < 0.01
-	}
-	diff := math.Abs(a - b)
-	return diff <= math.Abs(b)*tolerancePercent
 }
 
 // Internal helper for pattern detection

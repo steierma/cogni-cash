@@ -40,11 +40,21 @@ func (r *ReconciliationRepository) Save(ctx context.Context, rec entity.Reconcil
 	}
 	defer tx.Rollback(ctx)
 
+	// Clean up any orphaned reconciliation records (e.g., from deleted/re-imported statements)
+	// that might hold these hashes, otherwise the UNIQUE constraints will fail.
+	_, err = tx.Exec(ctx, `
+		DELETE FROM reconciliations 
+		WHERE user_id = $1 AND (settlement_transaction_hash = $2 OR target_transaction_hash = $3)`,
+		rec.UserID, rec.SettlementTransactionHash, rec.TargetTransactionHash,
+	)
+	if err != nil {
+		return entity.Reconciliation{}, fmt.Errorf("reconciliation repo: cleanup orphaned: %w", err)
+	}
+
 	_, err = tx.Exec(ctx, `
 		INSERT INTO reconciliations
 			(id, user_id, settlement_transaction_hash, target_transaction_hash, amount, reconciled_at)
-		VALUES ($1, $2, $3, $4, $5, $6)`,
-		rec.ID,
+		VALUES ($1, $2, $3, $4, $5, $6)`,		rec.ID,
 		rec.UserID,
 		rec.SettlementTransactionHash,
 		rec.TargetTransactionHash,

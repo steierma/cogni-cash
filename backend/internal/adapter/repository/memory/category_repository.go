@@ -20,9 +20,48 @@ type CategoryRepository struct {
 }
 
 func NewCategoryRepository() *CategoryRepository {
-	return &CategoryRepository{
+	r := &CategoryRepository{
 		categories: make(map[uuid.UUID]entity.Category),
 		order:      make([]uuid.UUID, 0, maxCategories),
+	}
+	r.seedData()
+	return r
+}
+
+func (r *CategoryRepository) seedData() {
+	userID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+	cats := []struct {
+		Name  string
+		Color string
+		IsVar bool
+	}{
+		{"Groceries", "#10b981", true},
+		{"Rent", "#3b82f6", false},
+		{"Utilities", "#f59e0b", false},
+		{"Transport", "#6366f1", true},
+		{"Entertainment", "#ec4899", true},
+		{"Salary", "#22c55e", false},
+		{"Bonus", "#84cc16", false},
+		{"Insurance", "#8b5cf6", false},
+		{"Taxes", "#ef4444", false},
+		{"Savings", "#14b8a6", false},
+		{"Dining Out", "#f43f5e", true},
+		{"Subscriptions", "#a855f7", false},
+	}
+
+	for _, c := range cats {
+		id := uuid.New()
+		cat := entity.Category{
+			ID:                 id,
+			UserID:             userID,
+			Name:               c.Name,
+			Color:              c.Color,
+			IsVariableSpending: c.IsVar,
+			OwnerID:            userID,
+			CreatedAt:          time.Now().Add(-365 * 24 * time.Hour),
+		}
+		r.categories[id] = cat
+		r.order = append(r.order, id)
 	}
 }
 

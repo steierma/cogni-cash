@@ -7,7 +7,7 @@ export interface Document {
     file_name: string;
     content_hash: string;
     mime_type: string;
-    metadata: Record<string, any>;
+    metadata: Record<string, unknown>;
     created_at: string;
     // UI temporary fields
     document_date?: string;

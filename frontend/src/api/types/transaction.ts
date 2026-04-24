@@ -71,12 +71,6 @@ export interface PredictedTransaction extends Transaction {
     probability: number;
 }
 
-export interface PatternExclusion {
-    id: string;
-    user_id: string;
-    match_term: string;
-    created_at: string;
-}
 
 export interface CashFlowForecast {
     current_balance: number;
@@ -95,11 +89,14 @@ export interface PlannedTransaction {
     date: string;
     description: string;
     category_id: string;
+    bank_account_id?: string | null;
     status: 'pending' | 'matched' | 'expired';
     matched_transaction_id?: string;
     interval_months: number;
+    scheduling_strategy: 'fixed_day' | 'last_bank_day';
     end_date?: string;
     is_superseded: boolean;
+    is_shared: boolean;
     created_at: string;
 }
 
@@ -109,7 +106,9 @@ export interface CreatePlannedTransactionRequest {
     date: string;
     description: string;
     category_id: string | null;
+    bank_account_id?: string | null;
     interval_months?: number;
+    scheduling_strategy?: 'fixed_day' | 'last_bank_day';
     end_date?: string;
 }
 
@@ -118,7 +117,9 @@ export interface UpdatePlannedTransactionRequest {
     date?: string;
     description?: string;
     category_id?: string | null;
+    bank_account_id?: string | null;
     interval_months?: number;
+    scheduling_strategy?: 'fixed_day' | 'last_bank_day';
     end_date?: string;
     status?: 'pending' | 'matched' | 'expired';
 }

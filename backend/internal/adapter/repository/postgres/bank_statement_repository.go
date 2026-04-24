@@ -50,12 +50,12 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 		INSERT INTO bank_statements
 			(id, user_id, account_holder, iban,
 			 statement_date, statement_no,
-			 old_balance, new_balance, currency, original_file, content_hash, statement_type)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)`,
+			 old_balance, new_balance, currency, original_file, content_hash, statement_type, bank_account_id)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, $13)`,
 		stmtID, stmt.UserID, stmt.AccountHolder, stmt.IBAN,
 		statementDate, stmt.StatementNo, stmt.OldBalance, stmt.NewBalance,
 		stmt.Currency, stmt.OriginalFile, stmt.ContentHash,
-		string(stmt.StatementType),
+		string(stmt.StatementType), stmt.BankAccountID,
 	)
 	if err != nil {
 		if isDuplicateHashError(err) {
@@ -74,20 +74,22 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 
 		batch.Queue(`
 			INSERT INTO transactions
-			        (id, user_id, bank_statement_id, booking_date, valuta_date,
+			        (id, user_id, bank_statement_id, bank_account_id, booking_date, valuta_date,
 			         description, location, amount, currency, base_amount, base_currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
-			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, skip_forecasting, is_payslip_verified, subscription_id)
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, is_payslip_verified, subscription_id)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21, $22, $23, $24)
-			ON CONFLICT (content_hash, user_id) 
+			ON CONFLICT (content_hash, user_id)
 			DO UPDATE SET
 				counterparty_name = EXCLUDED.counterparty_name,
 				counterparty_iban = EXCLUDED.counterparty_iban,
 				bank_transaction_code = EXCLUDED.bank_transaction_code,
 				mandate_reference = EXCLUDED.mandate_reference,
+				bank_account_id = COALESCE(transactions.bank_account_id, EXCLUDED.bank_account_id),
 				location = COALESCE(transactions.location, EXCLUDED.location)`,
 			uuid.New(),
 			stmt.UserID,
 			stmtID,
+			stmt.BankAccountID,
 			t.BookingDate,
 			t.ValutaDate,
 			t.Description,
@@ -106,7 +108,6 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			t.CounterpartyIban,
 			t.BankTransactionCode,
 			t.MandateReference,
-			t.SkipForecasting,
 			t.IsPayslipVerified,
 			t.SubscriptionID,
 		)
@@ -143,7 +144,7 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			INSERT INTO transactions
 			        (id, user_id, bank_account_id, booking_date, valuta_date,
 			         description, location, amount, currency, base_amount, base_currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
-			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, skip_forecasting, is_payslip_verified, subscription_id)
+			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, is_payslip_verified, subscription_id)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21, $22, $23, $24)
 			ON CONFLICT (content_hash, user_id) 
 			DO UPDATE SET
@@ -173,7 +174,6 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			t.CounterpartyIban,
 			t.BankTransactionCode,
 			t.MandateReference,
-			t.SkipForecasting,
 			t.IsPayslipVerified,
 			t.SubscriptionID,
 		)
@@ -194,10 +194,10 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 	r.Logger.Info("FindTransactions started", "user_id", filter.UserID, "include_shared", filter.IncludeShared, "cat_id", filter.CategoryID)
 
 	query := `
-	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
+	        SELECT t.id, t.user_id, t.bank_account_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
 	               t.currency, t.base_amount, t.base_currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.skip_forecasting, t.is_payslip_verified,
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.is_payslip_verified,
 	               (t.user_id != $1) as is_shared,
 	               t.user_id as owner_id,
 	               t.subscription_id
@@ -205,8 +205,10 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id`
 
 	if filter.IncludeShared {
-		// Include my transactions OR transactions in categories shared WITH me
-		query += ` WHERE (t.user_id = $1 OR t.category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $1))`
+		// Include my transactions OR transactions in categories shared WITH me OR bank accounts shared WITH me
+		query += ` WHERE (t.user_id = $1 
+		   OR t.category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $1)
+		   OR t.bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $1))`
 	} else {
 		// Only my transactions
 		query += ` WHERE t.user_id = $1`
@@ -308,16 +310,16 @@ func (r *BankStatementRepository) FindTransactions(ctx context.Context, filter e
 
 func (r *BankStatementRepository) loadTransactions(ctx context.Context, stmtID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error) {
 	rows, err := r.pool.Query(ctx, `
-	        SELECT t.id, t.user_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
+	        SELECT t.id, t.user_id, t.bank_account_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
 	               t.currency, t.base_amount, t.base_currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
 	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
-	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.skip_forecasting, t.is_payslip_verified,
-	               (EXISTS(SELECT 1 FROM shared_categories WHERE category_id = t.category_id)) as is_shared,
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.is_payslip_verified,
+	               (t.user_id != $2 OR EXISTS(SELECT 1 FROM shared_categories WHERE category_id = t.category_id AND shared_with_user_id = $2) OR EXISTS(SELECT 1 FROM shared_bank_accounts WHERE bank_account_id = t.bank_account_id AND shared_with_user_id = $2)) as is_shared,
 	               t.user_id as owner_id,
 	               t.subscription_id
 	        FROM transactions t		JOIN bank_statements b ON t.bank_statement_id = b.id
 		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
-		WHERE t.bank_statement_id = $1 AND t.user_id = $2
+		WHERE t.bank_statement_id = $1 AND (t.user_id = $2 OR t.bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $2))
 		ORDER BY t.booking_date DESC, t.id`, stmtID, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: load transactions: %w", err)
@@ -345,6 +347,7 @@ func scanTransaction(row scanner) (entity.Transaction, error) {
 	if err := row.Scan(
 		&t.ID,
 		&t.UserID,
+		&t.BankAccountID,
 		&t.BookingDate,
 		&t.ValutaDate,
 		&desc,
@@ -365,7 +368,6 @@ func scanTransaction(row scanner) (entity.Transaction, error) {
 		&cpIban,
 		&bankTxCode,
 		&mandateRef,
-		&t.SkipForecasting,
 		&t.IsPayslipVerified,
 		&t.IsShared,
 		&t.OwnerID,
@@ -422,8 +424,9 @@ func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID, us
 	row := r.pool.QueryRow(ctx, `
 		SELECT id, user_id, account_holder, iban,
 		       statement_date, statement_no,
-		       old_balance, new_balance, currency, original_file, imported_at, statement_type
-		FROM bank_statements WHERE id = $1 AND user_id = $2`, id, userID)
+		       old_balance, new_balance, currency, original_file, imported_at, statement_type, bank_account_id
+		FROM bank_statements 
+		WHERE id = $1 AND (user_id = $2 OR bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $2))`, id, userID)
 
 	stmt, err := scanStatement(row)
 	if err != nil {
@@ -441,9 +444,9 @@ func (r *BankStatementRepository) FindAll(ctx context.Context, userID uuid.UUID)
 	rows, err := r.pool.Query(ctx, `
 		SELECT id, user_id, account_holder, iban,
 		       statement_date, statement_no,
-		       old_balance, new_balance, currency, NULL::bytea as original_file, imported_at, statement_type
+		       old_balance, new_balance, currency, NULL::bytea as original_file, imported_at, statement_type, bank_account_id
 		FROM bank_statements
-		WHERE user_id = $1
+		WHERE user_id = $1 OR bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $1)
 		ORDER BY statement_date DESC NULLS LAST, imported_at DESC`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank_statement repo: find all: %w", err)
@@ -487,7 +490,7 @@ func (r *BankStatementRepository) FindSummaries(ctx context.Context, userID uuid
 			(bs.original_file IS NOT NULL AND length(bs.original_file) > 0) AS has_original_file
 		FROM bank_statements bs
 		LEFT JOIN transactions t ON t.bank_statement_id = bs.id
-		WHERE bs.user_id = $1
+		WHERE bs.user_id = $1 OR bs.bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $1)
 		GROUP BY bs.id
 		ORDER BY end_date DESC NULLS LAST, bs.statement_date DESC
 	`, userID)
@@ -705,6 +708,27 @@ func (r *BankStatementRepository) MarkTransactionReviewed(ctx context.Context, c
 	return nil
 }
 
+func (r *BankStatementRepository) MarkTransactionsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	
+	// Convert slice of strings to postgres array format or rely on ANY
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE transactions
+		SET reviewed = true
+		WHERE content_hash = ANY($1) AND user_id = $2`,
+		hashes, userID)
+	if err != nil {
+		return fmt.Errorf("bank_statement repo: bulk mark reviewed: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		// Just log or ignore if none were found
+		return nil
+	}
+	return nil
+}
+
 func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context, contentHash string, reconciliationID uuid.UUID, userID uuid.UUID) error {
 	tag, err := r.pool.Exec(ctx, `
 		UPDATE transactions
@@ -720,12 +744,6 @@ func (r *BankStatementRepository) MarkTransactionReconciled(ctx context.Context,
 	return nil
 }
 
-func (r *BankStatementRepository) UpdateTransactionSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
-	_, err := r.pool.Exec(ctx, `
-		UPDATE transactions SET skip_forecasting = $1
-		WHERE content_hash = $2 AND user_id = $3`, skip, hash, userID)
-	return err
-}
 
 func (r *BankStatementRepository) UpdateTransactionBaseAmount(ctx context.Context, hash string, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
 	_, err := r.pool.Exec(ctx, `
@@ -748,6 +766,66 @@ func (r *BankStatementRepository) LinkTransactionToStatement(ctx context.Context
 		return fmt.Errorf("bank_statement repo: transaction not found for linking: %s", id)
 	}
 	return nil
+}
+
+func (r *BankStatementRepository) UpdateStatementAccount(ctx context.Context, statementID uuid.UUID, bankAccountID *uuid.UUID, userID uuid.UUID) error {
+	tx, err := r.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	// 1. Update the statement itself
+	_, err = tx.Exec(ctx, `
+		UPDATE bank_statements
+		SET bank_account_id = $1
+		WHERE id = $2 AND user_id = $3`,
+		bankAccountID, statementID, userID)
+	if err != nil {
+		return fmt.Errorf("bank_statement repo: update statement account: %w", err)
+	}
+
+	// 2. Cascade to all transactions belonging to this statement
+	_, err = tx.Exec(ctx, `
+		UPDATE transactions
+		SET bank_account_id = $1
+		WHERE bank_statement_id = $2 AND user_id = $3`,
+		bankAccountID, statementID, userID)
+	if err != nil {
+		return fmt.Errorf("bank_statement repo: cascade statement account to transactions: %w", err)
+	}
+
+	return tx.Commit(ctx)
+}
+
+func (r *BankStatementRepository) GetTransactionsByAccountID(ctx context.Context, bankAccountID uuid.UUID, userID uuid.UUID) ([]entity.Transaction, error) {
+	rows, err := r.pool.Query(ctx, `
+	        SELECT t.id, t.user_id, t.bank_account_id, t.booking_date, t.valuta_date, t.description, t.location, t.amount,
+	               t.currency, t.base_amount, t.base_currency, t.transaction_type, t.reference, t.category_id, t.content_hash,
+	               t.is_reconciled, t.reconciliation_id, COALESCE(ba.account_type, t.statement_type, b.statement_type, 'giro'),
+	               t.reviewed, t.counterparty_name, t.counterparty_iban, t.bank_transaction_code, t.mandate_reference, t.is_payslip_verified,
+	               (t.user_id != $2) as is_shared,
+	               t.user_id as owner_id,
+	               t.subscription_id
+	        FROM transactions t
+		LEFT JOIN bank_statements b ON t.bank_statement_id = b.id
+		LEFT JOIN bank_accounts ba ON t.bank_account_id = ba.id
+		WHERE t.bank_account_id = $1 AND (t.user_id = $2 OR t.bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $2))
+		ORDER BY t.booking_date DESC, t.id`, bankAccountID, userID)
+	if err != nil {
+		return nil, fmt.Errorf("bank_statement repo: get transactions by account: %w", err)
+	}
+	defer rows.Close()
+
+	var txns []entity.Transaction
+	for rows.Next() {
+		t, err := scanTransaction(rows)
+		if err != nil {
+			return nil, err
+		}
+		txns = append(txns, t)
+	}
+	return txns, rows.Err()
 }
 
 func (r *BankStatementRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
@@ -789,6 +867,7 @@ func scanStatement(row scanner) (entity.BankStatement, error) {
 		&originalFile,
 		&s.ImportedAt,
 		&stmtType,
+		&s.BankAccountID,
 	)
 	if err != nil {
 		return entity.BankStatement{}, err

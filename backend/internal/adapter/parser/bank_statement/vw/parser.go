@@ -1,9 +1,7 @@
 package vw
 
 import (
-	"bytes"
 	"context"
-	"encoding/csv"
 	"errors"
 	"fmt"
 	"regexp"
@@ -26,15 +24,10 @@ func NewParser() *Parser {
 }
 
 func (p *Parser) Parse(ctx context.Context, _ uuid.UUID, fileBytes []byte) (entity.BankStatement, error) {
-	// 1. Try CSV Sniff
-	if isCSV(fileBytes) {
-		return p.parseCSV(fileBytes)
-	}
-
-	// 2. Otherwise try PDF
+	// Try PDF extraction
 	rawText, err := pdfutil.ExtractText(fileBytes)
 	if err != nil {
-		// If it's not a PDF, it's definitely not a VW PDF. Return FormatMismatch so the chain continues.
+		// If it's not a PDF, return FormatMismatch so the chain continues.
 		if strings.Contains(err.Error(), "not a PDF file") {
 			return entity.BankStatement{}, ErrFormatMismatch
 		}
@@ -73,138 +66,6 @@ func (p *Parser) Parse(ctx context.Context, _ uuid.UUID, fileBytes []byte) (enti
 	stmt.Transactions = parseTransactions(rawText)
 
 	return stmt, nil
-}
-
-func isCSV(fileBytes []byte) bool {
-	// Sniff for "Kontoinhaber" or "Plus Konto online" in a CSV-like structure
-	head := string(fileBytes[:min(500, len(fileBytes))])
-	return strings.Contains(head, "Kontoinhaber;") || strings.Contains(head, "Plus Konto online Nr.")
-}
-
-func (p *Parser) parseCSV(fileBytes []byte) (entity.BankStatement, error) {
-	r := csv.NewReader(bytes.NewReader(fileBytes))
-	r.Comma = ';'
-	r.LazyQuotes = true
-	r.FieldsPerRecord = -1
-
-	records, err := r.ReadAll()
-	if err != nil {
-		return entity.BankStatement{}, fmt.Errorf("vw parser: failed to read csv: %w", err)
-	}
-
-	if len(records) == 0 {
-		return entity.BankStatement{}, ErrFormatMismatch
-	}
-
-	stmt := entity.BankStatement{
-		StatementType: entity.StatementTypeGiro,
-		Currency:      "EUR",
-	}
-
-	var newestDate time.Time
-
-	for i, row := range records {
-		if len(row) == 0 {
-			continue
-		}
-
-		// Metadata sniffing: check all cells in row for keywords
-		for _, cell := range row {
-			if strings.Contains(cell, "Plus Konto online Nr.") {
-				stmt.StatementType = entity.StatementTypeExtraAccount
-				parts := strings.Split(cell, "Nr.")
-				if len(parts) > 1 {
-					stmt.IBAN = strings.TrimSpace(parts[1])
-				}
-			}
-		}
-
-		if len(row) > 1 && row[0] == "Saldo (EUR)" {
-			stmt.NewBalance, _ = parseGermanFloat(row[1])
-		} else if len(row) > 1 && row[0] == "Zeitraum" {
-			// e.g. "01.03.2026 - 04.04.2026"
-			parts := strings.Split(row[1], "-")
-			if len(parts) > 1 {
-				// We'll use the end date as the statement date
-				stmt.StatementDate, _ = time.Parse("02.01.2006", strings.TrimSpace(parts[1]))
-			}
-		}
-
-		// Header detection for transactions
-		if row[0] == "Nr." && len(row) >= 12 && row[1] == "Buchungsdatum" {
-			// Process transactions from the next row
-			for j := i + 1; j < len(records); j++ {
-				txRow := records[j]
-				if len(txRow) < 12 || txRow[1] == "" {
-					continue
-				}
-
-				bookingDate, _ := time.Parse("02.01.2006", txRow[1])
-				valutaDate, _ := time.Parse("02.01.2006", txRow[9])
-				if valutaDate.IsZero() {
-					valutaDate = bookingDate
-				}
-
-				// Amount handling: VW CSV has Soll and Haben columns
-				// Soll (EUR) is in column 10, Haben (EUR) is in column 11
-				var amount float64
-				if txRow[10] != "" {
-					soll, _ := parseGermanFloat(txRow[10])
-					amount = -soll
-				} else if txRow[11] != "" {
-					haben, _ := parseGermanFloat(txRow[11])
-					amount = haben
-				}
-
-				tx := entity.Transaction{
-					BookingDate: bookingDate,
-					ValutaDate:  valutaDate,
-					Description: strings.TrimSpace(txRow[3]),
-					Amount:      amount,
-					Currency:    "EUR",
-					Type:        entity.TransactionTypeCredit,
-				}
-				if amount < 0 {
-					tx.Type = entity.TransactionTypeDebit
-				}
-
-				stmt.Transactions = append(stmt.Transactions, tx)
-
-				if bookingDate.After(newestDate) {
-					newestDate = bookingDate
-				}
-			}
-			break
-		}
-	}
-
-	if stmt.StatementDate.IsZero() && !newestDate.IsZero() {
-		stmt.StatementDate = newestDate
-	}
-
-	// Final fallback for IBAN if not found yet
-	if stmt.IBAN == "" {
-		for _, row := range records {
-			for _, cell := range row {
-				if strings.Contains(cell, "Nr. ") {
-					parts := strings.Split(cell, "Nr.")
-					if len(parts) > 1 {
-						stmt.IBAN = strings.TrimSpace(parts[1])
-						break
-					}
-				}
-			}
-		}
-	}
-
-	return stmt, nil
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }
 
 func parseTransactions(text string) []entity.Transaction {

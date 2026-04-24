@@ -9,11 +9,11 @@ services:
 
   migrate:
     pull_policy: never
-    image: cogni-cash-backend:latest
+    image: backend:latest
 
   backend:
     pull_policy: if_not_present
-    image: cogni-cash-backend:latest
+    image: backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -27,7 +27,7 @@ services:
 
   frontend:
     pull_policy: if_not_present
-    image: cogni-cash-frontend:latest
+    image: frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile

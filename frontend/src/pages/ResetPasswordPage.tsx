@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import { KeyRound, CheckCircle2, AlertCircle, Eye, EyeOff } from 'lucide-react';
+import axios from 'axios';
 import { authService } from '../api/services/authService';
 
 const ResetPasswordPage = () => {
@@ -30,7 +31,7 @@ const ResetPasswordPage = () => {
             try {
                 const res = await authService.validateResetToken(token);
                 setIsTokenValid(res.valid);
-            } catch (err) {
+            } catch {
                 setIsTokenValid(false);
             } finally {
                 setIsValidating(false);
@@ -52,8 +53,12 @@ const ResetPasswordPage = () => {
             if (!token) throw new Error('Missing token');
             await authService.confirmPasswordReset(token, newPassword);
             setSuccess(true);
-        } catch (err: any) {
-            setError(err.response?.data?.error || 'Failed to reset password.');
+        } catch (err: unknown) {
+            if (axios.isAxiosError(err)) {
+                setError(err.response?.data?.error || 'Failed to reset password.');
+            } else {
+                setError('Failed to reset password.');
+            }
         } finally {
             setLoading(false);
         }

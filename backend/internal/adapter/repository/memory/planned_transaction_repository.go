@@ -3,8 +3,10 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"cogni-cash/internal/domain/entity"
+
 	"github.com/google/uuid"
 )
 
@@ -17,10 +19,55 @@ type PlannedTransactionRepository struct {
 }
 
 func NewPlannedTransactionRepository() *PlannedTransactionRepository {
-	return &PlannedTransactionRepository{
+	r := &PlannedTransactionRepository{
 		data:  make(map[uuid.UUID]entity.PlannedTransaction),
 		order: make([]uuid.UUID, 0, maxPlannedTransactions),
 	}
+	r.seedData()
+	return r
+}
+
+func (r *PlannedTransactionRepository) seedData() {
+	userID := uuid.MustParse("12345678-1234-1234-1234-123456789012")
+	now := time.Now()
+
+	// 1. Annual Car Insurance
+	carInsID := uuid.New()
+	carIns := entity.PlannedTransaction{
+		ID:             carInsID,
+		UserID:         userID,
+		Amount:         850.00,
+		Currency:       "EUR",
+		BaseAmount:     850.00,
+		BaseCurrency:   "EUR",
+		Date:           time.Date(now.Year(), time.November, 15, 0, 0, 0, 0, time.UTC),
+		Description:    "Annual Car Insurance (Allianz)",
+		Status:         entity.PlannedTransactionStatusPending,
+		IntervalMonths: 12,
+		CreatedAt:      now.Add(-30 * 24 * time.Hour),
+	}
+
+	// 2. Upcoming Vacation Booking
+	vacationID := uuid.New()
+	vacation := entity.PlannedTransaction{
+		ID:             vacationID,
+		UserID:         userID,
+		Amount:         1500.00,
+		Currency:       "EUR",
+		BaseAmount:     1500.00,
+		BaseCurrency:   "EUR",
+		Date:           now.Add(45 * 24 * time.Hour), // 45 days in the future
+		Description:    "Summer Vacation Flights & Hotel",
+		Status:         entity.PlannedTransactionStatusPending,
+		IntervalMonths: 0, // One-off
+		CreatedAt:      now.Add(-5 * 24 * time.Hour),
+	}
+
+	r.data[carInsID] = carIns
+	r.order = append(r.order, carInsID)
+
+	r.data[vacationID] = vacation
+	r.order = append(r.order, vacationID)
 }
 
 func (r *PlannedTransactionRepository) Create(ctx context.Context, pt *entity.PlannedTransaction) error {
@@ -51,9 +98,10 @@ func (r *PlannedTransactionRepository) GetByID(ctx context.Context, id uuid.UUID
 	if !ok {
 		return nil, entity.ErrPlannedTransactionNotFound
 	}
-	if pt.UserID != userID {
-		return nil, entity.ErrPlannedTransactionNotFound
-	}
+	
+	pt.IsShared = pt.UserID != userID
+	pt.OwnerID = pt.UserID
+
 	return &pt, nil
 }
 
@@ -75,12 +123,11 @@ func (r *PlannedTransactionRepository) Delete(ctx context.Context, id uuid.UUID,
 		return entity.ErrPlannedTransactionNotFound
 	}
 	if pt.UserID != userID {
-		return entity.ErrPlannedTransactionNotFound // simulating Not Found or Forbidden
+		return entity.ErrPlannedTransactionNotFound
 	}
 
 	delete(r.data, id)
 
-	// Remove from order tracking
 	for i, k := range r.order {
 		if k == id {
 			r.order = append(r.order[:i], r.order[i+1:]...)
@@ -97,9 +144,9 @@ func (r *PlannedTransactionRepository) FindByUserID(ctx context.Context, userID 
 	var pts []entity.PlannedTransaction
 	for _, id := range r.order {
 		pt := r.data[id]
-		if pt.UserID == userID {
-			pts = append(pts, pt)
-		}
+		pt.IsShared = pt.UserID != userID
+		pt.OwnerID = pt.UserID
+		pts = append(pts, pt)
 	}
 	return pts, nil
 }
@@ -110,7 +157,9 @@ func (r *PlannedTransactionRepository) FindPendingByUserID(ctx context.Context, 
 	var pts []entity.PlannedTransaction
 	for _, id := range r.order {
 		pt := r.data[id]
-		if pt.UserID == userID && pt.Status == entity.PlannedTransactionStatusPending {
+		if pt.Status == entity.PlannedTransactionStatusPending {
+			pt.IsShared = pt.UserID != userID
+			pt.OwnerID = pt.UserID
 			pts = append(pts, pt)
 		}
 	}

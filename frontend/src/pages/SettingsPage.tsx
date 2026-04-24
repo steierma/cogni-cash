@@ -1,6 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
+import axios from 'axios';
+import type { TFunction } from 'i18next';
 import {
     KeyRound, CheckCircle2, AlertCircle, Settings, Server, Database,
     Save, Palette, Globe, ChevronDown, ChevronRight, MessageSquareCode,
@@ -127,7 +129,7 @@ JSON Schema:
 Draft the letter in the requested language ({{LANGUAGE}}).`;
 
 // Helper component for the expandable prompt accordions
-const LogLevelControl = ({ t }: { t: any }) => {
+const LogLevelControl = ({ t }: { t: TFunction }) => {
     const queryClient = useQueryClient();
     const { data: logData, isLoading, error } = useQuery({
         queryKey: ['logLevel'],
@@ -148,7 +150,7 @@ const LogLevelControl = ({ t }: { t: any }) => {
         return (
             <div className="flex items-center gap-1 text-[10px] text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-md border border-red-100 dark:border-red-900/50">
                 <AlertCircle size={10} />
-                Err: {(error as any).response?.status || 'API'}
+                Err: {axios.isAxiosError(error) ? (error.response?.status || 'API') : 'API'}
             </div>
         );
     }
@@ -180,7 +182,16 @@ const LogLevelControl = ({ t }: { t: any }) => {
     );
 };
 
-const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t }: any) => {
+interface PromptAccordionProps {
+    title: string;
+    settingKey: string;
+    defaultPrompt: string;
+    value: string;
+    onChange: (key: string, val: string) => void;
+    t: TFunction;
+}
+
+const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t }: PromptAccordionProps) => {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
@@ -232,7 +243,14 @@ export default function SettingsPage() {
 
     const isAdmin = currentUser?.role === 'admin';
 
-    const [settingsParams, setSettingsParams] = useState<Record<string, string>>({});
+    const { data: currentSettings } = useQuery({
+        queryKey: ['settings'],
+        queryFn: () => settingsService.fetchSettings(),
+    });
+
+    const [settingsChanges, setSettingsChanges] = useState<Record<string, string>>({});
+    const settingsParams = { ...currentSettings, ...settingsChanges };
+
     const [settingsSuccess, setSettingsSuccess] = useState(false);
     const [settingsError, setSettingsError] = useState('');
 
@@ -251,27 +269,18 @@ export default function SettingsPage() {
         enabled: isAdmin, // Only fetch system info for admins
     });
 
-    const { data: currentSettings, isSuccess: settingsLoaded } = useQuery({
-        queryKey: ['settings'],
-        queryFn: () => settingsService.fetchSettings(),
-    });
-
-    useEffect(() => {
-        if (settingsLoaded && currentSettings) {
-            setSettingsParams(currentSettings);
-        }
-    }, [currentSettings, settingsLoaded]);
-
     const settingsMut = useMutation({
         mutationFn: () => settingsService.updateSettings(settingsParams),
         onSuccess: () => {
             setSettingsSuccess(true);
             setSettingsError('');
+            setSettingsChanges({});
             queryClient.invalidateQueries({ queryKey: ['settings'] });
             setTimeout(() => setSettingsSuccess(false), 3000);
         },
-        onError: (err: any) => {
-            setSettingsError(err.response?.data?.error || 'Failed to save settings.');
+        onError: (err: unknown) => {
+            const msg = axios.isAxiosError(err) ? (err.response?.data?.error || t('settings.errorSave')) : t('settings.errorSave');
+            setSettingsError(msg);
             setSettingsSuccess(false);
         }
     });
@@ -283,8 +292,9 @@ export default function SettingsPage() {
             setTestEmailError('');
             setTimeout(() => setTestEmailSuccess(false), 5000);
         },
-        onError: (err: any) => {
-            setTestEmailError(err.response?.data?.error || 'Failed to send test email.');
+        onError: (err: unknown) => {
+            const msg = axios.isAxiosError(err) ? (err.response?.data?.error || t('settings.errorSendTest')) : t('settings.errorSendTest');
+            setTestEmailError(msg);
             setTestEmailSuccess(false);
         }
     });
@@ -297,13 +307,14 @@ export default function SettingsPage() {
             setConfirmPassword('');
             setPwdErrorMsg('');
         },
-        onError: (err: any) => {
-            setPwdErrorMsg(err.response?.data?.error || 'Failed to change password.');
+        onError: (err: unknown) => {
+            const msg = axios.isAxiosError(err) ? (err.response?.data?.error || t('settings.errorChangePwd')) : t('settings.errorChangePwd');
+            setPwdErrorMsg(msg);
         }
     });
 
     const handleSettingChange = (key: string, value: string) => {
-        setSettingsParams(prev => ({ ...prev, [key]: value }));
+        setSettingsChanges(prev => ({ ...prev, [key]: value }));
     };
 
     const handleSettingsSubmit = (e: React.FormEvent) => {

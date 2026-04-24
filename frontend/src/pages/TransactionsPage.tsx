@@ -16,7 +16,7 @@ import { transactionService } from '../api/services/transactionService';
 import { subscriptionService } from '../api/services/subscriptionService';
 import type { BankStatementSummary } from "../api/types/bank";
 import type { Category } from "../api/types/category";
-import type { JobState, Transaction, PatternExclusion } from "../api/types/transaction";
+import type { JobState, Transaction } from "../api/types/transaction";
 import type { Subscription } from "../api/types/subscription";
 import type { User } from "../api/types/system";
 import { fmtCurrency, fmtDate } from '../utils/formatters';
@@ -55,7 +55,7 @@ export default function TransactionsPage() {
 
     const initialFilters: FilterState = {
         search: getParam('search'),
-        type: getParam('type', 'all') as any,
+        type: getParam('type', 'all') as FilterState['type'],
         statement: getParam('statement'),
         category: getParam('category', 'all'),
         from: searchParams.get('from'),
@@ -92,6 +92,7 @@ export default function TransactionsPage() {
     const [includePredictions, setIncludePredictions] = React.useState(getParam('predictions', 'false') === 'true');
     const [subModalTx, setSubModalTx] = React.useState<Transaction | null>(null);
     const [linkModalTx, setLinkModalTx] = React.useState<Transaction | null>(null);
+    const [searchSimilarTx, setSearchSimilarTx] = React.useState<Transaction | null>(null);
     const [topHitsCount, setTopHitsCount] = React.useState<number>(3);
     const [toastMessage, setToastMessage] = React.useState<string | null>(null);
 
@@ -144,36 +145,24 @@ export default function TransactionsPage() {
         refetchInterval: (query) => query.state?.data?.is_running ? 1500 : false,
     });
 
-    const { data: patternExclusions = [] } = useQuery<PatternExclusion[]>({
-        queryKey: ['pattern-exclusions'],
-        queryFn: () => transactionService.fetchPatternExclusions(),
+
+    const { data: similarTxns = [], isLoading: isLoadingSimilar } = useQuery<Transaction[]>({
+        queryKey: ['transactions', 'similar', searchSimilarTx?.description],
+        queryFn: () => transactionService.fetchTransactions(
+            undefined, // all statements
+            false, // show reconciled
+            undefined, // all categories
+            undefined, // all review status
+            searchSimilarTx?.description,
+            false, // no predictions
+            true // include shared
+        ),
+        enabled: !!searchSimilarTx,
     });
 
     const { data: me } = useQuery<User>({
         queryKey: ['me'],
         queryFn: () => authService.fetchMe(),
-    });
-
-    const linkMutation = useMutation({
-        mutationFn: ({ subID, txnHash }: { subID: string, txnHash: string }) => 
-            subscriptionService.linkTransaction(subID, txnHash),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ['transactions'] });
-            qc.invalidateQueries({ queryKey: ['subscriptions'] });
-            setToastMessage("Linked successfully!");
-            setTimeout(() => setToastMessage(null), 3000);
-        }
-    });
-
-    const unlinkMutation = useMutation({
-        mutationFn: (tx: Transaction) => 
-            subscriptionService.unlinkTransaction(tx.subscription_id!, tx.content_hash),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ['transactions'] });
-            qc.invalidateQueries({ queryKey: ['subscriptions'] });
-            setToastMessage("Unlinked successfully!");
-            setTimeout(() => setToastMessage(null), 3000);
-        }
     });
 
     const updateSettingsMut = useMutation({
@@ -189,30 +178,36 @@ export default function TransactionsPage() {
         },
     });
 
-    const excludePatternMutation = useMutation({
-        mutationFn: (matchTerm: string) => transactionService.excludePattern(matchTerm),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ['pattern-exclusions'] });
-            qc.invalidateQueries({ queryKey: ['forecast'] });
-        },
-    });
-
-    const includePatternMutation = useMutation({
-        mutationFn: (matchTerm: string) => transactionService.includePattern(matchTerm),
-        onSuccess: () => {
-            qc.invalidateQueries({ queryKey: ['pattern-exclusions'] });
-            qc.invalidateQueries({ queryKey: ['forecast'] });
-        },
-    });
 
     const batchMarkReviewedMutation = useMutation({
-        mutationFn: async (hashes: string[]) => {
-            await Promise.all(hashes.map(hash => transactionService.markReviewed(hash)));
-        },
+        mutationFn: (hashes: string[]) => transactionService.markReviewedBulk(hashes),
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['analytics'] });
             setSelectedHashes(new Set());
+        },
+    });
+
+    const unlinkMutation = useMutation({
+        mutationFn: (tx: Transaction) => subscriptionService.unlinkTransaction(tx.subscription_id!, tx.content_hash),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['transactions'] });
+            qc.invalidateQueries({ queryKey: ['subscriptions'] });
+            setToastMessage("Transaction unlinked successfully.");
+            setTimeout(() => setToastMessage(null), 3000);
+        },
+    });
+
+    const linkMutation = useMutation({
+        mutationFn: ({ subID, txnHashes }: { subID: string, txnHashes: string[] }) =>
+            subscriptionService.linkTransactions(subID, txnHashes),
+        onSuccess: () => {
+            qc.invalidateQueries({ queryKey: ['transactions'] });
+            qc.invalidateQueries({ queryKey: ['subscriptions'] });
+            setLinkModalTx(null);
+            setSelectedHashes(new Set());
+            setToastMessage("Linked successfully!");
+            setTimeout(() => setToastMessage(null), 3000);
         },
     });
 
@@ -853,7 +848,6 @@ export default function TransactionsPage() {
                     categories={categories}
                     subscriptions={subscriptions}
                     currentUserId={me?.id}
-                    patternExclusions={patternExclusions}
                     selectedHashes={selectedHashes}
                     onToggleSelect={toggleSelect}
                     onToggleSelectAll={toggleSelectAll}
@@ -862,26 +856,20 @@ export default function TransactionsPage() {
                     onSort={toggleSort}
                     onCategoryChange={(hash, categoryId) => catMutation.mutate({ hash, categoryId })}
                     onMarkReviewed={(hash) => markReviewedMutation.mutate(hash)}
-                    onTogglePatternExclusion={(term, excluded) => {
-                        if (excluded) {
-                            excludePatternMutation.mutate(term);
-                        } else {
-                            includePatternMutation.mutate(term);
-                        }
-                    }}
-                    onCreateSubscription={(tx) => setSubModalTx(tx)}
-                    onLinkSubscription={(tx) => setLinkModalTx(tx)}
-                    onUnlinkSubscription={(tx) => {
+                    onCreateSubscription={(tx: Transaction) => setSubModalTx(tx)}
+                    onLinkSubscription={(tx: Transaction) => setLinkModalTx(tx)}
+                    onUnlinkSubscription={(tx: Transaction) => {
                         if (window.confirm(t('subscriptions.unlinkConfirm', { merchant: subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name }))) {
                             unlinkMutation.mutate(tx);
                         }
                     }}
+                    onSearchSimilar={(tx: Transaction) => setSearchSimilarTx(tx)}
                     visibleCols={visibleCols}
                 />
             )}
 
             {subModalTx && (
-                <CreateFromTransactionModal 
+                <CreateFromTransactionModal
                     transaction={subModalTx}
                     onClose={() => setSubModalTx(null)}
                     categories={categories}
@@ -894,14 +882,30 @@ export default function TransactionsPage() {
                 />
             )}
 
+            {searchSimilarTx && (
+
+                <SearchSimilarModal
+                    transaction={searchSimilarTx}
+                    similarTxns={similarTxns}
+                    isLoading={isLoadingSimilar}
+                    categories={categories}
+                    onClose={() => setSearchSimilarTx(null)}
+                />
+            )}
+
             {linkModalTx && (
-                <LinkToSubscriptionModal 
-                    transaction={linkModalTx}
+                <LinkToSubscriptionModal
+                    transactions={selectedHashes.size > 1 
+                        ? allTxns.filter(tx => selectedHashes.has(tx.content_hash)) 
+                        : [linkModalTx]
+                    }
                     subscriptions={subscriptions}
                     onClose={() => setLinkModalTx(null)}
                     onLink={(subID) => {
-                        linkMutation.mutate({ subID, txnHash: linkModalTx.content_hash });
-                        setLinkModalTx(null);
+                        const hashes = selectedHashes.size > 1 
+                            ? Array.from(selectedHashes) 
+                            : [linkModalTx.content_hash];
+                        linkMutation.mutate({ subID, txnHashes: hashes });
                     }}
                 />
             )}
@@ -923,6 +927,13 @@ export default function TransactionsPage() {
                                 className="flex items-center gap-1.5 bg-indigo-600 hover:bg-indigo-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors shadow-sm disabled:opacity-50 whitespace-nowrap"
                             >
                                 <Check size={14} /> {t('transactions.markReviewed', 'Mark Reviewed')}
+                            </button>
+
+                            <button
+                                onClick={() => setLinkModalTx(allTxns.find(tx => selectedHashes.has(tx.content_hash)) || null)}
+                                className="flex items-center gap-1.5 bg-purple-600 hover:bg-purple-700 text-white text-xs font-bold px-3 py-1.5 rounded-lg transition-colors shadow-sm whitespace-nowrap"
+                            >
+                                <RefreshCcw size={14} /> {t('subscriptions.linkManually', 'Link to Subscription')}
                             </button>
                         </div>
 
@@ -977,16 +988,16 @@ export default function TransactionsPage() {
     );
 }
 
-function LinkToSubscriptionModal({ 
-    transaction, 
-    subscriptions, 
-    onClose, 
-    onLink 
-}: { 
-    transaction: Transaction, 
-    subscriptions: Subscription[], 
-    onClose: () => void, 
-    onLink: (subID: string) => void 
+function LinkToSubscriptionModal({
+                                     transactions,
+                                     subscriptions,
+                                     onClose,
+                                     onLink
+                                 }: {
+    transactions: Transaction[],
+    subscriptions: Subscription[],
+    onClose: () => void,
+    onLink: (subID: string) => void
 }) {
     const { t } = useTranslation();
     const [searchTerm, setSearchTerm] = React.useState('');
@@ -1004,7 +1015,11 @@ function LinkToSubscriptionModal({
                             <LinkIcon className="text-indigo-600" size={20} />
                             {t('subscriptions.linkTransaction')}
                         </h3>
-                        <p className="text-xs text-gray-500">{transaction.description}</p>
+                        <p className="text-xs text-gray-500">
+                            {transactions.length === 1
+                                ? transactions[0].description
+                                : t('transactions.selected', { count: transactions.length })}
+                        </p>
                     </div>
                     <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
                         <X size={20} />
@@ -1048,7 +1063,7 @@ function LinkToSubscriptionModal({
                 </div>
 
                 <div className="p-4 border-t border-gray-100 dark:border-gray-800">
-                    <button 
+                    <button
                         onClick={onClose}
                         className="w-full px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                     >
@@ -1067,8 +1082,8 @@ function CreateFromTransactionModal({ transaction, onClose, onCreated, categorie
     const [merchantName, setMerchantName] = React.useState(transaction.counterparty_name || transaction.description);
 
     const createMutation = useMutation({
-        mutationFn: () => axios.post('/api/v1/subscriptions/from-transaction/', { 
-            transaction_hash: transaction.content_hash, 
+        mutationFn: () => axios.post('/api/v1/subscriptions/from-transaction/', {
+            transaction_hash: transaction.content_hash,
             billing_cycle: billingCycle,
             billing_interval: billingInterval,
             merchant_name: merchantName
@@ -1164,13 +1179,14 @@ function CreateFromTransactionModal({ transaction, onClose, onCreated, categorie
                         </div>
                     </div>
 
-                    <div className="pt-4 flex gap-3">                        <button 
+                    <div className="pt-4 flex gap-3">
+                        <button
                             onClick={onClose}
                             className="flex-1 px-4 py-2 text-sm font-bold text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
                         >
                             {t('common.cancel')}
                         </button>
-                        <button 
+                        <button
                             onClick={() => createMutation.mutate()}
                             disabled={createMutation.isPending}
                             className="flex-1 bg-indigo-600 hover:bg-indigo-700 text-white px-4 py-2 rounded-xl text-sm font-bold transition-all shadow-lg shadow-indigo-500/20 disabled:opacity-50 flex items-center justify-center gap-2"
@@ -1179,6 +1195,91 @@ function CreateFromTransactionModal({ transaction, onClose, onCreated, categorie
                             {t('common.save')}
                         </button>
                     </div>
+                </div>
+            </div>
+        </div>
+    );
+}
+
+function SearchSimilarModal({ transaction, similarTxns, isLoading, categories, onClose }: {
+    transaction: Transaction,
+    similarTxns: Transaction[],
+    isLoading: boolean,
+    categories: Category[],
+    onClose: () => void
+}) {
+    const { t } = useTranslation();
+
+    return (
+        <div className="fixed inset-0 bg-gray-900/60 backdrop-blur-sm z-[100] flex items-center justify-center p-4">
+            <div className="bg-white dark:bg-gray-900 border border-gray-200 dark:border-gray-800 rounded-3xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden animate-in zoom-in-95 duration-200">
+                <div className="p-6 border-b border-gray-100 dark:border-gray-800 flex items-center justify-between shrink-0">
+                    <div>
+                        <h3 className="text-xl font-bold flex items-center gap-2">
+                            <Search className="text-indigo-600" size={20} />
+                            {t('transactions.searchSimilar')}
+                        </h3>
+                        <p className="text-xs text-gray-500 mt-1 truncate max-w-md">"{transaction.description}"</p>
+                    </div>
+                    <button onClick={onClose} className="p-2 text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 transition-colors">
+                        <X size={20} />
+                    </button>
+                </div>
+
+                <div className="flex-1 overflow-y-auto p-4 space-y-2 bg-gray-50/50 dark:bg-black/20">
+                    {isLoading ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                            <Loader2 size={32} className="animate-spin mb-3" />
+                            <p className="text-sm">{t('common.loading')}</p>
+                        </div>
+                    ) : similarTxns.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center py-20 text-gray-400">
+                            <Search size={32} className="opacity-20 mb-3" />
+                            <p className="text-sm">{t('transactions.noMatches')}</p>
+                        </div>
+                    ) : (
+                        similarTxns.map((tx) => {
+                            const cat = categories.find(c => c.id === tx.category_id);
+                            return (
+                                <div key={tx.content_hash} className="bg-white dark:bg-gray-800 p-4 rounded-2xl border border-gray-100 dark:border-gray-700/50 shadow-sm flex items-center justify-between gap-4">
+                                    <div className="min-w-0 flex-1">
+                                        <div className="flex items-center gap-2 mb-1">
+                                            <span className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-tight">{fmtDate(tx.booking_date)}</span>
+                                            {cat && (
+                                                <span
+                                                    className="px-1.5 py-0.5 rounded text-[10px] font-bold border shrink-0"
+                                                    style={{
+                                                        backgroundColor: cat.color + '15',
+                                                        color: cat.color,
+                                                        borderColor: cat.color + '30'
+                                                    }}
+                                                >
+                                                    {cat.name}
+                                                </span>
+                                            )}
+                                        </div>
+                                        <p className="text-sm font-medium text-gray-800 dark:text-gray-200 truncate" title={tx.description}>
+                                            {tx.description}
+                                        </p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className={`font-mono font-bold ${tx.amount < 0 ? 'text-red-500' : 'text-emerald-500'}`}>
+                                            {fmtCurrency(tx.amount, tx.currency)}
+                                        </p>
+                                    </div>
+                                </div>
+                            );
+                        })
+                    )}
+                </div>
+
+                <div className="p-4 bg-gray-50 dark:bg-gray-800/50 border-t border-gray-100 dark:border-gray-800 flex justify-end">
+                    <button
+                        onClick={onClose}
+                        className="px-6 py-2 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl text-sm font-bold hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                        {t('common.close')}
+                    </button>
                 </div>
             </div>
         </div>

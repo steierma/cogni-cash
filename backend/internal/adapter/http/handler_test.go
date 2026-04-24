@@ -201,15 +201,24 @@ func (m *mockBankStmtRepo) MarkTransactionReviewed(_ context.Context, _ string, 
 	return nil
 }
 
-func (m *mockBankStmtRepo) UpdateTransactionSkipForecasting(_ context.Context, _ string, _ bool, _ uuid.UUID) error {
+func (m *mockBankStmtRepo) MarkTransactionsReviewedBulk(_ context.Context, _ []string, _ uuid.UUID) error {
 	return nil
 }
+
 func (m *mockBankStmtRepo) UpdateTransactionBaseAmount(_ context.Context, _ string, _ float64, _ string, _ uuid.UUID) error {
 	return nil
 }
 
 func (m *mockBankStmtRepo) LinkTransactionToStatement(_ context.Context, _ uuid.UUID, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
+}
+
+func (m *mockBankStmtRepo) UpdateStatementAccount(_ context.Context, _ uuid.UUID, _ *uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockBankStmtRepo) GetTransactionsByAccountID(_ context.Context, _ uuid.UUID, _ uuid.UUID) ([]entity.Transaction, error) {
+	return nil, nil
 }
 
 func (m *mockBankStmtRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
@@ -402,6 +411,18 @@ func (m *mockSharingRepo) ListInvoiceShares(_ context.Context, _, _ uuid.UUID) (
 	return nil, nil
 }
 
+func (m *mockSharingRepo) ShareBankAccount(_ context.Context, _, _, _ uuid.UUID, _ string) error {
+	return nil
+}
+
+func (m *mockSharingRepo) RevokeBankAccountShare(_ context.Context, _, _, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *mockSharingRepo) ListBankAccountShares(_ context.Context, _, _ uuid.UUID) ([]uuid.UUID, error) {
+	return nil, nil
+}
+
 func TestListCategories_Empty(t *testing.T) {
 	authSvc, token, _ := setupTestAuth(t)
 	mockRepo := &mockCategoryRepo{}
@@ -469,7 +490,7 @@ func TestDeleteBankStatement(t *testing.T) {
 	authSvc, token, _ := setupTestAuth(t)
 	repo := &mockBankStmtRepo{}
 
-	svc := service.NewBankStatementService(repo, setupLogger())
+	svc := service.NewBankStatementService(repo, nil, setupLogger())
 
 	dummyPinger := func(ctx context.Context) error { return nil }
 	handler := apphttp.NewHandler(authSvc, nil, svc, nil, nil, setupLogger(), "memory", "localhost", dummyPinger, context.Background(), nil).
@@ -1055,25 +1076,6 @@ func (m *mockForecastingSvc) GetCashFlowForecast(ctx context.Context, userID uui
 	return entity.CashFlowForecast{}, m.err
 }
 
-func (m *mockForecastingSvc) ExcludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error {
-	return m.err
-}
-
-func (m *mockForecastingSvc) IncludeForecast(ctx context.Context, userID uuid.UUID, forecastID uuid.UUID) error {
-	return m.err
-}
-
-func (m *mockForecastingSvc) ExcludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error {
-	return m.err
-}
-
-func (m *mockForecastingSvc) IncludePattern(ctx context.Context, userID uuid.UUID, matchTerm string) error {
-	return m.err
-}
-
-func (m *mockForecastingSvc) ListPatternExclusions(ctx context.Context, userID uuid.UUID) ([]entity.PatternExclusion, error) {
-	return nil, m.err
-}
 
 func (m *mockForecastingSvc) CalculateCategoryAverage(ctx context.Context, userID uuid.UUID, categoryID uuid.UUID, strategy string) (float64, error) {
 	return 123.45, m.err

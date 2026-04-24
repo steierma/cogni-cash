@@ -51,7 +51,7 @@ func (r *BankRepository) CreateConnection(ctx context.Context, conn *entity.Bank
 func (r *BankRepository) deleteConnection(id uuid.UUID) {
 	delete(r.connections, id)
 	for accID, acc := range r.accounts {
-		if acc.ConnectionID == id {
+		if acc.ConnectionID != nil && *acc.ConnectionID == id {
 			delete(r.accounts, accID)
 		}
 	}
@@ -166,11 +166,12 @@ func (r *BankRepository) GetAccountByID(ctx context.Context, id uuid.UUID, userI
 	if !ok {
 		return nil, entity.ErrBankAccountNotFound
 	}
-	conn, ok := r.connections[acc.ConnectionID]
-	if !ok || conn.UserID != userID {
-		return nil, entity.ErrBankAccountNotFound
+
+	if acc.UserID == userID {
+		return &acc, nil
 	}
-	return &acc, nil
+
+	return nil, entity.ErrBankAccountNotFound
 }
 
 func (r *BankRepository) GetAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]entity.BankAccount, error) {
@@ -178,8 +179,7 @@ func (r *BankRepository) GetAccountsByUserID(ctx context.Context, userID uuid.UU
 	defer r.mu.RUnlock()
 	var accs []entity.BankAccount
 	for _, acc := range r.accounts {
-		conn, ok := r.connections[acc.ConnectionID]
-		if ok && conn.UserID == userID {
+		if acc.UserID == userID {
 			accs = append(accs, acc)
 		}
 	}
@@ -191,11 +191,8 @@ func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connecti
 	defer r.mu.RUnlock()
 	var accs []entity.BankAccount
 	for _, acc := range r.accounts {
-		if acc.ConnectionID == connectionID {
-			conn, ok := r.connections[connectionID]
-			if ok && conn.UserID == userID {
-				accs = append(accs, acc)
-			}
+		if acc.ConnectionID != nil && *acc.ConnectionID == connectionID && acc.UserID == userID {
+			accs = append(accs, acc)
 		}
 	}
 	return accs, nil
@@ -205,11 +202,8 @@ func (r *BankRepository) GetAccountByProviderID(ctx context.Context, providerAcc
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	for _, acc := range r.accounts {
-		if acc.ProviderAccountID == providerAccountID {
-			conn, ok := r.connections[acc.ConnectionID]
-			if ok && conn.UserID == userID {
-				return &acc, nil
-			}
+		if acc.ProviderAccountID == providerAccountID && acc.UserID == userID {
+			return &acc, nil
 		}
 	}
 	return nil, entity.ErrBankAccountNotFound
@@ -219,16 +213,11 @@ func (r *BankRepository) UpdateAccountBalance(ctx context.Context, id uuid.UUID,
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	acc, ok := r.accounts[id]
-	if !ok {
-		return entity.ErrBankAccountNotFound
-	}
-	conn, ok := r.connections[acc.ConnectionID]
-	if !ok || conn.UserID != userID {
+	if !ok || acc.UserID != userID {
 		return entity.ErrBankAccountNotFound
 	}
 	acc.Balance = balance
 	acc.LastSyncError = errorMsg
-	// In-memory, we don't strictly need to handle the syncedAt interface unless it's a specific type we want to store
 	r.accounts[id] = acc
 	return nil
 }
@@ -237,11 +226,7 @@ func (r *BankRepository) UpdateAccountType(ctx context.Context, id uuid.UUID, ac
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	acc, ok := r.accounts[id]
-	if !ok {
-		return entity.ErrBankAccountNotFound
-	}
-	conn, ok := r.connections[acc.ConnectionID]
-	if !ok || conn.UserID != userID {
+	if !ok || acc.UserID != userID {
 		return entity.ErrBankAccountNotFound
 	}
 	acc.AccountType = accType
@@ -250,3 +235,31 @@ func (r *BankRepository) UpdateAccountType(ctx context.Context, id uuid.UUID, ac
 }
 
 var _ port.BankRepository = (*BankRepository)(nil)
+
+func (r *BankRepository) SaveAccount(ctx context.Context, acc *entity.BankAccount) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.accounts[acc.ID] = *acc
+	return nil
+}
+
+func (r *BankRepository) FindAccountByIBAN(ctx context.Context, iban string, userID uuid.UUID) (*entity.BankAccount, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	for _, acc := range r.accounts {
+		if acc.IBAN == iban && acc.UserID == userID {
+			return &acc, nil
+		}
+	}
+	return nil, nil
+}
+
+func (r *BankRepository) DeleteAccount(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	acc, ok := r.accounts[id]
+	if ok && acc.UserID == userID {
+		delete(r.accounts, id)
+	}
+	return nil
+}

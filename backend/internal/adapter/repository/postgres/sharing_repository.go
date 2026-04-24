@@ -122,3 +122,53 @@ func (r *SharingRepository) ListInvoiceShares(ctx context.Context, invoiceID, ow
 	}
 	return userIDs, rows.Err()
 }
+
+func (r *SharingRepository) ShareBankAccount(ctx context.Context, bankAccountID, ownerID, sharedWithID uuid.UUID, permission string) error {
+	r.Logger.Info("Sharing bank account", "bank_account_id", bankAccountID, "owner_id", ownerID, "shared_with", sharedWithID)
+
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO shared_bank_accounts (bank_account_id, owner_user_id, shared_with_user_id, permission_level)
+		VALUES ($1, $2, $3, $4)
+		ON CONFLICT (owner_user_id, bank_account_id, shared_with_user_id) DO UPDATE SET permission_level = EXCLUDED.permission_level`,
+		bankAccountID, ownerID, sharedWithID, permission)
+	if err != nil {
+		return fmt.Errorf("sharing repo: share bank account: %w", err)
+	}
+	return nil
+}
+
+func (r *SharingRepository) RevokeBankAccountShare(ctx context.Context, bankAccountID, ownerID, sharedWithID uuid.UUID) error {
+	r.Logger.Info("Revoking bank account share", "bank_account_id", bankAccountID, "owner_id", ownerID, "shared_with", sharedWithID)
+
+	_, err := r.pool.Exec(ctx, `
+		DELETE FROM shared_bank_accounts 
+		WHERE bank_account_id = $1 AND owner_user_id = $2 AND shared_with_user_id = $3`,
+		bankAccountID, ownerID, sharedWithID)
+	if err != nil {
+		return fmt.Errorf("sharing repo: revoke bank account share: %w", err)
+	}
+	return nil
+}
+
+func (r *SharingRepository) ListBankAccountShares(ctx context.Context, bankAccountID, ownerID uuid.UUID) ([]uuid.UUID, error) {
+	r.Logger.Info("Listing shares for bank account", "bank_account_id", bankAccountID, "owner_id", ownerID)
+
+	rows, err := r.pool.Query(ctx, `
+		SELECT shared_with_user_id FROM shared_bank_accounts 
+		WHERE bank_account_id = $1 AND owner_user_id = $2`,
+		bankAccountID, ownerID)
+	if err != nil {
+		return nil, fmt.Errorf("sharing repo: list bank account shares: %w", err)
+	}
+	defer rows.Close()
+
+	var userIDs []uuid.UUID
+	for rows.Next() {
+		var id uuid.UUID
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("sharing repo: scan: %w", err)
+		}
+		userIDs = append(userIDs, id)
+	}
+	return userIDs, rows.Err()
+}

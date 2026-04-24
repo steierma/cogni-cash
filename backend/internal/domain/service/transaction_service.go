@@ -52,9 +52,10 @@ func (s *TransactionService) MarkAsReviewed(ctx context.Context, hash string, us
 	return s.repo.MarkTransactionReviewed(ctx, hash, userID)
 }
 
-func (s *TransactionService) ToggleSkipForecasting(ctx context.Context, hash string, skip bool, userID uuid.UUID) error {
-	return s.repo.UpdateTransactionSkipForecasting(ctx, hash, skip, userID)
+func (s *TransactionService) MarkAsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error {
+	return s.repo.MarkTransactionsReviewedBulk(ctx, hashes, userID)
 }
+
 
 func (s *TransactionService) GetTransactionAnalytics(ctx context.Context, filter entity.TransactionFilter) (entity.TransactionAnalytics, error) {
 	if s.repo == nil {
@@ -299,6 +300,9 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 		var toCategorizeViaLLM []port.TransactionToCategorize
 		var successfulResults []port.CategorizedTransaction
 
+		uniqueForLLM := make(map[string]port.TransactionToCategorize)
+		descToHashes := make(map[string][]string)
+
 		// 1. Try to find matches in database first
 		for _, tx := range batch {
 			if matchedID, err := s.repo.FindMatchingCategory(ctx, userID, tx); err == nil && matchedID != nil {
@@ -319,7 +323,14 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 					continue
 				}
 			}
-			toCategorizeViaLLM = append(toCategorizeViaLLM, tx)
+			
+			// Not matched in DB, prepare for LLM. Deduplicate within batch to save AI tokens.
+			dedupKey := tx.Description + "|" + tx.CounterpartyName
+			descToHashes[dedupKey] = append(descToHashes[dedupKey], tx.Hash)
+			if _, exists := uniqueForLLM[dedupKey]; !exists {
+				uniqueForLLM[dedupKey] = tx
+				toCategorizeViaLLM = append(toCategorizeViaLLM, tx)
+			}
 		}
 
 		// 2. Only call LLM for transactions that weren't matched in DB
@@ -337,6 +348,12 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 				return
 			}
 
+			// Map to easily find the dedupKey from the returned hash
+			hashToDedupKey := make(map[string]string)
+			for _, tx := range toCategorizeViaLLM {
+				hashToDedupKey[tx.Hash] = tx.Description + "|" + tx.CounterpartyName
+			}
+
 			for _, res := range results {
 				var validCategoryID *uuid.UUID
 				for _, knownCat := range categories {
@@ -347,10 +364,28 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 				}
 
 				if validCategoryID != nil {
-					if err := s.repo.UpdateTransactionCategory(ctx, res.Hash, validCategoryID, userID); err != nil {
-						s.Logger.Error("Failed to update transaction category", "hash", res.Hash, "error", err)
-					} else {
-						successfulResults = append(successfulResults, res)
+					dedupKey := hashToDedupKey[res.Hash]
+					hashesToUpdate := descToHashes[dedupKey]
+
+					// Add successful categorization to examples to improve LLM accuracy for subsequent batches
+					if len(examples) < 50 && len(hashesToUpdate) > 0 {
+						txRef := uniqueForLLM[dedupKey]
+						examples = append(examples, entity.CategorizationExample{
+							Description:         txRef.Description,
+							CounterpartyName:    txRef.CounterpartyName,
+							Category:            res.Category,
+						})
+					}
+
+					for _, h := range hashesToUpdate {
+						if err := s.repo.UpdateTransactionCategory(ctx, h, validCategoryID, userID); err != nil {
+							s.Logger.Error("Failed to update transaction category", "hash", h, "error", err)
+						} else {
+							successfulResults = append(successfulResults, port.CategorizedTransaction{
+								Hash:     h,
+								Category: res.Category,
+							})
+						}
 					}
 				}
 			}

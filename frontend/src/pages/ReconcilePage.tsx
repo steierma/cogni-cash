@@ -1,6 +1,8 @@
 import { memo, useCallback, useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation, Trans } from 'react-i18next';
+import type { TFunction } from 'i18next';
+import axios from 'axios';
 import {
     AlertCircle,
     CheckCircle2,
@@ -25,10 +27,10 @@ import {
 import { reconciliationService } from '../api/services/reconciliationService';
 import { transactionService } from '../api/services/transactionService';
 import type { ReconciliationPairSuggestion, Reconciliation } from "../api/types/transaction";
-import { fmtCurrency, fmtDate } from '../utils/formatters';
+import { fmtCurrency, fmtDate, getLocalISODate } from '../utils/formatters';
 
 // Helper: translate a statement_type string into a localized label with icon
-function AccountBadge({ type, t }: { type?: string; t: any }) {
+function AccountBadge({ type, t }: { type?: string; t: TFunction }) {
     const label = type
         ? t(`reconcile.account.${type}`)
         : t('reconcile.account.unknown');
@@ -56,7 +58,7 @@ interface ReconciliationRowProps {
     suggestion: ReconciliationPairSuggestion;
     isSelected: boolean;
     onToggle: (hash: string) => void;
-    t: any;
+    t: TFunction;
 }
 
 const ReconciliationRow = memo(({ suggestion, isSelected, onToggle, t }: ReconciliationRowProps) => {
@@ -173,8 +175,8 @@ export default function ReconcilePage() {
             setSelectedManualTarget(null);
             setDeselectedHashes({});
         },
-        onError: (err: any) => {
-            const msg = err.response?.data?.error || t('reconcile.errorFetch');
+        onError: (err: unknown) => {
+            const msg = axios.isAxiosError(err) ? (err.response?.data?.error || t('reconcile.errorFetch')) : t('reconcile.errorFetch');
             setErrorMessage(msg);
             setTimeout(() => setErrorMessage(null), 5000);
         }
@@ -197,11 +199,11 @@ export default function ReconcilePage() {
     };
 
     // --- Suggestions Logic ---
-    const activeSuggestions = suggestions || [];
     const filteredSuggestions = useMemo(() => {
-        if (!searchTerm.trim()) return activeSuggestions;
+        const list = suggestions || [];
+        if (!searchTerm.trim()) return list;
         const lowerTerm = searchTerm.toLowerCase();
-        return activeSuggestions.filter(sugg => {
+        return list.filter(sugg => {
             const sourceDesc = (sugg.source_transaction.description || '').toLowerCase();
             const sourceCp = (sugg.source_transaction.counterparty_name || '').toLowerCase();
             const targetDesc = (sugg.target_transaction.description || '').toLowerCase();
@@ -213,16 +215,17 @@ export default function ReconcilePage() {
                 sourceCp.includes(lowerTerm) || targetCp.includes(lowerTerm) ||
                 sourceRef.includes(lowerTerm) || targetRef.includes(lowerTerm) || sourceAmt.includes(lowerTerm);
         });
-    }, [activeSuggestions, searchTerm]);
+    }, [suggestions, searchTerm]);
 
     const pairsToLink = useMemo(() => {
-        return activeSuggestions.reduce((acc, sugg) => {
+        const list = suggestions || [];
+        return list.reduce((acc, sugg) => {
             if (!deselectedHashes[sugg.source_transaction.content_hash]) {
                 acc.push({ settlementHash: sugg.source_transaction.content_hash, targetHash: sugg.target_transaction.content_hash });
             }
             return acc;
         }, [] as { settlementHash: string, targetHash: string }[]);
-    }, [activeSuggestions, deselectedHashes]);
+    }, [suggestions, deselectedHashes]);
 
     const visibleSelectedCount = useMemo(() => {
         return filteredSuggestions.filter(sugg => !deselectedHashes[sugg.source_transaction.content_hash]).length;
@@ -255,10 +258,7 @@ export default function ReconcilePage() {
         const shiftAmount = (diffDays === 0 ? 1 : diffDays) * direction;
         fromDate.setDate(fromDate.getDate() + shiftAmount);
         toDate.setDate(toDate.getDate() + shiftAmount);
-        const format = (d: Date) => {
-            const offset = d.getTimezoneOffset() * 60000;
-            return new Date(d.getTime() - offset).toISOString().split('T')[0];
-        };
+        const format = (d: Date) => getLocalISODate(d);
         const newFrom = format(fromDate);
         const newTo = format(toDate);
         setManualDateFrom(newFrom);
@@ -370,7 +370,7 @@ export default function ReconcilePage() {
 
                     {isLoadingSuggestions ? (
                         <div className="h-32 bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm animate-pulse" />
-                    ) : activeSuggestions.length === 0 ? (
+                    ) : (suggestions?.length || 0) === 0 ? (
                         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 p-8 flex flex-col items-center text-center">
                             <div className="w-12 h-12 bg-green-100 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center mb-4"><CheckCircle2 size={24} /></div>
                             <h3 className="text-gray-900 dark:text-gray-100 font-semibold mb-1">{t('reconcile.noMatches1to1')}</h3>

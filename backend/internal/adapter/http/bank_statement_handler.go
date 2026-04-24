@@ -1,6 +1,7 @@
 package http
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -251,9 +252,13 @@ func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Reque
 	}
 
 	contentType := http.DetectContentType(stmt.OriginalFile)
-	// http.DetectContentType may return "application/octet-stream" for binary files
-	// it doesn't recognise — fall back to PDF which is the historical default.
-	if contentType == "application/octet-stream" || contentType == "" {
+
+	// Manually check for Compound File Binary Format (BIFF8 XLS) magic bytes.
+	// http.DetectContentType returns "application/octet-stream" for these files.
+	if len(stmt.OriginalFile) >= 8 && bytes.HasPrefix(stmt.OriginalFile, []byte{0xD0, 0xCF, 0x11, 0xE0, 0xA1, 0xB1, 0x1A, 0xE1}) {
+		contentType = "application/vnd.ms-excel"
+	} else if contentType == "application/octet-stream" || contentType == "" {
+		// Fall back to PDF which is the historical default for unrecognized binary data.
 		contentType = "application/pdf"
 	}
 	ext := mimeToExt(contentType)
@@ -386,6 +391,7 @@ func (h *Handler) markTransactionReviewed(w http.ResponseWriter, r *http.Request
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+
 	if err := h.transactionSvc.MarkAsReviewed(r.Context(), contentHash, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
@@ -394,23 +400,18 @@ func (h *Handler) markTransactionReviewed(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) toggleTransactionSkipForecasting(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) markTransactionsReviewedBulk(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "service not available")
 		return
 	}
 
-	contentHash := chi.URLParam(r, "hash")
-	if contentHash == "" {
-		writeError(w, http.StatusBadRequest, "missing transaction hash")
-		return
+	var payload struct {
+		Hashes []string `json:"hashes"`
 	}
 
-	var req struct {
-		Skip bool `json:"skip"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request")
+	if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid payload")
 		return
 	}
 
@@ -419,13 +420,15 @@ func (h *Handler) toggleTransactionSkipForecasting(w http.ResponseWriter, r *htt
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
-	if err := h.transactionSvc.ToggleSkipForecasting(r.Context(), contentHash, req.Skip, userID); err != nil {
+
+	if err := h.transactionSvc.MarkAsReviewedBulk(r.Context(), payload.Hashes, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}
 
 	w.WriteHeader(http.StatusNoContent)
 }
+
 
 func (h *Handler) startAutoCategorize(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
@@ -576,4 +579,35 @@ func mapImportError(err error) string {
 	default:
 		return "internal_error"
 	}
+}
+
+func (h *Handler) updateBankStatement(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid bank statement id")
+		return
+	}
+
+	var req struct {
+		BankAccountID *uuid.UUID `json:"bank_account_id"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	userID := h.getUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.bankStatementSvc.UpdateStatementAccount(r.Context(), id, req.BankAccountID, userID); err != nil {
+		h.Logger.Error("failed to update bank statement account", "error", err, "id", id)
+		writeError(w, http.StatusInternalServerError, "failed to update statement account")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }

@@ -141,8 +141,8 @@ func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.B
 			acc.ID = uuid.New()
 		}
 		batch.Queue(`
-			INSERT INTO bank_accounts (id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type)
-			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9
+			INSERT INTO bank_accounts (id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type, user_id)
+			SELECT $1, $2, $3, $4, $5, $6, $7, $8, $9, $10
 			FROM bank_connections
 			WHERE id = $2 AND user_id = $10
 			ON CONFLICT (connection_id, provider_account_id) DO UPDATE SET
@@ -150,7 +150,8 @@ func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.B
 				last_synced_at = EXCLUDED.last_synced_at,
 				iban = CASE WHEN EXCLUDED.iban <> '' THEN EXCLUDED.iban ELSE bank_accounts.iban END,
 				name = CASE WHEN EXCLUDED.name <> '' THEN EXCLUDED.name ELSE bank_accounts.name END,
-				account_type = EXCLUDED.account_type
+				account_type = EXCLUDED.account_type,
+				user_id = EXCLUDED.user_id
 		`, acc.ID, acc.ConnectionID, acc.ProviderAccountID, acc.IBAN, acc.Name, acc.Currency, acc.Balance, acc.LastSyncedAt, string(acc.AccountType), userID)
 	}
 
@@ -175,15 +176,18 @@ func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.B
 
 func (r *BankRepository) GetAccountByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*entity.BankAccount, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT ba.id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error
+		SELECT 
+			ba.id, ba.user_id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error,
+			EXISTS(SELECT 1 FROM shared_bank_accounts sba WHERE sba.bank_account_id = ba.id) as is_shared,
+			COALESCE((SELECT array_agg(shared_with_user_id) FROM shared_bank_accounts WHERE bank_account_id = ba.id), '{}') as shared_with,
+			ba.user_id as owner_id
 		FROM bank_accounts ba
-		JOIN bank_connections bc ON ba.connection_id = bc.id
-		WHERE ba.id = $1 AND bc.user_id = $2
+		WHERE ba.id = $1 AND (ba.user_id = $2 OR ba.id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $2))
 	`, id, userID)
 
 	var acc entity.BankAccount
 	var accType string
-	err := row.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError)
+	err := row.Scan(&acc.ID, &acc.UserID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError, &acc.IsShared, &acc.SharedWith, &acc.OwnerID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -196,10 +200,13 @@ func (r *BankRepository) GetAccountByID(ctx context.Context, id uuid.UUID, userI
 
 func (r *BankRepository) GetAccountsByUserID(ctx context.Context, userID uuid.UUID) ([]entity.BankAccount, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT ba.id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error
+		SELECT 
+			ba.id, ba.user_id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error,
+			EXISTS(SELECT 1 FROM shared_bank_accounts sba WHERE sba.bank_account_id = ba.id) as is_shared,
+			COALESCE((SELECT array_agg(shared_with_user_id) FROM shared_bank_accounts WHERE bank_account_id = ba.id), '{}') as shared_with,
+			ba.user_id as owner_id
 		FROM bank_accounts ba
-		JOIN bank_connections bc ON ba.connection_id = bc.id
-		WHERE bc.user_id = $1
+		WHERE ba.user_id = $1 OR ba.id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $1)
 	`, userID)
 	if err != nil {
 		return nil, fmt.Errorf("bank repo: list accounts by user: %w", err)
@@ -210,7 +217,7 @@ func (r *BankRepository) GetAccountsByUserID(ctx context.Context, userID uuid.UU
 	for rows.Next() {
 		var acc entity.BankAccount
 		var accType string
-		if err := rows.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError); err != nil {
+		if err := rows.Scan(&acc.ID, &acc.UserID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError, &acc.IsShared, &acc.SharedWith, &acc.OwnerID); err != nil {
 			return nil, fmt.Errorf("bank repo: scan account: %w", err)
 		}
 		acc.AccountType = entity.StatementType(accType)
@@ -221,7 +228,11 @@ func (r *BankRepository) GetAccountsByUserID(ctx context.Context, userID uuid.UU
 
 func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connectionID uuid.UUID, userID uuid.UUID) ([]entity.BankAccount, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT ba.id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error
+		SELECT 
+			ba.id, ba.user_id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error,
+			EXISTS(SELECT 1 FROM shared_bank_accounts sba WHERE sba.bank_account_id = ba.id) as is_shared,
+			COALESCE((SELECT array_agg(shared_with_user_id) FROM shared_bank_accounts WHERE bank_account_id = ba.id), '{}') as shared_with,
+			ba.user_id as owner_id
 		FROM bank_accounts ba
 		JOIN bank_connections bc ON ba.connection_id = bc.id
 		WHERE ba.connection_id = $1 AND bc.user_id = $2
@@ -235,7 +246,7 @@ func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connecti
 	for rows.Next() {
 		var acc entity.BankAccount
 		var accType string
-		if err := rows.Scan(&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError); err != nil {
+		if err := rows.Scan(&acc.ID, &acc.UserID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError, &acc.IsShared, &acc.SharedWith, &acc.OwnerID); err != nil {
 			return nil, fmt.Errorf("bank repo: scan account: %w", err)
 		}
 		acc.AccountType = entity.StatementType(accType)
@@ -246,8 +257,11 @@ func (r *BankRepository) GetAccountsByConnectionID(ctx context.Context, connecti
 
 func (r *BankRepository) GetAccountByProviderID(ctx context.Context, providerAccountID string, userID uuid.UUID) (*entity.BankAccount, error) {
 	query := `
-		SELECT a.id, a.connection_id, a.provider_account_id, a.iban, a.name, 
-		       a.currency, a.balance, a.last_synced_at, a.account_type, a.last_sync_error
+		SELECT 
+			a.id, a.user_id, a.connection_id, a.provider_account_id, a.iban, a.name, a.currency, a.balance, a.last_synced_at, a.account_type, a.last_sync_error,
+			EXISTS(SELECT 1 FROM shared_bank_accounts sba WHERE sba.bank_account_id = a.id) as is_shared,
+			COALESCE((SELECT array_agg(shared_with_user_id) FROM shared_bank_accounts WHERE bank_account_id = a.id), '{}') as shared_with,
+			a.user_id as owner_id
 		FROM bank_accounts a
 		JOIN bank_connections c ON a.connection_id = c.id
 		WHERE a.provider_account_id = $1 AND c.user_id = $2
@@ -255,8 +269,9 @@ func (r *BankRepository) GetAccountByProviderID(ctx context.Context, providerAcc
 	var acc entity.BankAccount
 	var accType string
 	err := r.pool.QueryRow(ctx, query, providerAccountID, userID).Scan(
-		&acc.ID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name,
+		&acc.ID, &acc.UserID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name,
 		&acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError,
+		&acc.IsShared, &acc.SharedWith, &acc.OwnerID,
 	)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -272,10 +287,8 @@ func (r *BankRepository) UpdateAccountBalance(ctx context.Context, id uuid.UUID,
 	_, err := r.pool.Exec(ctx, `
 		UPDATE bank_accounts
 		SET balance = $1, last_synced_at = $2, last_sync_error = $3
-		FROM bank_connections bc
-		WHERE bank_accounts.connection_id = bc.id
-		  AND bank_accounts.id = $4
-		  AND bc.user_id = $5
+		WHERE bank_accounts.id = $4
+		  AND bank_accounts.user_id = $5
 	`, balance, syncedAt, errorMsg, id, userID)
 	if err != nil {
 		return fmt.Errorf("bank repo: update account balance: %w", err)
@@ -287,13 +300,64 @@ func (r *BankRepository) UpdateAccountType(ctx context.Context, id uuid.UUID, ac
 	_, err := r.pool.Exec(ctx, `
 		UPDATE bank_accounts
 		SET account_type = $1
-		FROM bank_connections bc
-		WHERE bank_accounts.connection_id = bc.id
-		  AND bank_accounts.id = $2
-		  AND bc.user_id = $3
+		WHERE bank_accounts.id = $2
+		  AND bank_accounts.user_id = $3
 	`, string(accType), id, userID)
 	if err != nil {
 		return fmt.Errorf("bank repo: update account type: %w", err)
+	}
+	return nil
+}
+
+func (r *BankRepository) SaveAccount(ctx context.Context, acc *entity.BankAccount) error {
+	if acc.ID == uuid.Nil {
+		acc.ID = uuid.New()
+	}
+	_, err := r.pool.Exec(ctx, `
+		INSERT INTO bank_accounts (id, user_id, connection_id, provider_account_id, iban, name, currency, balance, last_synced_at, account_type)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (id) DO UPDATE SET
+			name = EXCLUDED.name,
+			iban = EXCLUDED.iban,
+			currency = EXCLUDED.currency,
+			balance = EXCLUDED.balance,
+			account_type = EXCLUDED.account_type
+	`, acc.ID, acc.UserID, acc.ConnectionID, acc.ProviderAccountID, acc.IBAN, acc.Name, acc.Currency, acc.Balance, acc.LastSyncedAt, string(acc.AccountType))
+	if err != nil {
+		return fmt.Errorf("bank repo: save account: %w", err)
+	}
+	return nil
+}
+
+func (r *BankRepository) FindAccountByIBAN(ctx context.Context, iban string, userID uuid.UUID) (*entity.BankAccount, error) {
+	row := r.pool.QueryRow(ctx, `
+		SELECT 
+			ba.id, ba.user_id, ba.connection_id, ba.provider_account_id, ba.iban, ba.name, ba.currency, ba.balance, ba.last_synced_at, ba.account_type, ba.last_sync_error,
+			EXISTS(SELECT 1 FROM shared_bank_accounts sba WHERE sba.bank_account_id = ba.id) as is_shared,
+			COALESCE((SELECT array_agg(shared_with_user_id) FROM shared_bank_accounts WHERE bank_account_id = ba.id), '{}') as shared_with,
+			ba.user_id as owner_id
+		FROM bank_accounts ba
+		WHERE ba.iban = $1 AND (ba.user_id = $2 OR ba.id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $2))
+		LIMIT 1
+	`, iban, userID)
+
+	var acc entity.BankAccount
+	var accType string
+	err := row.Scan(&acc.ID, &acc.UserID, &acc.ConnectionID, &acc.ProviderAccountID, &acc.IBAN, &acc.Name, &acc.Currency, &acc.Balance, &acc.LastSyncedAt, &accType, &acc.LastSyncError, &acc.IsShared, &acc.SharedWith, &acc.OwnerID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, nil
+		}
+		return nil, fmt.Errorf("bank repo: find account by iban: %w", err)
+	}
+	acc.AccountType = entity.StatementType(accType)
+	return &acc, nil
+}
+
+func (r *BankRepository) DeleteAccount(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	_, err := r.pool.Exec(ctx, "DELETE FROM bank_accounts WHERE id = $1 AND user_id = $2", id, userID)
+	if err != nil {
+		return fmt.Errorf("bank repo: delete account: %w", err)
 	}
 	return nil
 }

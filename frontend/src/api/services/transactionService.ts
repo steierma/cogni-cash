@@ -26,23 +26,9 @@ export const transactionService = {
     markReviewed: (contentHash: string): Promise<void> =>
         api.patch(`transactions/${contentHash}/review/`).then(() => undefined),
 
-    patchSkipForecasting: (contentHash: string, skip: boolean): Promise<void> =>
-        api.patch(`transactions/${contentHash}/skip-forecasting/`, { skip }).then(() => undefined),
+    markReviewedBulk: (hashes: string[]): Promise<void> =>
+        api.patch('transactions/bulk-review/', { hashes }).then(() => undefined),
 
-    excludeForecastProjection: (id: string): Promise<void> =>
-        api.post(`transactions/forecast/exclude/${id}/`).then(() => undefined),
-
-    includeForecastProjection: (id: string): Promise<void> =>
-        api.post(`transactions/forecast/include/${id}/`).then(() => undefined),
-
-    fetchPatternExclusions: (): Promise<any[]> =>
-        api.get<any[]>('transactions/forecast/patterns/exclusions/').then(r => r.data ?? []),
-
-    excludePattern: (matchTerm: string): Promise<void> =>
-        api.post('transactions/forecast/patterns/exclude/', { match_term: matchTerm }).then(() => undefined),
-
-    includePattern: (matchTerm: string): Promise<void> =>
-        api.post('transactions/forecast/patterns/include/', { match_term: matchTerm }).then(() => undefined),
 
     startAutoCategorize: (): Promise<{ message: string }> =>
         api.post<{ message: string }>('transactions/auto-categorize/start/').then(r => r.data),

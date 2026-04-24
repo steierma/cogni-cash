@@ -22,4 +22,11 @@ type SharingRepository interface {
 	RevokeInvoiceShare(ctx context.Context, invoiceID, ownerID, sharedWithID uuid.UUID) error
 	// ListInvoiceShares returns all user IDs an invoice is shared with.
 	ListInvoiceShares(ctx context.Context, invoiceID, ownerID uuid.UUID) ([]uuid.UUID, error)
+
+	// ShareBankAccount creates a sharing relationship for a bank account.
+	ShareBankAccount(ctx context.Context, bankAccountID, ownerID, sharedWithID uuid.UUID, permission string) error
+	// RevokeBankAccountShare removes a sharing relationship for a bank account.
+	RevokeBankAccountShare(ctx context.Context, bankAccountID, ownerID, sharedWithID uuid.UUID) error
+	// ListBankAccountShares returns all user IDs a bank account is shared with.
+	ListBankAccountShares(ctx context.Context, bankAccountID, ownerID uuid.UUID) ([]uuid.UUID, error)
 }

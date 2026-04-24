@@ -126,7 +126,7 @@ export default function PayslipsPage() {
     });
 
     const updateSettingsMut = useMutation({
-        mutationFn: (params: Record<string, any>) => settingsService.updateSettings(params),
+        mutationFn: (params: Record<string, string>) => settingsService.updateSettings(params),
         onSuccess: () => queryClient.invalidateQueries({queryKey: ['settings']})
     });
 

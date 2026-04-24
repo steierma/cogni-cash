@@ -32,7 +32,7 @@ func TestMain(m *testing.M) {
 		tcpg.WithPassword("testpass"),
 		testcontainers.WithWaitStrategy(
 			wait.ForLog("database system is ready to accept connections").
-				WithOccurrence(2).WithStartupTimeout(15*time.Second),
+				WithOccurrence(2).WithStartupTimeout(60*time.Second),
 		),
 	)
 	if err != nil {
@@ -103,16 +103,23 @@ func clearTables(ctx context.Context, t *testing.T) {
 		"users",
 		"bank_connections",
 		"bank_accounts",
+		"shared_bank_accounts",
 		"bank_statements",
 		"transactions",
 		"categories",
+		"shared_categories",
 		"reconciliations",
 		"invoices",
+		"shared_invoices",
 		"payslips",
-		"payslip_bonuses", // <-- Updated table name
+		"payslip_bonuses",
 		"planned_transactions",
+		"subscriptions",
+		"subscription_events",
+		"subscription_discovery_feedback",
 		"documents",
 		"settings",
+		"bridge_access_tokens",
 	}
 	query := "TRUNCATE TABLE " + strings.Join(tables, ", ") + " CASCADE;"
 	_, err := globalPool.Exec(ctx, query)

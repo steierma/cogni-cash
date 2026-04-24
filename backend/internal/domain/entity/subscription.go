@@ -38,6 +38,7 @@ type Subscription struct {
 	LastOccurrence   *time.Time         `json:"last_occurrence,omitempty"`
 	NextOccurrence   *time.Time         `json:"next_occurrence,omitempty"`
 	Notes            *string            `json:"notes,omitempty"`
+	BankAccountID    *uuid.UUID         `json:"bank_account_id,omitempty"`
 	MatchingHashes   []string           `json:"matching_hashes"`
 	IgnoredHashes    []string           `json:"ignored_hashes"`
 	LinkedMandates   []string           `json:"linked_mandates"`
@@ -57,6 +58,7 @@ type SuggestedSubscription struct {
 	MatchingHashes   []string          `json:"matching_hashes"`
 	BaseTransactions []BaseTransaction `json:"base_transactions"`
 	CategoryID       *uuid.UUID        `json:"category_id"`
+	BankAccountID    *uuid.UUID        `json:"bank_account_id,omitempty"`
 }
 
 type BaseTransaction struct {

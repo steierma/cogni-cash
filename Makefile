@@ -21,8 +21,8 @@ BACKEND_DIR   := ./backend
 FRONTEND_DIR  := ./frontend
 
 TAG           ?= latest
-BACKEND_IMAGE := cogni-cash-backend:$(TAG)
-FRONTEND_IMAGE:= cogni-cash-frontend:$(TAG)
+BACKEND_IMAGE := backend:$(TAG)
+FRONTEND_IMAGE:= frontend:$(TAG)
 
 DEPLOY_HOST   ?= financial-manager
 DEPLOY_PATH   ?= /opt/cogni-cash
@@ -36,7 +36,7 @@ RSYNC_SSH     := ssh
 	build build-backend build-frontend \
 	deploy deploy-sync deploy-up setup-server \
 	db-truncate db-reset db-nuke db-migrate db-shell db-reset-password \
-	dev backend-run backend-build backend-test \
+	dev dev-memory test-e2e backend-run backend-build backend-test \
 	gen-testdata \
 	frontend-dev frontend-dev-prod frontend-build \
 	clean clean-all nuke \
@@ -81,6 +81,7 @@ help:
 	@echo "  Backend"
 	@echo "    make dev-memory       Start backend (In-Memory) + Frontend and open browser"
 	@echo "    make dev              Local dev server — in-memory + seed data"
+	@echo "    make test-e2e         Run Playwright End-to-End tests (In-Memory)"
 	@echo "    make backend-run      go run ./main.go  (reads backend/.env)"
 	@echo "    make backend-build    Compile binary → backend/bin/server"
 	@echo "    make backend-test     Run all Go tests"
@@ -118,8 +119,11 @@ up: backend/.env
 build-up:
 	@mkdir -p tmp
 	@echo ">>> Running build and up with live progress logging to $(ERR_LOG)..."
-	($(MAKE) build && $(MAKE) up) 2>&1 | tee $(ERR_LOG)
-	@echo ">>> Build and Up finished."
+	@if ! ($(MAKE) build && $(MAKE) up) 2>&1 | tee $(ERR_LOG); then \
+		echo ">>> ❌ ERROR: Process halted due to an error. Check $(ERR_LOG) for details."; \
+		exit 1; \
+	fi
+	@echo ">>> ✅ Build and Up finished successfully."
 
 down:
 	docker compose down
@@ -130,24 +134,7 @@ restart:
 SERVICE_ARG := $(word 2,$(MAKECMDGOALS))
 SERVICE := $(if $(SERVICE_ARG),$(SERVICE_ARG),$(SERVICE))
 
-ifneq (,$(filter cogni-cash-backend,$(SERVICE)))
-SERVICE := backend
-endif
-ifneq (,$(filter cogni-cash-frontend,$(SERVICE)))
-SERVICE := frontend
-endif
-ifneq (,$(filter cogni-cash-migrate,$(SERVICE)))
-SERVICE := migrate
-endif
-ifneq (,$(filter cogni-cash-db,$(SERVICE)))
-SERVICE := postgres
-endif
-ifneq (,$(filter cogni-cash-adminer,$(SERVICE)))
-SERVICE := adminer
-endif
-
-.PHONY: logs backend frontend migrate postgres adminer \
-        cogni-cash-backend cogni-cash-frontend cogni-cash-migrate cogni-cash-db cogni-cash-adminer
+.PHONY: logs backend frontend migrate postgres adminer
 logs:
 	@if [ -n "$(SERVICE)" ]; then \
 		echo "Tailing logs for '$(SERVICE)' (docker compose)"; \
@@ -204,7 +191,6 @@ deploy-up:
 	$(DEPLOY_SSH) \
 		"cd $(DEPLOY_PATH) && \
 		 [ -f backend/.env ] || cp backend/.env.example backend/.env && \
-		 export IMAGE_SUFFIX=-internal && \
 		 docker compose pull && \
 		 docker compose up -d --remove-orphans && \
 		 docker compose ps"
@@ -258,9 +244,9 @@ db-reset-password:
 		docker run --rm \
 			--network cogni-cash_app-net \
 			-e POSTGRES_USER -e POSTGRES_PASSWORD -e POSTGRES_DB \
-			-e DATABASE_HOST=cogni-cash-db \
+			-e DATABASE_HOST=db \
 			-e DATABASE_PORT=5432 \
-			--entrypoint /app/cogni-cash-resetpw \
+			--entrypoint /app/resetpw \
 			$(BACKEND_IMAGE) \
 			-user "$(USERNAME)" -password "$(PASSWORD)"; \
 	fi
@@ -330,6 +316,32 @@ db-squash-upgrade:
 	@echo ">>> ✅ Migration history successfully updated!"
 
 # ── Backend ───────────────────────────────────────────────────────────────────
+test-e2e:
+	@echo ">>> Cleaning up existing processes on :8080 and :5173..."
+	@lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+	@lsof -ti:5173 | xargs kill -9 2>/dev/null || true
+	@echo ">>> Starting In-Memory E2E Stack..."
+	@( \
+		(cd $(BACKEND_DIR) && JWT_SECRET=testsecret12345678901234567890123456789012 DB_TYPE=memory DEMO_MODE=true go run ./main.go) & \
+		BACKEND_PID=$$!; \
+		(cd $(FRONTEND_DIR) && npm run dev) & \
+		FRONTEND_PID=$$!; \
+		echo ">>> Waiting for services to be ready..."; \
+		for i in {1..30}; do \
+			if curl -s http://localhost:8080/health > /dev/null && curl -s http://localhost:5173/ > /dev/null; then \
+				echo "✅ Services are UP"; \
+				cd $(FRONTEND_DIR) && npm run test:e2e; \
+				EXIT_CODE=$$?; \
+				kill $$BACKEND_PID $$FRONTEND_PID 2>/dev/null || true; \
+				exit $$EXIT_CODE; \
+			fi; \
+			sleep 2; \
+		done; \
+		echo "❌ Services failed to start in time"; \
+		kill $$BACKEND_PID $$FRONTEND_PID 2>/dev/null || true; \
+		exit 1; \
+	)
+
 dev-memory:
 	@echo ">>> Cleaning up existing processes on :8080 and :5173..."
 	@lsof -ti:8080 | xargs kill -9 2>/dev/null || true
@@ -339,6 +351,7 @@ dev-memory:
 		(cd $(BACKEND_DIR) && DB_TYPE=memory DEMO_MODE=true go run ./main.go) & \
 		(cd $(FRONTEND_DIR) && npm run dev) & \
 		(sleep 5 && \
+		  while ! curl -s http://localhost:8080/health > /dev/null; do sleep 1; done && \
 		  (open http://localhost:5173 || xdg-open http://localhost:5173 || start http://localhost:5173) \
 		) & \
 		wait \
@@ -417,6 +430,10 @@ nuke: clean-all
 	docker compose down --volumes --remove-orphans 2>/dev/null || true
 	@echo ">>> Removing built Docker images..."
 	docker rmi -f \
+		$(BACKEND_IMAGE) \
+		backend:latest \
+		$(FRONTEND_IMAGE) \
+		frontend:latest \
 		cogni-cash-backend:latest \
 		cogni-cash-backend:$(TAG) \
 		cogni-cash-frontend:latest \

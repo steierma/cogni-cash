@@ -25,7 +25,10 @@ jobs:
       - name: Run tests and check coverage
         working-directory: backend
         shell: sh
+        env:
+          JWT_SECRET: "ci-test-secret-long-enough-for-validation-32-chars"
         run: |
+          set -e
           go test ./... -v -count=1 -coverprofile=coverage.out
           
           # Exclude non-logic files (entities, ports, cmd/, migrations/, main.go) and memory adapters from coverage calculation
@@ -39,7 +42,8 @@ jobs:
           fi
           echo "✅ Total coverage requirement met."
 
-          SERVICE_COVERAGE=$(go test ./internal/domain/service/... -cover | awk '{print $5}' | sed 's/%//')
+          # Determine service layer coverage
+          SERVICE_COVERAGE=$(go test ./internal/domain/service/... -cover | awk '/ok/ {print $5}' | sed 's/%//')
           if [ -n "$SERVICE_COVERAGE" ]; then
             echo "Service layer coverage: $SERVICE_COVERAGE%"
             if [ "$(echo "$SERVICE_COVERAGE < 65" | awk '{print ($1 < 65)}')" -eq 1 ]; then
@@ -51,7 +55,105 @@ jobs:
             echo "⚠️ Service layer coverage could not be determined."
           fi
 
-  # ── 2. Deploy (Internal) ──────────────────────────────────────────────────
+  # ── 2. E2E Tests (DEACTIVATED TEMPORARILY) ─────────────────────────────────
+  # e2e:
+  #   name: E2E Tests (Playwright)
+  #   runs-on: docker
+  #   needs: test
+  #   steps:
+  #     - name: Checkout
+  #       uses: actions/checkout@v4.1.1
+  #
+  #     - name: Set up Go
+  #       uses: actions/setup-go@v4
+  #       with:
+  #         go-version: '1.26'
+  #         cache-dependency-path: backend/go.sum
+  #
+  #     - name: Set up Node.js
+  #       uses: actions/setup-node@v4
+  #       with:
+  #         node-version: '22'
+  #         cache-dependency-path: frontend/package-lock.json
+  #
+  #     - name: Install dependencies
+  #       run: |
+  #         cd frontend
+  #         npm ci
+  #         npx playwright install --with-deps chromium
+  #
+  #     - name: Start Backend (In-Memory)
+  #       working-directory: backend
+  #       shell: sh
+  #       env:
+  #         JWT_SECRET: "ci-test-secret-long-enough-for-validation-32-chars"
+  #         DB_TYPE: memory
+  #         DEMO_MODE: "true"
+  #       run: |
+  #         go run ./main.go &
+  #         PID=$!
+  #         echo $PID > ../backend.pid
+  #         
+  #         echo "Waiting for backend on PID $PID..."
+  #         TIMEOUT=60
+  #         while ! curl -s http://localhost:8080/health > /dev/null; do
+  #           if ! kill -0 $PID 2>/dev/null; then
+  #             echo "❌ Backend process died unexpectedly!"
+  #             exit 1
+  #           fi
+  #           TIMEOUT=$((TIMEOUT - 1))
+  #           if [ $TIMEOUT -le 0 ]; then
+  #             echo "❌ Timeout waiting for backend!"
+  #             exit 1
+  #           fi
+  #           echo "Waiting for backend..."
+  #           sleep 2
+  #         done
+  #         echo "✅ Backend is ready"
+  #
+  #     - name: Start Frontend
+  #       working-directory: frontend
+  #       shell: sh
+  #       run: |
+  #         npm run dev -- --host &
+  #         PID=$!
+  #         echo $PID > ../frontend.pid
+  #         
+  #         echo "Waiting for frontend on PID $PID..."
+  #         TIMEOUT=60
+  #         while ! curl -s http://localhost:5173/ > /dev/null; do
+  #           if ! kill -0 $PID 2>/dev/null; then
+  #             echo "❌ Frontend process died unexpectedly!"
+  #             exit 1
+  #           fi
+  #           TIMEOUT=$((TIMEOUT - 1))
+  #           if [ $TIMEOUT -le 0 ]; then
+  #             echo "❌ Timeout waiting for frontend!"
+  #             exit 1
+  #           fi
+  #           echo "Waiting for frontend..."
+  #           sleep 2
+  #         done
+  #         echo "✅ Frontend is ready"
+  #
+  #     - name: Run Playwright Tests
+  #       working-directory: frontend
+  #       run: npm run test:e2e
+  #
+  #     - name: Kill background processes
+  #       run: |
+  #         [ -f backend.pid ] && kill $(cat backend.pid) || true
+  #         [ -f frontend.pid ] && kill $(cat frontend.pid) || true
+  #
+  #     - name: Upload Playwright report
+  #       if: always()
+  #       uses: actions/upload-artifact@v4
+  #       with:
+  #         name: playwright-report
+  #         path: frontend/playwright-report/
+  #         retention-days: 30
+
+  # ── 3. Deploy (Internal) ──────────────────────────────────────────────────
   # This job now builds LOCAL images for your Proxmox server instead of pushing to GHCR
   deploy:
     name: Deploy to Proxmox

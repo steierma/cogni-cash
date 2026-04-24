@@ -23,6 +23,7 @@ export interface Subscription {
     last_occurrence?: string;
     next_occurrence?: string;
     notes?: string;
+    bank_account_id?: string | null;
     matching_hashes: string[];
     ignored_hashes: string[];
     created_at: string;

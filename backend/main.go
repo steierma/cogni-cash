@@ -29,10 +29,12 @@ import (
 	smtpadapter "cogni-cash/internal/adapter/email/smtp"
 	httpAdapter "cogni-cash/internal/adapter/http"
 	llmadapter "cogni-cash/internal/adapter/ollama"
+	aiparser "cogni-cash/internal/adapter/parser/bank_statement/ai"
 	amazonvisaparser "cogni-cash/internal/adapter/parser/bank_statement/amazonvisa"
 	ingparser "cogni-cash/internal/adapter/parser/bank_statement/ing"
 	ingcsvparser "cogni-cash/internal/adapter/parser/bank_statement/ingcsv"
 	vwparser "cogni-cash/internal/adapter/parser/bank_statement/vw"
+	vwcsvparser "cogni-cash/internal/adapter/parser/bank_statement/vwcsv"
 	invoiceparser "cogni-cash/internal/adapter/parser/invoice"
 	cariadparser "cogni-cash/internal/adapter/parser/payslip/cariad"
 	memrepo "cogni-cash/internal/adapter/repository/memory"
@@ -53,15 +55,6 @@ func main() {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{AddSource: true, Level: logLevelVar}))
 	addr := envOrDefault("SERVER_ADDR", ":8080")
 
-	jwtSecret := os.Getenv("JWT_SECRET")
-	if jwtSecret == "" {
-		logger.Error("JWT_SECRET environment variable is NOT SET. This is a critical security risk. Exiting.")
-		os.Exit(1)
-	}
-	if jwtSecret == "super-secret-default-key-change-me" {
-		logger.Error("JWT_SECRET is set to the insecure default value. Exiting.")
-		os.Exit(1)
-	}
 	adminUsername := envOrDefault("ADMIN_USERNAME", "admin")
 	adminPassword := envOrDefault("ADMIN_PASSWORD", "")
 
@@ -87,11 +80,11 @@ func main() {
 	var authRepo port.AuthRepository
 	var passwordResetRepo port.PasswordResetRepository
 	var plannedTransactionRepo port.PlannedTransactionRepository
-	var forecastingRepo port.ForecastingRepository
 	var bridgeTokenRepo port.BridgeAccessTokenRepository
 	var documentRepo port.DocumentRepository
 	var subscriptionRepo port.SubscriptionRepository
 
+	jwtSecret := "dummy"
 	if storageMode == "memory" {
 		logger.Info("Using in-memory storage mode")
 		invoiceRepo = memrepo.NewInvoiceRepository()
@@ -109,7 +102,6 @@ func main() {
 		authRepo = memrepo.NewAuthRepository()
 		passwordResetRepo = memrepo.NewPasswordResetRepository()
 		plannedTransactionRepo = memrepo.NewPlannedTransactionRepository()
-		forecastingRepo = memrepo.NewForecastingRepository()
 		bridgeTokenRepo = memrepo.NewBridgeAccessTokenRepository()
 		documentRepo = memrepo.NewDocumentRepository()
 		subscriptionRepo = memrepo.NewSubscriptionRepository()
@@ -120,6 +112,15 @@ func main() {
 		// Seed default data for in-memory mode
 		seedInMemoryData(appCtx, userRepo, categoryRepo, logger, bankRepo, bankStmtRepo, invoiceRepo, payslipRepo)
 	} else {
+		jwtSecret = os.Getenv("JWT_SECRET")
+		if jwtSecret == "" {
+			logger.Error("JWT_SECRET environment variable is NOT SET. This is a critical security risk. Exiting.")
+			os.Exit(1)
+		}
+		if jwtSecret == "super-secret-default-key-change-me" {
+			logger.Error("JWT_SECRET is set to the insecure default value. Exiting.")
+			os.Exit(1)
+		}
 		dbUser := envOrDefault("POSTGRES_USER", "")
 		dbPassword := envOrDefault("POSTGRES_PASSWORD", "")
 		dbHost = envOrDefault("DATABASE_HOST", "localhost")
@@ -156,7 +157,6 @@ func main() {
 		authRepo = pgrepo.NewAuthRepository(pool, logger)
 		passwordResetRepo = pgrepo.NewPasswordResetRepository(pool, logger)
 		plannedTransactionRepo = pgrepo.NewPlannedTransactionRepository(pool, logger)
-		forecastingRepo = pgrepo.NewForecastingRepository(pool)
 		bridgeTokenRepo = pgrepo.NewBridgeAccessTokenRepository(pool, logger)
 		documentRepo = pgrepo.NewDocumentRepository(pool, vaultKey)
 		subscriptionRepo = pgrepo.NewSubscriptionRepository(pool, logger)
@@ -230,7 +230,7 @@ func main() {
 	currencySvc := service.NewCurrencyService(currencyAdapter, settingsRepo, bankStmtRepo, invoiceRepo, payslipRepo, logger)
 
 	// Inject the LLMClient (which satisfies port.BankStatementAIParser)
-	bankStatementSvc := service.NewBankStatementService(bankStmtRepo, logger).
+	bankStatementSvc := service.NewBankStatementService(bankStmtRepo, bankRepo, logger).
 		WithPlannedTransactionService(plannedTransactionSvc).
 		WithDiscoveryService(discoverySvc).
 		WithAIParser(llmClient).
@@ -247,9 +247,9 @@ func main() {
 		bankProvider = dynamicbank.NewAdapter(settingsRepo, ebPrivateKey, logger)
 	}
 
-	bankSvc := service.NewBankService(bankRepo, bankStmtRepo, settingsRepo, plannedTransactionSvc, bankProvider, logger).
+	bankSvc := service.NewBankService(bankRepo, sharingRepo, bankStmtRepo, settingsRepo, plannedTransactionSvc, bankProvider, logger).
 		WithDiscoveryService(discoverySvc)
-	forecastingSvc := service.NewForecastingService(bankStmtRepo, bankRepo, categoryRepo, payslipRepo, plannedTransactionRepo, forecastingRepo, settingsRepo, currencyAdapter, logger)
+	forecastingSvc := service.NewForecastingService(bankStmtRepo, bankRepo, categoryRepo, payslipRepo, plannedTransactionRepo, subscriptionRepo, settingsRepo, currencyAdapter, logger)
 
 	// If using dynamic adapter (Postgres mode), decide if we allow mock interception
 	if storageMode != "memory" {
@@ -260,11 +260,17 @@ func main() {
 
 	// --- Parser Registration ---
 	vwParser := vwparser.NewParser()
+	vwCSVParser := vwcsvparser.NewParser()
 	bankStatementSvc.RegisterParser(".pdf", vwParser)
-	bankStatementSvc.RegisterParser(".csv", vwParser)
+	bankStatementSvc.RegisterParser(".csv", vwCSVParser)
 	bankStatementSvc.RegisterParser(".pdf", ingparser.NewParser(logger))
 	bankStatementSvc.RegisterParser(".csv", ingcsvparser.NewParser(logger))
 	bankStatementSvc.RegisterParser(".xls", amazonvisaparser.NewParser(logger))
+
+	// AI Fallback Parsers (tried if traditional parsers above fail)
+	aiFallback := aiparser.NewParser(llmClient, logger)
+	bankStatementSvc.RegisterParser(".pdf", aiFallback)
+	bankStatementSvc.RegisterParser(".csv", aiFallback)
 
 	// --- Payslip Service ---
 	cariadParser := cariadparser.NewParser(logger)
@@ -661,7 +667,6 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 	logger.Info("Seeding in-memory default data...")
 
 	// 1. Seed Users (admin/admin and test/test)
-	var adminID uuid.UUID
 	users := []struct {
 		username string
 		password string
@@ -673,12 +678,14 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 
 	for _, u := range users {
 		hash, _ := bcrypt.GenerateFromPassword([]byte(u.password), bcrypt.DefaultCost)
-		id := uuid.New()
-		if u.username == "admin" {
-			adminID = id
+		
+		userID := uuid.New()
+		if existing, err := userRepo.FindByUsername(ctx, u.username); err == nil {
+			userID = existing.ID
 		}
+
 		user := entity.User{
-			ID:           id,
+			ID:           userID,
 			Username:     u.username,
 			PasswordHash: string(hash),
 			Email:        u.username + "@localhost",
@@ -686,163 +693,189 @@ func seedInMemoryData(ctx context.Context, userRepo port.UserRepository, catRepo
 			Role:         u.role,
 		}
 		_ = userRepo.Upsert(ctx, user)
-	}
 
-	// 2. Seed default categories
-	categories := []struct {
-		name               string
-		color              string
-		isVariableSpending bool
-		forecastStrategy   string
-	}{
-		{"Salary", "#4caf50", false, "3y"},
-		{"Rent", "#f44336", false, "3y"},
-		{"Groceries", "#ff9800", true, "3m"},
-		{"Insurance", "#2196f3", false, "3y"},
-		{"Leisure", "#9c27b0", true, "6m"},
-		{"Internal Transfer", "#607d8b", false, "3y"},
-		{"Tech & Software", "#3b82f6", true, "12m"},
-	}
-
-	catMap := make(map[string]uuid.UUID)
-	for _, c := range categories {
-		cat, _ := catRepo.Save(ctx, entity.Category{
-			ID:                 uuid.New(),
-			UserID:             adminID,
-			Name:               c.name,
-			Color:              c.color,
-			IsVariableSpending: c.isVariableSpending,
-			ForecastStrategy:   c.forecastStrategy,
-		})
-		catMap[c.name] = cat.ID
-	}
-
-	// 3. Seed Bank Connections & Accounts
-	conn := entity.BankConnection{
-		ID:              uuid.New(),
-		UserID:          adminID,
-		InstitutionID:   "SANDBOX_ID",
-		InstitutionName: "Sandbox Bank",
-		Provider:        "enablebanking",
-		Status:          entity.StatusLinked,
-	}
-	_ = bankRepo.CreateConnection(ctx, &conn)
-
-	acc := entity.BankAccount{
-		ID:                uuid.New(),
-		ConnectionID:      conn.ID,
-		ProviderAccountID: "dummy_acc_id",
-		IBAN:              "DE12345678901234567890",
-		Name:              "Main Giro",
-		Currency:          "EUR",
-		Balance:           5240.50,
-		LastSyncedAt:      time.Now(),
-		AccountType:       entity.StatementTypeGiro,
-	}
-	_ = bankRepo.UpsertAccounts(ctx, []entity.BankAccount{acc}, adminID)
-
-	// 4. Seed Bank Statements and Transactions (last 3 months)
-	now := time.Now()
-	for i := 0; i < 3; i++ {
-		monthDate := now.AddDate(0, -i, 0)
-		stmtDate := time.Date(monthDate.Year(), monthDate.Month(), 28, 0, 0, 0, 0, time.UTC)
-
-		stmt := entity.BankStatement{
-			ID:            uuid.New(),
-			AccountHolder: "Max Mustermann",
-			IBAN:          acc.IBAN,
-			StatementDate: stmtDate,
-			StatementNo:   100 - i,
-			Currency:      "EUR",
-			StatementType: entity.StatementTypeGiro,
-			ContentHash:   uuid.New().String(),
-			ImportedAt:    time.Now(),
+		// 2. Seed default categories for this user
+		categories := []struct {
+			name               string
+			color              string
+			isVariableSpending bool
+			forecastStrategy   string
+		}{
+			{"Salary", "#4caf50", false, "3y"},
+			{"Rent", "#f44336", false, "3y"},
+			{"Groceries", "#ff9800", true, "3m"},
+			{"Insurance", "#2196f3", false, "3y"},
+			{"Leisure", "#9c27b0", true, "6m"},
+			{"Internal Transfer", "#607d8b", false, "3y"},
+			{"Tech & Software", "#3b82f6", true, "12m"},
 		}
 
-		salaryCat := catMap["Salary"]
-		rentCat := catMap["Rent"]
-		groceriesCat := catMap["Groceries"]
-		techCat := catMap["Tech & Software"]
-
-		stmt.Transactions = []entity.Transaction{
-			{
-				ID:            uuid.New(),
-				BankAccountID: &acc.ID,
-				BookingDate:   stmtDate.AddDate(0, 0, -27),
-				Description:   "Salary Mustermann GmbH",
-				Amount:        3500.00,
-				Currency:      "EUR",
-				Type:          entity.TransactionTypeCredit,
-				CategoryID:    &salaryCat,
-				ContentHash:   uuid.New().String(),
-				StatementType: entity.StatementTypeGiro,
-				Reviewed:      true,
-			},
-			{
-				ID:            uuid.New(),
-				BankAccountID: &acc.ID,
-				BookingDate:   stmtDate.AddDate(0, 0, -25),
-				Description:   "Rent Payment",
-				Amount:        -1200.00,
-				Currency:      "EUR",
-				Type:          entity.TransactionTypeDebit,
-				CategoryID:    &rentCat,
-				ContentHash:   uuid.New().String(),
-				StatementType: entity.StatementTypeGiro,
-				Reviewed:      true,
-			},
-			{
-				ID:            uuid.New(),
-				BankAccountID: &acc.ID,
-				BookingDate:   stmtDate.AddDate(0, 0, -15),
-				Description:   "REWE Supermarket",
-				Amount:        -85.40,
-				Currency:      "EUR",
-				Type:          entity.TransactionTypeDebit,
-				CategoryID:    &groceriesCat,
-				ContentHash:   uuid.New().String(),
-				StatementType: entity.StatementTypeGiro,
-				Reviewed:      true,
-			},
-			{
-				ID:            uuid.New(),
-				BankAccountID: &acc.ID,
-				BookingDate:   stmtDate.AddDate(0, 0, -10),
-				Description:   "Hetzner Online GmbH",
-				Amount:        -42.15,
-				Currency:      "EUR",
-				Type:          entity.TransactionTypeDebit,
-				CategoryID:    &techCat,
-				ContentHash:   uuid.New().String(),
-				StatementType: entity.StatementTypeGiro,
-				Reviewed:      true,
-			},
+		catMap := make(map[string]uuid.UUID)
+		for _, c := range categories {
+			cat, _ := catRepo.Save(ctx, entity.Category{
+				ID:                 uuid.New(),
+				UserID:             userID,
+				Name:               c.name,
+				Color:              c.color,
+				IsVariableSpending: c.isVariableSpending,
+				ForecastStrategy:   c.forecastStrategy,
+			})
+			catMap[c.name] = cat.ID
 		}
 
-		_ = bankStmtRepo.Save(ctx, stmt)
+		// 3. Seed Bank Connections & Accounts
+		conn := entity.BankConnection{
+			ID:              uuid.New(),
+			UserID:          userID,
+			InstitutionID:   "SANDBOX_ID_" + u.username,
+			InstitutionName: "Sandbox Bank (" + u.username + ")",
+			Provider:        "enablebanking",
+			Status:          entity.StatusLinked,
+		}
+		_ = bankRepo.CreateConnection(ctx, &conn)
 
-		// 5. Seed Invoices
-		_ = invoiceRepo.Save(ctx, entity.Invoice{
-			ID:          uuid.New(),
-			Vendor:      entity.Vendor{Name: "Hetzner Online GmbH"},
-			Amount:      42.15,
-			Currency:    "EUR",
-			IssuedAt:    stmtDate.AddDate(0, 0, -10),
-			Description: "Cloud Server Invoice",
-			CategoryID:  &techCat,
-			ContentHash: uuid.New().String(),
-		})
+		acc := entity.BankAccount{
+			ID:                uuid.New(),
+			ConnectionID:      &conn.ID,
+			ProviderAccountID: "dummy_acc_id_" + u.username,
+			IBAN:              "DE1234567890" + u.username,
+			Name:              "Main Giro",
+			Currency:          "EUR",
+			Balance:           5240.50,
+			LastSyncedAt:      time.Now(),
+			AccountType:       entity.StatementTypeGiro,
+		}
+		_ = bankRepo.UpsertAccounts(ctx, []entity.BankAccount{acc}, userID)
 
-		// 6. Seed Payslips
-		_ = payslipRepo.Save(ctx, &entity.Payslip{
-			ID:               uuid.New().String(),
-			OriginalFileName: fmt.Sprintf("Payslip_%d_%02d.pdf", stmtDate.Year(), stmtDate.Month()),
-			PeriodMonthNum:   int(stmtDate.Month()),
-			PeriodYear:       stmtDate.Year(),
-			GrossPay:         5500.00,
-			NetPay:           3500.00,
-			PayoutAmount:     3500.00,
-			ContentHash:      uuid.New().String(),
-		})
+		// 4. Seed Bank Statements and Transactions (last 36 months)
+		now := time.Now()
+		for i := 0; i < 36; i++ {
+			monthDate := now.AddDate(0, -i, 0)
+			stmtDate := time.Date(monthDate.Year(), monthDate.Month(), 28, 0, 0, 0, 0, time.UTC)
+
+			stmt := entity.BankStatement{
+				ID:            uuid.New(),
+				UserID:        userID,
+				AccountHolder: u.username + " User",
+				IBAN:          acc.IBAN,
+				StatementDate: stmtDate,
+				StatementNo:   1000 - i,
+				Currency:      "EUR",
+				StatementType: entity.StatementTypeGiro,
+				ContentHash:   uuid.New().String(),
+				ImportedAt:    time.Now(),
+			}
+
+			salaryCat := catMap["Salary"]
+			rentCat := catMap["Rent"]
+			groceriesCat := catMap["Groceries"]
+			techCat := catMap["Tech & Software"]
+
+			// Calculate how many full years we are past the start of the 3-year period
+			// Start year is now.Year() - 3. Current year is stmtDate.Year().
+			yearsFromStart := float64(stmtDate.Year() - (now.Year() - 3))
+			if yearsFromStart < 0 {
+				yearsFromStart = 0
+			}
+
+			multiplier := 1.0
+			increaseRate := 0.0225 // 2.25%
+			for y := 0.0; y < yearsFromStart; y++ {
+				multiplier *= (1.0 + increaseRate)
+			}
+
+			baseNet := 3500.0
+			baseGross := 5500.0
+
+			stmt.Transactions = []entity.Transaction{
+				{
+					ID:            uuid.New(),
+					UserID:        userID,
+					BankAccountID: &acc.ID,
+					BookingDate:   stmtDate.AddDate(0, 0, -27),
+					Description:   "Salary " + u.username + " Corp",
+					Amount:        baseNet * multiplier,
+					Currency:      "EUR",
+					Type:          entity.TransactionTypeCredit,
+					CategoryID:    &salaryCat,
+					ContentHash:   uuid.New().String(),
+					StatementType: entity.StatementTypeGiro,
+					Reviewed:      true,
+				},
+				{
+					ID:            uuid.New(),
+					UserID:        userID,
+					BankAccountID: &acc.ID,
+					BookingDate:   stmtDate.AddDate(0, 0, -25),
+					Description:   "Rent Payment",
+					Amount:        -1200.00,
+					Currency:      "EUR",
+					Type:          entity.TransactionTypeDebit,
+					CategoryID:    &rentCat,
+					ContentHash:   uuid.New().String(),
+					StatementType: entity.StatementTypeGiro,
+					Reviewed:      true,
+				},
+				{
+					ID:            uuid.New(),
+					UserID:        userID,
+					BankAccountID: &acc.ID,
+					BookingDate:   stmtDate.AddDate(0, 0, -15),
+					Description:   "REWE Supermarket",
+					Amount:        -85.40 - float64(i%5),
+					Currency:      "EUR",
+					Type:          entity.TransactionTypeDebit,
+					CategoryID:    &groceriesCat,
+					ContentHash:   uuid.New().String(),
+					StatementType: entity.StatementTypeGiro,
+					Reviewed:      true,
+				},
+				{
+					ID:            uuid.New(),
+					UserID:        userID,
+					BankAccountID: &acc.ID,
+					BookingDate:   stmtDate.AddDate(0, 0, -10),
+					Description:   "Cloud Services",
+					Amount:        -42.15,
+					Currency:      "EUR",
+					Type:          entity.TransactionTypeDebit,
+					CategoryID:    &techCat,
+					ContentHash:   uuid.New().String(),
+					StatementType: entity.StatementTypeGiro,
+					Reviewed:      true,
+				},
+			}
+
+			_ = bankStmtRepo.Save(ctx, stmt)
+
+			// 5. Seed Invoices
+			_ = invoiceRepo.Save(ctx, entity.Invoice{
+				ID:          uuid.New(),
+				UserID:      userID,
+				Vendor:      entity.Vendor{Name: "Cloud Services"},
+				Amount:      42.15,
+				Currency:    "EUR",
+				IssuedAt:    stmtDate.AddDate(0, 0, -10),
+				Description: "Cloud Server Invoice",
+				CategoryID:  &techCat,
+				ContentHash: uuid.New().String(),
+			})
+
+			// 6. Seed Payslips
+			// Yearly salary increase of ~1.5% to 3% (2.25% average)
+			_ = payslipRepo.Save(ctx, &entity.Payslip{
+				ID:               uuid.New().String(),
+				UserID:           userID,
+				OriginalFileName: fmt.Sprintf("Payslip_%d_%02d.pdf", stmtDate.Year(), stmtDate.Month()),
+				PeriodMonthNum:   int(stmtDate.Month()),
+				PeriodYear:       stmtDate.Year(),
+				EmployerName:     u.username + " Corp",
+				Currency:         "EUR",
+				GrossPay:         baseGross * multiplier,
+				NetPay:           baseNet * multiplier,
+				PayoutAmount:     baseNet * multiplier,
+				ContentHash:      uuid.New().String(),
+			})
+		}
 	}
 }

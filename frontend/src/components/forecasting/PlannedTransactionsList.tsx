@@ -141,10 +141,10 @@ export default function PlannedTransactionsList() {
                                             <CategoryBadge category={tx.category_id} />
                                         </td>
                                         <td className="px-6 py-4 text-center">
-                                            <div className="flex items-center justify-center gap-1.5" title={t(`forecasting.status_${tx.status}`)}>
-                                                <StatusIcon status={tx.status} />
+                                            <div className="flex items-center justify-center gap-1.5" title={t(`forecasting.status_${tx.status || 'pending'}`)}>
+                                                <StatusIcon status={tx.status || 'pending'} />
                                                 <span className="text-xs font-medium capitalize text-gray-600 dark:text-gray-400">
-                                                    {t(`forecasting.status_${tx.status}`)}
+                                                    {t(`forecasting.status_${tx.status || 'pending'}`)}
                                                 </span>
                                             </div>
                                         </td>

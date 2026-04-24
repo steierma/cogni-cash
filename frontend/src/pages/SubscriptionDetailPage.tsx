@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
@@ -30,6 +30,7 @@ import {
 } from 'lucide-react';
 import { subscriptionService } from '../api/services/subscriptionService';
 import { transactionService } from '../api/services/transactionService';
+import { bankService } from '../api/services/bankService';
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 import type { 
     Subscription, 
@@ -43,7 +44,6 @@ export default function SubscriptionDetailPage() {
     const navigate = useNavigate();
     const { t, i18n } = useTranslation();
     const queryClient = useQueryClient();
-    const [showCancelModal, setShowCancelModal] = useState(false);
     const [showLinkModal, setShowLinkModal] = useState(false);
     const [cancellationDraft, setCancellationDraft] = useState<CancellationLetterResult | null>(null);
     const [isEditing, setIsEditing] = useState(false);
@@ -60,7 +60,8 @@ export default function SubscriptionDetailPage() {
         support_url: '',
         cancellation_url: '',
         is_trial: false,
-        notes: ''
+        notes: '',
+        bank_account_id: ''
     });
 
     const { data: subscription, isLoading: isLoadingSub } = useQuery<Subscription>({
@@ -68,6 +69,13 @@ export default function SubscriptionDetailPage() {
         queryFn: () => subscriptionService.getSubscription(id!),
         enabled: !!id
     });
+
+    const { data: connections = [] } = useQuery({
+        queryKey: ['bank-connections'],
+        queryFn: bankService.fetchConnections,
+    });
+
+    const allAccounts = connections.flatMap(c => c.accounts || []);
 
     const { data: transactions = [] } = useQuery({
         queryKey: ['subscriptionTransactions', id],
@@ -126,7 +134,12 @@ export default function SubscriptionDetailPage() {
     });
 
     const linkMutation = useMutation({
-        mutationFn: (txnHash: string) => subscriptionService.linkTransaction(id!, txnHash),
+        mutationFn: (txnHashes: string | string[]) => {
+            if (Array.isArray(txnHashes)) {
+                return subscriptionService.linkTransactions(id!, txnHashes);
+            }
+            return subscriptionService.linkTransaction(id!, txnHashes);
+        },
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['subscription', id] });
             queryClient.invalidateQueries({ queryKey: ['subscriptionTransactions', id] });
@@ -135,26 +148,34 @@ export default function SubscriptionDetailPage() {
     });
 
     const [searchParams, setSearchParams] = useSearchParams();
-    const [showEnrichedBadge, setShowEnrichedBadge] = useState(false);
+    const [showEnrichedBadge, setShowEnrichedBadge] = useState(() => searchParams.get('enriched') === 'true');
+    const [showCancelModal, setShowCancelModal] = useState(() => searchParams.get('cancel') === 'true');
+    const paramsProcessed = useRef(false);
 
     useEffect(() => {
+        if (paramsProcessed.current) return;
+
         if (searchParams.get('enriched') === 'true') {
-            setShowEnrichedBadge(true);
             const timer = setTimeout(() => {
                 setShowEnrichedBadge(false);
-                // Clear the param without a full navigation
-                searchParams.delete('enriched');
-                setSearchParams(searchParams, { replace: true });
             }, 10000);
+            
+            // Clear the param without a full navigation
+            const newParams = new URLSearchParams(searchParams);
+            newParams.delete('enriched');
+            setSearchParams(newParams, { replace: true });
+            
+            paramsProcessed.current = true;
             return () => clearTimeout(timer);
         }
 
         if (searchParams.get('cancel') === 'true') {
-            setShowCancelModal(true);
             previewMutation.mutate();
             // Clear the param
-            searchParams.delete('cancel');
-            setSearchParams(searchParams, { replace: true });
+            const newParams = new URLSearchParams(searchParams);
+            newParams.delete('cancel');
+            setSearchParams(newParams, { replace: true });
+            paramsProcessed.current = true;
         }
     }, [searchParams, setSearchParams, previewMutation]);
 
@@ -182,7 +203,8 @@ export default function SubscriptionDetailPage() {
             support_url: subscription.support_url || '',
             cancellation_url: subscription.cancellation_url || '',
             is_trial: subscription.is_trial,
-            notes: subscription.notes || ''
+            notes: subscription.notes || '',
+            bank_account_id: subscription.bank_account_id || ''
         });
         setIsEditing(true);
     };
@@ -357,6 +379,19 @@ export default function SubscriptionDetailPage() {
                                             <option value="active">{t('subscriptions.status.active')}</option>
                                             <option value="cancelled">{t('subscriptions.status.cancelledPast')}</option>
                                             <option value="paused">{t('subscriptions.status.paused')}</option>
+                                        </select>
+                                    </div>
+                                    <div className="space-y-1">
+                                        <label className="text-[10px] font-bold text-gray-400 dark:text-gray-500 uppercase tracking-widest">Source Account</label>
+                                        <select
+                                            value={editForm.bank_account_id}
+                                            onChange={(e) => setEditForm({ ...editForm, bank_account_id: e.target.value })}
+                                            className="w-full p-3 bg-gray-50 dark:bg-gray-800 rounded-xl border-none focus:ring-2 focus:ring-indigo-500 font-bold appearance-none"
+                                        >
+                                            <option value="">-- All Accounts (Global) --</option>
+                                            {allAccounts.map(acc => (
+                                                <option key={acc.id} value={acc.id}>{acc.name} ({acc.iban})</option>
+                                            ))}
                                         </select>
                                     </div>
                                 </div>
@@ -735,8 +770,8 @@ export default function SubscriptionDetailPage() {
             {showLinkModal && (
                 <LinkTransactionModal 
                     onClose={() => setShowLinkModal(false)}
-                    onLink={(hash) => {
-                        linkMutation.mutate(hash);
+                    onLink={(hashes) => {
+                        linkMutation.mutate(hashes);
                         setShowLinkModal(false);
                     }}
                 />
@@ -745,9 +780,10 @@ export default function SubscriptionDetailPage() {
     );
 }
 
-function LinkTransactionModal({ onClose, onLink }: { onClose: () => void, onLink: (hash: string) => void }) {
+function LinkTransactionModal({ onClose, onLink }: { onClose: () => void, onLink: (hashes: string[]) => void }) {
     const { t } = useTranslation();
     const [searchTerm, setSearchTerm] = useState('');
+    const [selectedHashes, setSelectedHashes] = useState<Set<string>>(new Set());
     
     // Fetch transactions that are NOT already linked to any subscription
     const { data: unlinkedTxns = [], isLoading } = useQuery({
@@ -759,10 +795,8 @@ function LinkTransactionModal({ onClose, onLink }: { onClose: () => void, onLink
             undefined, // toDate
             undefined, // categoryID
             false,     // isReconciled
-            false,     // skipForecasting
-            'null' as any, // HACK: We need a way to filter by subscription_id IS NULL. 
-            // Looking at the backend, it might not support 'null' filter explicitly in SearchTransactions yet.
-            // But let's assume we filter on client side or use a broad search.
+            false,     // includeShared
+            'null' as string, // HACK: We need a way to filter by subscription_id IS NULL.
         ),
         enabled: true
     });
@@ -777,6 +811,22 @@ function LinkTransactionModal({ onClose, onLink }: { onClose: () => void, onLink
         )
         .sort((a, b) => new Date(b.booking_date).getTime() - new Date(a.booking_date).getTime())
         .slice(0, 50);
+
+    const toggleSelection = (hash: string) => {
+        const next = new Set(selectedHashes);
+        if (next.has(hash)) {
+            next.delete(hash);
+        } else {
+            next.add(hash);
+        }
+        setSelectedHashes(next);
+    };
+
+    const handleLinkSelected = () => {
+        if (selectedHashes.size > 0) {
+            onLink(Array.from(selectedHashes));
+        }
+    };
 
     return (
         <div className="fixed inset-0 z-[100] flex items-center justify-center p-4 md:p-8">
@@ -816,40 +866,63 @@ function LinkTransactionModal({ onClose, onLink }: { onClose: () => void, onLink
                             {t('common.noData')}
                         </div>
                     ) : (
-                        filteredTxns.map(tx => (
-                            <div key={tx.id} className="p-4 rounded-2xl border border-gray-100 dark:border-gray-800 hover:border-indigo-500 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10 transition-all flex items-center justify-between group">
-                                <div className="space-y-1 min-w-0">
-                                    <div className="flex items-center gap-2">
-                                        <p className="text-sm font-bold text-gray-900 dark:text-white">{fmtDate(tx.booking_date)}</p>
-                                        <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
-                                            {tx.statement_type}
-                                        </span>
+                        filteredTxns.map(tx => {
+                            const isSelected = selectedHashes.has(tx.content_hash);
+                            return (
+                                <div 
+                                    key={tx.id} 
+                                    onClick={() => toggleSelection(tx.content_hash)}
+                                    className={`p-4 rounded-2xl border transition-all flex items-center justify-between group cursor-pointer ${
+                                        isSelected 
+                                            ? 'border-indigo-500 bg-indigo-50/50 dark:bg-indigo-900/20' 
+                                            : 'border-gray-100 dark:border-gray-800 hover:border-indigo-500 hover:bg-indigo-50/30 dark:hover:bg-indigo-900/10'
+                                    }`}
+                                >
+                                    <div className="flex items-center gap-4 min-w-0">
+                                        <div className={`w-6 h-6 rounded-full border-2 flex items-center justify-center transition-colors ${
+                                            isSelected 
+                                                ? 'bg-indigo-500 border-indigo-500 text-white' 
+                                                : 'border-gray-300 dark:border-gray-700'
+                                        }`}>
+                                            {isSelected && <CheckCircle2 size={16} />}
+                                        </div>
+                                        <div className="space-y-1 min-w-0">
+                                            <div className="flex items-center gap-2">
+                                                <p className="text-sm font-bold text-gray-900 dark:text-white">{fmtDate(tx.booking_date)}</p>
+                                                <span className="text-[10px] font-bold text-gray-400 uppercase tracking-widest bg-gray-100 dark:bg-gray-800 px-1.5 py-0.5 rounded">
+                                                    {tx.statement_type}
+                                                </span>
+                                            </div>
+                                            <p className="text-sm text-gray-600 dark:text-gray-400 truncate max-w-md">{tx.description}</p>
+                                        </div>
                                     </div>
-                                    <p className="text-sm text-gray-600 dark:text-gray-400 truncate max-w-md">{tx.description}</p>
+                                    <div className="flex items-center gap-4 shrink-0">
+                                        <p className="font-mono font-bold text-gray-900 dark:text-white">
+                                            {fmtCurrency(tx.amount)}
+                                        </p>
+                                    </div>
                                 </div>
-                                <div className="flex items-center gap-4 shrink-0">
-                                    <p className="font-mono font-bold text-gray-900 dark:text-white">
-                                        {fmtCurrency(tx.amount)}
-                                    </p>
-                                    <button
-                                        onClick={() => onLink(tx.content_hash)}
-                                        className="p-2.5 rounded-xl bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-400 hover:text-indigo-600 hover:border-indigo-500 transition-all shadow-sm group-hover:bg-indigo-600 group-hover:text-white group-hover:border-indigo-600"
-                                    >
-                                        <LinkIcon size={18} />
-                                    </button>
-                                </div>
-                            </div>
-                        ))
+                            );
+                        })
                     )}
                 </div>
 
-                <div className="p-6 border-t border-gray-100 dark:border-gray-800">
+                <div className="p-6 border-t border-gray-100 dark:border-gray-800 flex gap-4">
                     <button 
                         onClick={onClose}
-                        className="w-full px-6 py-3 rounded-xl font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                        className="flex-1 px-6 py-3 rounded-xl font-bold text-gray-600 dark:text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
                     >
                         {t('common.close')}
                     </button>
+                    {selectedHashes.size > 0 && (
+                        <button 
+                            onClick={handleLinkSelected}
+                            className="flex-[2] px-6 py-3 rounded-xl font-bold bg-indigo-600 text-white hover:bg-indigo-700 transition-colors shadow-lg shadow-indigo-500/20 flex items-center justify-center gap-2"
+                        >
+                            <LinkIcon size={18} />
+                            {t('subscriptions.linkTransaction', { count: selectedHashes.size })}
+                        </button>
+                    )}
                 </div>
             </div>
         </div>

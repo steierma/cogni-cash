@@ -56,3 +56,8 @@ mobile_hermit/ios_bak/
 mobile_hermit/bin/inspect_temp.dart
 /coverage.out
 /backend/internal/adapter/parser/bank_statement/ingcsv/parser_test.go
+/frontend/test-results/auth-Authentication-should-aa54a-ully-with-admin-credentials-chromium/error-context.md
+/frontend/test-results/auth-Authentication-should-ef91f-or-with-invalid-credentials-chromium/error-context.md
+/frontend/test-results/.last-run.json
+/frontend/playwright-report/index.html
+/.lens.yaml

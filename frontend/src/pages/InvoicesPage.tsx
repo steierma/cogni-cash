@@ -198,7 +198,7 @@ export default function InvoicesPage() {
     });
 
     const importMutation = useMutation({
-        mutationFn: ({ file, categoryId, splits }: { file: File, categoryId?: string, splits?: any[] }) => 
+        mutationFn: ({ file, categoryId, splits }: { file: File, categoryId?: string, splits?: InvoiceUpdatePayload['splits'] }) => 
             invoiceService.import(file, { category_id: categoryId || null, splits }),
         onSuccess: () => qc.invalidateQueries({ queryKey: ['invoices'] }),
     });
@@ -350,7 +350,7 @@ export default function InvoicesPage() {
         });
 
         return rows;
-    }, [invoices, appliedFilters, sortKey, sortDir, categories]);
+    }, [invoices, appliedFilters, sortKey, sortDir, categories, me?.id]);
 
     const toggleSelect = (id: string) => {
         const next = new Set(selectedIds);
@@ -528,7 +528,7 @@ export default function InvoicesPage() {
                     <div>
                         <select
                             value={draftFilters.source}
-                            onChange={(e) => setDraftFilters(f => ({ ...f, source: e.target.value as any }))}
+                            onChange={(e) => setDraftFilters(f => ({ ...f, source: e.target.value as FilterState['source'] }))}
                             className="w-full py-2 px-3 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-200 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500/50"
                         >
                             <option value="all">{t('sharing.filters.all', 'All Invoices')}</option>

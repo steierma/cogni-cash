@@ -45,7 +45,11 @@ func (s *ReconciliationService) ReconcileStatements(
 	}
 
 	f := false
-	txns, err := s.transactionRepo.SearchTransactions(ctx, entity.TransactionFilter{UserID: userID, IsReconciled: &f})
+	txns, err := s.transactionRepo.SearchTransactions(ctx, entity.TransactionFilter{
+		UserID:        userID,
+		IsReconciled:  &f,
+		IncludeShared: true,
+	})
 	if err != nil {
 		return entity.Reconciliation{}, fmt.Errorf("reconciliation service: resolve transactions: %w", err)
 	}
@@ -105,8 +109,9 @@ func (s *ReconciliationService) SuggestReconciliations(ctx context.Context, user
 
 	f := false
 	allTxns, err := s.transactionRepo.FindTransactions(ctx, entity.TransactionFilter{
-		UserID:       userID,
-		IsReconciled: &f,
+		UserID:        userID,
+		IsReconciled:  &f,
+		IncludeShared: true,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("find candidate txns: %w", err)
@@ -140,12 +145,6 @@ func (s *ReconciliationService) SuggestReconciliations(ctx context.Context, user
 				continue
 			}
 			if debit.BankStatementID != nil && credit.BankStatementID != nil && *debit.BankStatementID == *credit.BankStatementID {
-				continue
-			}
-
-			// Skip if the target (credit) date is before the source (debit) date.
-			// A settlement payment always debits first; the credit appears later (or same day).
-			if credit.BookingDate.Before(debit.BookingDate) {
 				continue
 			}
 

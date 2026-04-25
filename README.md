@@ -1,48 +1,72 @@
+```markdown
 # 💰 CogniCash: Your Private AI Financial Center
 
 CogniCash is a **privacy-first, self-hosted** financial engine that transforms raw banking data and documents into actionable insights. By combining **Strict Hexagonal Architecture** with **Local AI (Ollama)**, it provides a high-integrity platform for managing your entire financial life without ever leaking data to the cloud.
 
-## ⚡ Quick Start (Docker) 
+---
 
-The fastest way to get started is using our standalone Docker setup: 
+> ### 🚀 Try the Live Demo!
+> Want to see it in action before installing? Check out the live demo environment:
+> 👉 **[demo-cogni-cash.steierl.org](https://demo-cogni-cash.steierl.org/)**
+> * **Username:** `admin`
+> * **Password:** `demo`
+
+---
+
+## ⚡ Quick Start (Docker)
+
+The fastest way to get started is using our standalone Docker setup:
 
 ```bash 
 # 1. Create directory 
 mkdir cognicash && cd cognicash 
 
 # 2. Download and run 
-curl -O https://raw.githubusercontent.com/steierma/cogni-cash/main/docker-compose.standalone.yml 
+curl -O [https://raw.githubusercontent.com/steierma/cogni-cash/main/docker-compose.standalone.yml](https://raw.githubusercontent.com/steierma/cogni-cash/main/docker-compose.standalone.yml) 
 mv docker-compose.standalone.yml docker-compose.yml 
 docker compose up -d 
 ``` 
 
-See the [Installation Guide](./INSTALL.md#option-d--standalone-docker-quickest) for full details. 
+See the [Installation Guide](./INSTALL.md#option-d--standalone-docker-quickest) for full details.
 
 --- 
 
-## 🌟 Why CogniCash?
+## 🌟 Key Highlights
 
-* **🧠 Local-First AI Intelligence:** Leverage local LLMs (like Llama 3 via Ollama) to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Supports **Split Categorization** for invoices, allowing for granular tracking (e.g., splitting a supermarket receipt into multiple categories). Supports PDF and image formats via multimodal Gemini or AI-fallback paths. All AI processing happens **locally on your hardware**. Includes a **Hybrid Matcher** checking for high-confidence (65%+) historical matches before calling the AI.
-* **📊 Global Multi-Currency Support:** Master your international finances with a robust, snapshot-based multi-currency system. All financial data (Transactions, Invoices, Payslips) is projected into a persistent **Base Display Currency** using historical exchange rates at the time of import. Ensures 100% accuracy in analytics and forecasting across different regions and currencies.
-* **🔮 Predictive Intelligence:** Look into your financial future with the **Forecasting Engine**.
- Automatically detects recurring patterns from your subscription history and manually planned transactions. Supports **Account-Centric Forecasting**, allowing you to filter projections by specific bank accounts. Includes **Forecast Fine-Tuning** to mute or exclude specific projections.
+| | | |
+| :--- | :--- | :--- |
+| **🧠 Local-First AI Integration** | **🔮 Predictive Forecasting** | **👥 Shared Bank Accounts** |
+| **📊 Multi-Currency Mastery** | **🗄️ Universal Vault Encryption** | **🛡️ Privacy-First Integrity** |
+| **📜 Professional Payslip Management** | **🔁 Subscription Management** | **🥧 Raspberry Pi 5 Ready** |
+
+---
+
+<details>
+<summary><h2>🔍 Dive Deeper: All Features & Capabilities (Click to expand)</h2></summary>
+
+* **🧠 Local-First AI Intelligence:** Leverage local LLMs to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Supports **Split Categorization** for invoices, allowing for granular tracking (e.g., splitting a supermarket receipt into multiple categories). Supports PDF and image formats via multimodal Gemini or AI-fallback paths. Includes a **Hybrid Matcher** checking for high-confidence (65%+) historical matches before calling the AI.
+* **📊 Global Multi-Currency Support:** Master your international finances with a robust, snapshot-based multi-currency system. Ensures 100% accuracy in analytics and forecasting across different regions and currencies.
+* **🔮 Predictive Intelligence:** Look into your financial future with the **Forecasting Engine**. Automatically detects recurring patterns from your subscription history and manually planned transactions. Includes **Forecast Fine-Tuning** to mute or exclude specific projections.
 * **🛡️ Privacy-First Integrity:** We maintain a strictly **personal-data-free codebase**. Our automated "deep-scrubbing" policy ensures all test data, logs, and documentation examples are completely anonymized or synthetic.
 * **📜 Professional Payslip Management:** Master your HR documents with a dedicated **Payslip Engine**. Automatically extract Gross, Net, Payout, and Bonuses. Includes a **Split-View Preview** to compare the original PDF with the extracted data.
 * **🏦 Offline-First Parsers:** Built-in, privacy-respecting offline parsers for major providers like **ING (DIBA), Amazon Visa, and VW/CARIAD**. Supports **Virtual Bank Accounts** to track non-syncable accounts like manual credit cards.
 * **📈 Precision Analytics:** Master your cash flow with deep-dive analytics, a dedicated **Review Mode (Inbox)** for new transactions, and a smart **Reconciliation Wizard** to link internal transfers.
-* **🔁 Subscription Management:** Automatically identify recurring payments (Netflix, Rent, Insurance) from your transaction history. Approve suggested subscriptions to retroactively link and track your fixed costs with one click. Features **AI-powered Merchant Profiling**, **Configurable AI-driven pattern recognition**, **One-click manual creation from transactions**, and **Manual transaction linking with persistent overrides**.
-* **🗄️ Universal Vault Encryption:** A centralized, **mandatory-encryption** repository for all your tax certificates, payslips, invoices, bank statements, and contracts. Secured at rest using PostgreSQL's `pgp_sym_encrypt_bytea`, ensuring that your most sensitive financial files never exist in plain text on your storage media. Features **OCR-powered full-text search** and a dedicated **Tax Year View**. Supports manual and AI-assisted uploads.
-* **👥 Multi-Tenant & Collaborative:** Built for **Full User Tenancy**. Includes **Bank Account Centric Sharing** for collaborative budgeting. Sharing an account automatically grants access to its history, statements, and future projections while preserving personal privacy for other accounts.
+* **🔁 Subscription Management:** Automatically identify recurring payments (Netflix, Rent, Insurance) from your transaction history. Approve suggested subscriptions to retroactively link and track your fixed costs with one click. Features **AI-powered Merchant Profiling** and **Configurable AI-driven pattern recognition**.
+* **🗄️ Universal Vault Encryption:** A centralized, **mandatory-encryption** repository. Secured at rest using PostgreSQL's `pgp_sym_encrypt_bytea`. Features **OCR-powered full-text search** and a dedicated **Tax Year View**. Supports manual and AI-assisted uploads.
+* **👥 Multi-Tenant & Collaborative:** Built for **Full User Tenancy**. Includes **Bank Account Centric Sharing** for collaborative budgeting.
 * **📱 Native Mobile App:** High-fidelity Flutter app with a **Cache-First (Isar)** architecture and **Mutation Outbox** for seamless financial management without a network connection.
 * **🥧 Raspberry Pi 5 Ready:** Fully compatible with **ARM64** architectures.
 
-## Intro Video
+### Intro Video
 
 https://github.com/user-attachments/assets/44a99551-3589-4b79-b353-bb4d597fd291
 
+</details>
+
 ---
 
-## 📱 Mobile Experience (Beta)
+<details>
+<summary><h2>📱 Mobile Experience Beta (Click to expand)</h2></summary>
 
 Manage your finances on the go with the **CogniCash Mobile App**. Built with Flutter, it offers a seamless, offline-first experience that syncs perfectly with your self-hosted instance.
 
@@ -80,6 +104,8 @@ Manage your finances on the go with the **CogniCash Mobile App**. Built with Flu
 
 **Interested in the Mobile App?** I am preparing for a public release on the **Google Play Store**. Contact me to join the Beta Program: 👉 [support-cogni-cash@steierl.org](mailto:support-cogni-cash@steierl.org?subject=Interest%20in%20CogniCash%20Mobile)
 
+</details>
+
 ---
 
 ## 📚 Documentation Directory
@@ -93,3 +119,4 @@ To keep this repository easy to navigate, detailed documentation has been split 
 * **[Architecture & Roadmap](docs/ARCHITECTURE.md):** Hexagonal design details, Tech Stack, and Project Roadmap.
 * **[API Reference](docs/API_REFERENCE.md):** Overview of the RESTful API endpoints.
 * **[Database Schema](docs/DATABASE_SCHEMA.md):** Comprehensive ERD, table definitions, and migration strategies.
+```

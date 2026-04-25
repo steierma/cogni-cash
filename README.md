@@ -2,6 +2,24 @@
 
 CogniCash is a **privacy-first, self-hosted** financial engine that transforms raw banking data and documents into actionable insights. By combining **Strict Hexagonal Architecture** with **Local AI (Ollama)**, it provides a high-integrity platform for managing your entire financial life without ever leaking data to the cloud.
 
+## ⚡ Quick Start (Docker) 
+
+The fastest way to get started is using our standalone Docker setup: 
+
+```bash 
+# 1. Create directory 
+mkdir cognicash && cd cognicash 
+
+# 2. Download and run 
+curl -O https://raw.githubusercontent.com/steierma/cogni-cash/main/docker-compose.standalone.yml 
+mv docker-compose.standalone.yml docker-compose.yml 
+docker compose up -d 
+``` 
+
+See the [Installation Guide](./INSTALL.md#option-d--standalone-docker-quickest) for full details. 
+
+--- 
+
 ## 🌟 Why CogniCash?
 
 * **🧠 Local-First AI Intelligence:** Leverage local LLMs (like Llama 3 via Ollama) to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Supports **Split Categorization** for invoices, allowing for granular tracking (e.g., splitting a supermarket receipt into multiple categories). Supports PDF and image formats via multimodal Gemini or AI-fallback paths. All AI processing happens **locally on your hardware**. Includes a **Hybrid Matcher** checking for high-confidence (65%+) historical matches before calling the AI.

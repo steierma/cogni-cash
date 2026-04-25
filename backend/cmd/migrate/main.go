@@ -95,6 +95,8 @@ func main() {
 	}
 
 	ran := 0
+	vaultKey := os.Getenv("DOCUMENT_VAULT_KEY")
+
 	for _, f := range files {
 		version := versionFromFile(f)
 
@@ -114,7 +116,7 @@ func main() {
 			log.Printf("  apply %s ...", version)
 		}
 
-		if err := runMigration(ctx, pool, version, string(sql), currentHash); err != nil {
+		if err := runMigration(ctx, pool, version, string(sql), currentHash, vaultKey); err != nil {
 			log.Fatalf("migrate: apply %s: %v", version, err)
 		}
 		log.Printf("  ✓     %s applied", version)
@@ -127,12 +129,21 @@ func main() {
 }
 
 // runMigration executes the SQL and records the version + content hash inside a single transaction.
-func runMigration(ctx context.Context, pool *pgxpool.Pool, version, sql, contentHash string) error {
+func runMigration(ctx context.Context, pool *pgxpool.Pool, version, sql, contentHash, vaultKey string) error {
 	tx, err := pool.BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return fmt.Errorf("begin: %w", err)
 	}
 	defer tx.Rollback(ctx) //nolint:errcheck
+
+	if vaultKey != "" {
+		// Set the vault key as a session variable so SQL migrations can use it.
+		// Using set_config instead of SET LOCAL allows using parameters for safety.
+		_, err = tx.Exec(ctx, "SELECT set_config('vault.key', $1, true)", vaultKey)
+		if err != nil {
+			return fmt.Errorf("set vault key: %w", err)
+		}
+	}
 
 	if _, err := tx.Exec(ctx, sql); err != nil {
 		return fmt.Errorf("exec: %w", err)

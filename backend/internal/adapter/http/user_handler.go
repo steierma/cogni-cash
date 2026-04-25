@@ -8,7 +8,30 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"context"
+	"sync"
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type UserHandler struct {
+	AppCtx context.Context
+	Logger *slog.Logger
+	WaitGroup *sync.WaitGroup
+	notificationSvc port.NotificationUseCase
+	userSvc port.UserUseCase
+}
+
+func NewUserHandler(AppCtx context.Context, Logger *slog.Logger, WaitGroup *sync.WaitGroup, notificationSvc port.NotificationUseCase, userSvc port.UserUseCase) *UserHandler {
+	return &UserHandler{
+		AppCtx: AppCtx,
+		Logger: Logger,
+		WaitGroup: WaitGroup,
+		notificationSvc: notificationSvc,
+		userSvc: userSvc,
+	}
+}
 
 type createUserRequest struct {
 	entity.User
@@ -16,8 +39,8 @@ type createUserRequest struct {
 }
 
 // getMe returns the currently authenticated user's profile
-func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *UserHandler) getMe(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		h.Logger.Warn("getMe failed: missing or invalid userID in context")
 		writeError(w, http.StatusUnauthorized, "unauthorized")
@@ -35,7 +58,7 @@ func (h *Handler) getMe(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) listUsers(w http.ResponseWriter, r *http.Request) {
 	search := r.URL.Query().Get("q")
 	h.Logger.Info("Fetching user list", "search_query", search)
 
@@ -54,7 +77,7 @@ func (h *Handler) listUsers(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, users)
 }
 
-func (h *Handler) getUser(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) getUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	h.Logger.Info("Fetching specific user", "target_id", id)
 
@@ -68,7 +91,7 @@ func (h *Handler) getUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) createUser(w http.ResponseWriter, r *http.Request) {
 	var req createUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.Logger.Warn("createUser failed: invalid JSON body", "error", err)
@@ -102,7 +125,7 @@ func (h *Handler) createUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, user)
 }
 
-func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) updateUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
 	h.Logger.Info("Attempting to update user", "target_id", id)
 
@@ -124,9 +147,9 @@ func (h *Handler) updateUser(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, user)
 }
 
-func (h *Handler) deleteUser(w http.ResponseWriter, r *http.Request) {
+func (h *UserHandler) deleteUser(w http.ResponseWriter, r *http.Request) {
 	id := chi.URLParam(r, "id")
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

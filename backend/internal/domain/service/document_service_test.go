@@ -334,6 +334,62 @@ func TestDocumentService_Update(t *testing.T) {
 			t.Errorf("expected new_key to be added, got %v", updatedDoc.Metadata["new_key"])
 		}
 	})
+
+	t.Run("Update with Re-upload (Trigger AI)", func(t *testing.T) {
+		initialDoc := entity.Document{
+			ID:               docID,
+			UserID:           userID,
+			Type:             entity.DocTypeOther,
+			OriginalFileName: "old.pdf",
+			ContentHash:      "old-hash",
+			MimeType:         "application/pdf",
+		}
+
+		repo := &mockDocumentRepoDocSvc{
+			findByIDFunc: func(ctx context.Context, id, uID uuid.UUID) (entity.Document, error) {
+				return initialDoc, nil
+			},
+			updateFunc: func(ctx context.Context, doc entity.Document) (entity.Document, error) {
+				return doc, nil
+			},
+		}
+
+		aiParser := &mockDocumentAIParserDocSvc{
+			classifyAndExtractFunc: func(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.DocumentType, map[string]interface{}, string, error) {
+				return entity.DocTypeReceipt, map[string]interface{}{"vendor": "Re-uploaded Inc"}, "Fresh AI Text", nil
+			},
+		}
+
+		svc := service.NewDocumentService(repo, aiParser, &mockPayslipRepoDocSvc{}, &mockInvoiceRepoDocSvc{})
+
+		newContent := []byte("new file content")
+		newMime := "application/pdf"
+		req := entity.DocumentUpdateRequest{
+			OriginalFileContent: newContent,
+			MimeType:            &newMime,
+		}
+
+		updatedDoc, err := svc.Update(ctx, docID, userID, req)
+		if err != nil {
+			t.Fatalf("expected no error, got %v", err)
+		}
+
+		// Verify content hash changed
+		if updatedDoc.ContentHash == "old-hash" {
+			t.Error("expected content hash to change after re-upload")
+		}
+
+		// Verify AI was triggered
+		if updatedDoc.Type != entity.DocTypeReceipt {
+			t.Errorf("expected re-classification to %s, got %s", entity.DocTypeReceipt, updatedDoc.Type)
+		}
+		if updatedDoc.Metadata["vendor"] != "Re-uploaded Inc" {
+			t.Errorf("expected updated metadata, got %v", updatedDoc.Metadata["vendor"])
+		}
+		if updatedDoc.ExtractedText != "Fresh AI Text" {
+			t.Errorf("expected updated extracted text, got %s", updatedDoc.ExtractedText)
+		}
+	})
 }
 
 func TestDocumentService_SimpleWrappers(t *testing.T) {

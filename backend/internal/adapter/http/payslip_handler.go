@@ -12,7 +12,24 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type PayslipHandler struct {
+	Logger *slog.Logger
+	payslipRepo port.PayslipRepository
+	payslipSvc port.PayslipUseCase
+}
+
+func NewPayslipHandler(Logger *slog.Logger, payslipRepo port.PayslipRepository, payslipSvc port.PayslipUseCase) *PayslipHandler {
+	return &PayslipHandler{
+		Logger: Logger,
+		payslipRepo: payslipRepo,
+		payslipSvc: payslipSvc,
+	}
+}
 
 // allowedPayslipMIMETypes is the set of MIME types accepted by the payslip import endpoints.
 // Image types are accepted because the AI payslip parser supports multimodal requests.
@@ -26,8 +43,8 @@ var allowedPayslipMIMETypes = map[string]bool{
 }
 
 // listPayslips handles GET /api/v1/payslips/
-func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PayslipHandler) listPayslips(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -60,8 +77,8 @@ func (h *Handler) listPayslips(w http.ResponseWriter, r *http.Request) {
 }
 
 // getPayslipSummary handles GET /api/v1/payslips/summary
-func (h *Handler) getPayslipSummary(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PayslipHandler) getPayslipSummary(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -78,8 +95,8 @@ func (h *Handler) getPayslipSummary(w http.ResponseWriter, r *http.Request) {
 }
 
 // getPayslip handles GET /api/v1/payslips/{id}
-func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PayslipHandler) getPayslip(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -102,8 +119,8 @@ func (h *Handler) getPayslip(w http.ResponseWriter, r *http.Request) {
 }
 
 // importPayslip handles POST /api/v1/payslips/import
-func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PayslipHandler) importPayslip(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -211,8 +228,8 @@ func (h *Handler) importPayslip(w http.ResponseWriter, r *http.Request) {
 }
 
 // updatePayslip handles PUT /api/v1/payslips/{id}
-func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PayslipHandler) updatePayslip(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -288,8 +305,8 @@ func (h *Handler) updatePayslip(w http.ResponseWriter, r *http.Request) {
 }
 
 // deletePayslip handles DELETE /api/v1/payslips/{id}
-func (h *Handler) deletePayslip(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PayslipHandler) deletePayslip(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -311,8 +328,8 @@ func (h *Handler) deletePayslip(w http.ResponseWriter, r *http.Request) {
 }
 
 // downloadPayslipFile handles GET /api/v1/payslips/{id}/download
-func (h *Handler) downloadPayslipFile(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PayslipHandler) downloadPayslipFile(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -364,7 +381,7 @@ type batchImportError struct {
 }
 
 // importPayslipsBatch handles POST /api/v1/payslips/import/batch
-func (h *Handler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
+func (h *PayslipHandler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
 	const maxUpload = 50 << 20 // 50 MB hard cap for batch
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
 	if err := r.ParseMultipartForm(maxUpload); err != nil {
@@ -379,7 +396,7 @@ func (h *Handler) importPayslipsBatch(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

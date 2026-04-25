@@ -20,12 +20,13 @@ import (
 
 // BankStatementRepository implements port.BankStatementRepository using pgx.
 type BankStatementRepository struct {
-	pool   *pgxpool.Pool
-	Logger *slog.Logger
+	pool     *pgxpool.Pool
+	vaultKey string
+	Logger   *slog.Logger
 }
 
-func NewBankStatementRepository(pool *pgxpool.Pool, logger *slog.Logger) *BankStatementRepository {
-	return &BankStatementRepository{pool: pool, Logger: logger}
+func NewBankStatementRepository(pool *pgxpool.Pool, vaultKey string, logger *slog.Logger) *BankStatementRepository {
+	return &BankStatementRepository{pool: pool, vaultKey: vaultKey, Logger: logger}
 }
 
 func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStatement) error {
@@ -51,10 +52,10 @@ func (r *BankStatementRepository) Save(ctx context.Context, stmt entity.BankStat
 			(id, user_id, account_holder, iban,
 			 statement_date, statement_no,
 			 old_balance, new_balance, currency, original_file, content_hash, statement_type, bank_account_id)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12, $13)`,
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,pgp_sym_encrypt_bytea($10, $11),$12,$13, $14)`,
 		stmtID, stmt.UserID, stmt.AccountHolder, stmt.IBAN,
 		statementDate, stmt.StatementNo, stmt.OldBalance, stmt.NewBalance,
-		stmt.Currency, stmt.OriginalFile, stmt.ContentHash,
+		stmt.Currency, stmt.OriginalFile, r.vaultKey, stmt.ContentHash,
 		string(stmt.StatementType), stmt.BankAccountID,
 	)
 	if err != nil {
@@ -428,7 +429,7 @@ func (r *BankStatementRepository) FindByID(ctx context.Context, id uuid.UUID, us
 		FROM bank_statements 
 		WHERE id = $1 AND (user_id = $2 OR bank_account_id IN (SELECT bank_account_id FROM shared_bank_accounts WHERE shared_with_user_id = $2))`, id, userID)
 
-	stmt, err := scanStatement(row)
+	stmt, err := r.scanStatement(ctx, row)
 	if err != nil {
 		return entity.BankStatement{}, fmt.Errorf("bank_statement repo: find by id: %w", err)
 	}
@@ -455,7 +456,7 @@ func (r *BankStatementRepository) FindAll(ctx context.Context, userID uuid.UUID)
 
 	var stmts []entity.BankStatement
 	for rows.Next() {
-		s, err := scanStatement(rows)
+		s, err := r.scanStatement(ctx, rows)
 		if err != nil {
 			return nil, fmt.Errorf("bank_statement repo: scan row: %w", err)
 		}
@@ -845,10 +846,11 @@ type scanner interface {
 	Scan(dest ...any) error
 }
 
-func scanStatement(row scanner) (entity.BankStatement, error) {
+func (r *BankStatementRepository) scanStatement(ctx context.Context, row scanner) (entity.BankStatement, error) {
 	var (
 		s             entity.BankStatement
 		statementDate *time.Time
+		rawFile       []byte
 		originalFile  []byte
 		// Use pointers to scan safely in case the DB has NULLs (e.g. from tests)
 		accHolder, iban, currency, stmtType *string
@@ -864,7 +866,7 @@ func scanStatement(row scanner) (entity.BankStatement, error) {
 		&s.OldBalance,
 		&s.NewBalance,
 		&currency,
-		&originalFile,
+		&rawFile,
 		&s.ImportedAt,
 		&stmtType,
 		&s.BankAccountID,
@@ -888,6 +890,18 @@ func scanStatement(row scanner) (entity.BankStatement, error) {
 	if statementDate != nil {
 		s.StatementDate = *statementDate
 	}
+
+	if len(rawFile) > 0 {
+		// Try decryption
+		decryptQuery := "SELECT pgp_sym_decrypt_bytea($1, $2)"
+		err = r.pool.QueryRow(ctx, decryptQuery, rawFile, r.vaultKey).Scan(&originalFile)
+		if err != nil {
+			// Fallback for legacy data
+			r.Logger.Warn("Bank statement decryption failed, returning raw content", "id", s.ID, "error", err)
+			originalFile = rawFile
+		}
+	}
+
 	s.OriginalFile = originalFile
 
 	return s, nil

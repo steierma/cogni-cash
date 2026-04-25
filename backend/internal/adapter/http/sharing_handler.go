@@ -4,16 +4,31 @@ import (
 	"net/http"
 
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
 
+type SharingHandler struct {
+	Logger *slog.Logger
+	sharingSvc port.SharingUseCase
+}
+
+func NewSharingHandler(Logger *slog.Logger, sharingSvc port.SharingUseCase) *SharingHandler {
+	return &SharingHandler{
+		Logger: Logger,
+		sharingSvc: sharingSvc,
+	}
+}
+
 // GET /api/v1/sharing/dashboard/
-func (h *Handler) getSharingDashboard(w http.ResponseWriter, r *http.Request) {
-	if h.sharingSvc == nil {
+func (h *SharingHandler) getSharingDashboard(w http.ResponseWriter, r *http.Request) {
+	if h == nil || h.sharingSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "sharing service not available")
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

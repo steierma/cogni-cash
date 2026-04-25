@@ -15,7 +15,7 @@ func TestInvoiceRepository(t *testing.T) {
 	ctx := context.Background()
 	clearTables(ctx, t)
 
-	repo := NewInvoiceRepository(globalPool, setupLogger())
+	repo := NewInvoiceRepository(globalPool, "test-key-123", setupLogger())
 
 	userID := uuid.New()
 	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'inv_user', 'hash', 'inv@example.com')", userID)

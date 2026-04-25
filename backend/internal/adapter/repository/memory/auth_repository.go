@@ -40,11 +40,11 @@ func (r *AuthRepository) FindRefreshToken(_ context.Context, tokenHash string) (
 	return token, nil
 }
 
-func (r *AuthRepository) RevokeRefreshToken(_ context.Context, id uuid.UUID) error {
+func (r *AuthRepository) RevokeRefreshToken(_ context.Context, id uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for hash, token := range r.refreshTokens {
-		if token.ID == id {
+		if token.ID == id && token.UserID == userID {
 			token.Revoked = true
 			r.refreshTokens[hash] = token
 			break

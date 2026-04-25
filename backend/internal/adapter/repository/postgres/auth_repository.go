@@ -48,9 +48,9 @@ func (r *AuthRepository) FindRefreshToken(ctx context.Context, tokenHash string)
 	return t, nil
 }
 
-func (r *AuthRepository) RevokeRefreshToken(ctx context.Context, id uuid.UUID) error {
-	r.Logger.Info("Revoking refresh token", "id", id)
-	_, err := r.pool.Exec(ctx, `UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1`, id)
+func (r *AuthRepository) RevokeRefreshToken(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	r.Logger.Info("Revoking refresh token", "id", id, "user_id", userID)
+	_, err := r.pool.Exec(ctx, `UPDATE refresh_tokens SET revoked = TRUE WHERE id = $1 AND user_id = $2`, id, userID)
 	if err != nil {
 		return fmt.Errorf("auth repo: revoke refresh token: %w", err)
 	}

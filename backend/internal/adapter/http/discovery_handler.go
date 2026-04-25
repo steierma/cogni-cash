@@ -7,14 +7,35 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"context"
+	"sync"
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type DiscoveryHandler struct {
+	AppCtx context.Context
+	Logger *slog.Logger
+	WaitGroup *sync.WaitGroup
+	discoverySvc port.DiscoveryUseCase
+}
+
+func NewDiscoveryHandler(AppCtx context.Context, Logger *slog.Logger, WaitGroup *sync.WaitGroup, discoverySvc port.DiscoveryUseCase) *DiscoveryHandler {
+	return &DiscoveryHandler{
+		AppCtx: AppCtx,
+		Logger: Logger,
+		WaitGroup: WaitGroup,
+		discoverySvc: discoverySvc,
+	}
+}
 
 type ApproveRequest struct {
 	Suggestion entity.SuggestedSubscription `json:"suggestion"`
 }
 
-func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -30,8 +51,8 @@ func (h *Handler) ListSubscriptions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, subs)
 }
 
-func (h *Handler) GetSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) GetSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -54,8 +75,8 @@ func (h *Handler) GetSubscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, sub)
 }
 
-func (h *Handler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -87,8 +108,8 @@ func (h *Handler) UpdateSubscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, updated)
 }
 
-func (h *Handler) GetSuggestedSubscriptions(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) GetSuggestedSubscriptions(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -104,8 +125,8 @@ func (h *Handler) GetSuggestedSubscriptions(w http.ResponseWriter, r *http.Reque
 	writeJSON(w, http.StatusOK, suggestions)
 }
 
-func (h *Handler) ApproveSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) ApproveSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -142,8 +163,8 @@ func (h *Handler) ApproveSubscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, subscription)
 }
 
-func (h *Handler) DeclineSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) DeclineSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -172,8 +193,8 @@ func (h *Handler) DeclineSubscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "declined"})
 }
 
-func (h *Handler) GetDiscoveryFeedback(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) GetDiscoveryFeedback(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -189,8 +210,8 @@ func (h *Handler) GetDiscoveryFeedback(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, feedback)
 }
 
-func (h *Handler) RemoveDiscoveryFeedback(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) RemoveDiscoveryFeedback(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -219,8 +240,8 @@ func (h *Handler) RemoveDiscoveryFeedback(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, map[string]string{"status": "removed"})
 }
 
-func (h *Handler) EnrichSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) EnrichSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -243,8 +264,8 @@ func (h *Handler) EnrichSubscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, subscription)
 }
 
-func (h *Handler) PreviewCancellation(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) PreviewCancellation(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -268,8 +289,8 @@ func (h *Handler) PreviewCancellation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, draft)
 }
 
-func (h *Handler) CancelSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) CancelSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -306,8 +327,8 @@ func (h *Handler) CancelSubscription(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "cancellation_sent"})
 }
 
-func (h *Handler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -330,8 +351,8 @@ func (h *Handler) DeleteSubscription(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) GetSubscriptionEvents(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) GetSubscriptionEvents(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -354,8 +375,8 @@ func (h *Handler) GetSubscriptionEvents(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, events)
 }
 
-func (h *Handler) CreateSubscriptionFromTransaction(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) CreateSubscriptionFromTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -391,8 +412,8 @@ func (h *Handler) CreateSubscriptionFromTransaction(w http.ResponseWriter, r *ht
 	writeJSON(w, http.StatusCreated, sub)
 }
 
-func (h *Handler) LinkTransactions(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) LinkTransactions(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -428,8 +449,8 @@ func (h *Handler) LinkTransactions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "linked"})
 }
 
-func (h *Handler) LinkTransaction(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) LinkTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -458,8 +479,8 @@ func (h *Handler) LinkTransaction(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "linked"})
 }
 
-func (h *Handler) UnlinkTransaction(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DiscoveryHandler) UnlinkTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

@@ -126,7 +126,7 @@ func (s *AuthService) Logout(ctx context.Context, plainRT string) error {
 		return nil // Already gone or invalid
 	}
 
-	return s.authRepo.RevokeRefreshToken(ctx, rt.ID)
+	return s.authRepo.RevokeRefreshToken(ctx, rt.ID, rt.UserID)
 }
 
 func (s *AuthService) generateRefreshToken(ctx context.Context, userID uuid.UUID) (entity.RefreshToken, string, error) {

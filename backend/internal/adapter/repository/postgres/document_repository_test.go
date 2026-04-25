@@ -79,6 +79,57 @@ func TestDocumentRepository(t *testing.T) {
 		assert.Equal(t, "some notes", foundDoc.Metadata["notes"])
 	})
 
+	t.Run("Update with re-upload", func(t *testing.T) {
+		// 1. Create initial document
+		initialContent := []byte("initial content")
+		doc := entity.Document{
+			UserID:              userID,
+			Type:                entity.DocTypeOther,
+			OriginalFileName:    "reupload.pdf",
+			OriginalFileContent: initialContent,
+			ContentHash:         "hash-initial",
+			MimeType:            "application/pdf",
+			Metadata:            map[string]interface{}{},
+		}
+		savedDoc, err := repo.Save(ctx, doc)
+		require.NoError(t, err)
+
+		// 2. Update with new content
+		newContent := []byte("new replaced content")
+		savedDoc.OriginalFileContent = newContent
+		savedDoc.ContentHash = "hash-new"
+		savedDoc.MimeType = "application/vnd.pdf"
+		savedDoc.ExtractedText = "New extracted text"
+
+		updatedDoc, err := repo.Update(ctx, savedDoc)
+		require.NoError(t, err)
+		assert.Equal(t, savedDoc.ID, updatedDoc.ID)
+
+		// 3. Verify decryption of new content
+		foundDoc, err := repo.FindByID(ctx, savedDoc.ID, userID)
+		require.NoError(t, err)
+		assert.Equal(t, newContent, foundDoc.OriginalFileContent, "Should have replaced content")
+		assert.Equal(t, "hash-new", foundDoc.ContentHash)
+		assert.Equal(t, "application/vnd.pdf", foundDoc.MimeType)
+		assert.Equal(t, "New extracted text", foundDoc.ExtractedText)
+
+		// 4. Update metadata only (should NOT overwrite content with empty bytes if we don't provide them)
+		foundDoc.OriginalFileContent = nil // Reset for update object
+		foundDoc.ContentHash = ""
+		foundDoc.MimeType = ""
+		foundDoc.ExtractedText = ""
+		foundDoc.OriginalFileName = "final-name.pdf"
+
+		_, err = repo.Update(ctx, foundDoc)
+		require.NoError(t, err)
+
+		// 5. Verify content is still there
+		finalDoc, err := repo.FindByID(ctx, savedDoc.ID, userID)
+		require.NoError(t, err)
+		assert.Equal(t, newContent, finalDoc.OriginalFileContent, "Content should have been preserved")
+		assert.Equal(t, "final-name.pdf", finalDoc.OriginalFileName)
+	})
+
 	t.Run("ExistsByHash", func(t *testing.T) {
 		exists, err := repo.ExistsByHash(ctx, userID, "hash123")
 		require.NoError(t, err)
@@ -207,5 +258,21 @@ func TestDocumentRepository(t *testing.T) {
 	t.Run("Delete - Not Found", func(t *testing.T) {
 		err := repo.Delete(ctx, uuid.New(), userID)
 		assert.ErrorIs(t, err, entity.ErrDocumentNotFound)
+	})
+
+	t.Run("Non-PGP data behavior", func(t *testing.T) {
+		// Manually insert a document with raw (unencrypted) content
+		id := uuid.New()
+		rawContent := []byte("this is raw content")
+		_, err := globalPool.Exec(ctx, `
+			INSERT INTO documents (id, user_id, document_type, original_file_name, original_file_content, content_hash, mime_type, metadata, extracted_text)
+			VALUES ($1, $2, 'other', 'raw.txt', $3, 'raw-hash', 'text/plain', '{}', 'raw text')
+		`, id, userID, rawContent)
+		require.NoError(t, err)
+
+		// FindByID should now succeed and return raw content (fallback)
+		foundDoc, err := repo.FindByID(ctx, id, userID)
+		require.NoError(t, err)
+		assert.Equal(t, rawContent, foundDoc.OriginalFileContent, "Should return raw content if decryption fails")
 	})
 }

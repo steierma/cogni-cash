@@ -94,14 +94,15 @@ func (r *DocumentRepository) FindAll(ctx context.Context, filter entity.Document
 
 func (r *DocumentRepository) FindByID(ctx context.Context, id, userID uuid.UUID) (entity.Document, error) {
 	query := `
-		SELECT id, user_id, document_type, original_file_name, pgp_sym_decrypt_bytea(original_file_content, $1),
+		SELECT id, user_id, document_type, original_file_name, original_file_content,
 		       content_hash, mime_type, metadata, extracted_text, created_at
 		FROM documents
-		WHERE id = $2 AND user_id = $3
+		WHERE id = $1 AND user_id = $2
 	`
 	var doc entity.Document
-	err := r.db.QueryRow(ctx, query, r.key, id, userID).Scan(
-		&doc.ID, &doc.UserID, &doc.Type, &doc.OriginalFileName, &doc.OriginalFileContent,
+	var rawContent []byte
+	err := r.db.QueryRow(ctx, query, id, userID).Scan(
+		&doc.ID, &doc.UserID, &doc.Type, &doc.OriginalFileName, &rawContent,
 		&doc.ContentHash, &doc.MimeType, &doc.Metadata, &doc.ExtractedText, &doc.CreatedAt,
 	)
 	if err != nil {
@@ -110,6 +111,25 @@ func (r *DocumentRepository) FindByID(ctx context.Context, id, userID uuid.UUID)
 		}
 		return entity.Document{}, fmt.Errorf("document repo find by id: %w", err)
 	}
+
+	if len(rawContent) == 0 {
+		return doc, nil
+	}
+
+	// Try decryption
+	var decrypted []byte
+	decryptQuery := "SELECT pgp_sym_decrypt_bytea($1, $2)"
+	err = r.db.QueryRow(ctx, decryptQuery, rawContent, r.key).Scan(&decrypted)
+	if err != nil {
+		// Fallback: If decryption fails, it might be legacy plain text or corrupt.
+		// Return raw content but log a loud warning.
+		// We use fmt.Printf because this is specifically for stdout/stderr visibility in logs.
+		fmt.Printf("WARNING: DOCUMENT DECRYPTION FAILED for id %s. Error: %v. This usually means the DOCUMENT_VAULT_KEY has changed or is incorrect.\n", id, err)
+		doc.OriginalFileContent = rawContent
+	} else {
+		doc.OriginalFileContent = decrypted
+	}
+
 	return doc, nil
 }
 
@@ -118,12 +138,38 @@ func (r *DocumentRepository) Update(ctx context.Context, doc entity.Document) (e
 		UPDATE documents
 		SET document_type = $1,
 		    original_file_name = $2,
-		    metadata = $3
-		WHERE id = $4 AND user_id = $5
+		    metadata = $3,
+		    original_file_content = COALESCE(pgp_sym_encrypt_bytea($4, $5), original_file_content),
+		    content_hash = COALESCE($6, content_hash),
+		    mime_type = COALESCE($7, mime_type),
+		    extracted_text = COALESCE($8, extracted_text)
+		WHERE id = $9 AND user_id = $10
 		RETURNING id, created_at
 	`
 
-	err := r.db.QueryRow(ctx, query, doc.Type, doc.OriginalFileName, doc.Metadata, doc.ID, doc.UserID).Scan(&doc.ID, &doc.CreatedAt)
+	var fileContent []byte
+	if len(doc.OriginalFileContent) > 0 {
+		fileContent = doc.OriginalFileContent
+	}
+
+	var contentHash, mimeType, extractedText *string
+	if doc.ContentHash != "" {
+		contentHash = &doc.ContentHash
+	}
+	if doc.MimeType != "" {
+		mimeType = &doc.MimeType
+	}
+	if doc.ExtractedText != "" {
+		extractedText = &doc.ExtractedText
+	}
+
+	err := r.db.QueryRow(ctx, query,
+		doc.Type, doc.OriginalFileName, doc.Metadata,
+		fileContent, r.key,
+		contentHash, mimeType, extractedText,
+		doc.ID, doc.UserID,
+	).Scan(&doc.ID, &doc.CreatedAt)
+
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return entity.Document{}, entity.ErrDocumentNotFound

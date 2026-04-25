@@ -50,10 +50,14 @@ type DocumentUploadRequest struct {
 
 // DocumentUpdateRequest defines the mutable fields for a document.
 type DocumentUpdateRequest struct {
-	OriginalFileName *string                `json:"file_name"`
-	Type             *DocumentType          `json:"type"`
-	DocumentDate     *time.Time             `json:"document_date"`
-	Metadata         map[string]interface{} `json:"metadata"`
+	OriginalFileName    *string                `json:"file_name"`
+	Type                *DocumentType          `json:"type"`
+	DocumentDate        *time.Time             `json:"document_date"`
+	Metadata            map[string]interface{} `json:"metadata"`
+	OriginalFileContent []byte                 `json:"-"`
+	MimeType            *string                `json:"-"`
+	ContentHash         *string                `json:"-"`
+	ExtractedText       *string                `json:"-"`
 }
 
 // TaxYearSummary provides an aggregated view of tax-relevant documents for a specific year.

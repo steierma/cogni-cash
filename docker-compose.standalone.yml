@@ -1,0 +1,89 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: db
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U \$$POSTGRES_USER -d \$$POSTGRES_DB"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    networks:
+      - app-net
+
+  migrate:
+    image: ghcr.io/steierma/cogni-cash-backend:latest
+    container_name: migrate
+    entrypoint: ["/app/migrate"]
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app-net
+
+  backend:
+    image: ghcr.io/steierma/cogni-cash-backend:latest
+    container_name: backend
+    restart: unless-stopped
+    env_file: .env
+    environment:
+      DATABASE_HOST: postgres
+      PAYSLIP_IMPORT_JSON_PATH: /app/payslips/payslips_import.json
+      ENABLEBANKING_PRIVATE_KEY_PATH: /app/enable-banking-prod.pem
+    volumes:
+      - ./backend/payslips:/app/payslips
+      - ./enable-banking-prod.pem:/app/enable-banking-prod.pem:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "/app/healthcheck"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - app-net
+
+  frontend:
+    image: ghcr.io/steierma/cogni-cash-frontend:latest
+    container_name: frontend
+    restart: unless-stopped
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app-net
+
+  caddy:
+    image: caddy:2-alpine
+    container_name: caddy
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - app-net
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
+
+networks:
+  app-net:
+    driver: bridge

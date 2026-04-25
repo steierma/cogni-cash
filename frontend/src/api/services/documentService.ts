@@ -7,6 +7,7 @@ export interface DocumentUpdatePayload {
     type?: DocumentType;
     document_date?: string;
     metadata?: Record<string, unknown>;
+    file?: File; // Optional file for re-upload
 }
 
 export const documentService = {
@@ -31,8 +32,23 @@ export const documentService = {
     getDetail: (id: string): Promise<Document> =>
         api.get<Document>(`documents/${id}/`).then((r: AxiosResponse<Document>) => r.data),
 
-    update: (id: string, data: DocumentUpdatePayload): Promise<Document> =>
-        api.put<Document>(`documents/${id}/`, data).then((r: AxiosResponse<Document>) => r.data),
+    update: (id: string, data: DocumentUpdatePayload): Promise<Document> => {
+        if (data.file) {
+            const form = new FormData();
+            form.append('file', data.file);
+            if (data.file_name) form.append('file_name', data.file_name);
+            if (data.type) form.append('document_type', data.type);
+            if (data.document_date) form.append('document_date', data.document_date);
+            // Metadata is harder to send via FormData if it's complex, 
+            // but the backend handler expects them as form values if possible or we stick to what's there.
+
+            return api.put<Document>(`documents/${id}/`, form, {
+                headers: { 'Content-Type': 'multipart/form-data' }
+            }).then((r: AxiosResponse<Document>) => r.data);
+        }
+
+        return api.put<Document>(`documents/${id}/`, data).then((r: AxiosResponse<Document>) => r.data);
+    },
 
     delete: (id: string): Promise<void> =>
         api.delete(`documents/${id}/`).then(() => undefined),

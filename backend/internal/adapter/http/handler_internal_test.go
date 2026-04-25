@@ -219,7 +219,7 @@ func (m *mockInvoiceUseCase) ListInvoiceShares(ctx context.Context, id, ownerID 
 func TestDiscoveryHandler(t *testing.T) {
 	userID := uuid.New()
 	mockSvc := new(mockDiscoveryUseCase)
-	handler := NewHandler(nil, nil, nil, nil, nil, slog.Default(), "memory", "localhost", nil, context.Background(), nil).
+	handler := NewRouter(slog.Default(), context.Background(), nil, nil, nil, nil).
 		WithDiscoveryService(mockSvc)
 
 	t.Run("ListSubscriptions - Success", func(t *testing.T) {
@@ -232,7 +232,7 @@ func TestDiscoveryHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.ListSubscriptions(rr, req)
+		handler.Discovery.ListSubscriptions(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 		var resp []entity.Subscription
@@ -253,7 +253,7 @@ func TestDiscoveryHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.ApproveSubscription(rr, req)
+		handler.Discovery.ApproveSubscription(rr, req)
 
 		assert.Equal(t, http.StatusCreated, rr.Code)
 		var resp entity.Subscription
@@ -265,7 +265,7 @@ func TestDiscoveryHandler(t *testing.T) {
 func TestCategoryHandler(t *testing.T) {
 	userID := uuid.New()
 	mockSvc := new(mockCategoryUseCase)
-	handler := NewHandler(nil, nil, nil, nil, nil, slog.Default(), "memory", "localhost", nil, context.Background(), nil).
+	handler := NewRouter(slog.Default(), context.Background(), nil, nil, nil, nil).
 		WithCategoryService(mockSvc)
 
 	t.Run("listCategories - Success", func(t *testing.T) {
@@ -278,7 +278,7 @@ func TestCategoryHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.listCategories(rr, req)
+		handler.Category.listCategories(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 		var resp []entity.Category
@@ -299,7 +299,7 @@ func TestCategoryHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.createCategory(rr, req)
+		handler.Category.createCategory(rr, req)
 
 		assert.Equal(t, http.StatusCreated, rr.Code)
 	})
@@ -308,7 +308,7 @@ func TestCategoryHandler(t *testing.T) {
 func TestBankHandler(t *testing.T) {
 	userID := uuid.New()
 	mockSvc := new(mockBankUseCase)
-	handler := NewHandler(nil, nil, nil, nil, nil, slog.Default(), "memory", "localhost", nil, context.Background(), nil).
+	handler := NewRouter(slog.Default(), context.Background(), nil, nil, nil, nil).
 		WithBankService(mockSvc)
 
 	t.Run("listBankConnections - Success", func(t *testing.T) {
@@ -321,7 +321,7 @@ func TestBankHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.listBankConnections(rr, req)
+		handler.Bank.listBankConnections(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 	})
@@ -335,7 +335,7 @@ func TestBankHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.syncAllBankAccounts(rr, req)
+		handler.Bank.syncAllBankAccounts(rr, req)
 
 		assert.Equal(t, http.StatusAccepted, rr.Code)
 	})
@@ -345,7 +345,7 @@ func TestInvoiceHandler(t *testing.T) {
 	userID := uuid.New()
 	invoiceID := uuid.New()
 	mockSvc := new(mockInvoiceUseCase)
-	handler := NewHandler(nil, nil, nil, nil, nil, slog.Default(), "memory", "localhost", nil, context.Background(), nil).
+	handler := NewRouter(slog.Default(), context.Background(), nil, nil, nil, nil).
 		WithInvoiceService(mockSvc)
 
 	t.Run("updateInvoice - Success with ISO Date", func(t *testing.T) {
@@ -373,7 +373,7 @@ func TestInvoiceHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.updateInvoice(rr, req)
+		handler.Invoice.updateInvoice(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 		mockSvc.AssertExpectations(t)
@@ -394,7 +394,7 @@ func TestInvoiceHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.updateInvoice(rr, req)
+		handler.Invoice.updateInvoice(rr, req)
 
 		// This confirms that the backend currently FAILS with plain dates,
 		// which is why we fixed the frontend to send ISO strings.
@@ -427,7 +427,7 @@ func TestInvoiceHandler(t *testing.T) {
 		req = req.WithContext(ctx)
 
 		rr := httptest.NewRecorder()
-		handler.updateInvoice(rr, req)
+		handler.Invoice.updateInvoice(rr, req)
 
 		assert.Equal(t, http.StatusOK, rr.Code)
 		mockSvc.AssertExpectations(t)

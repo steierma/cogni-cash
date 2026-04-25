@@ -119,7 +119,34 @@ func (s *DocumentService) Update(ctx context.Context, id, userID uuid.UUID, req 
 		}
 	}
 
-	return s.repo.Update(ctx, doc) // Assumes Update is defined in your DocumentRepository interface
+	// Handle Re-upload
+	if len(req.OriginalFileContent) > 0 {
+		hash := sha256.Sum256(req.OriginalFileContent)
+		doc.ContentHash = hex.EncodeToString(hash[:])
+		doc.OriginalFileContent = req.OriginalFileContent
+
+		if req.MimeType != nil {
+			doc.MimeType = *req.MimeType
+		}
+
+		// Re-run AI classification if not skipped (implicitly enabled for re-upload if no skip_ai was possible in the original metadata or if we want to refresh)
+		// For simplicity, we only re-run if it's explicitly requested via ExtractedText being nil or similar, 
+		// but here we just re-run AI to ensure metadata is fresh.
+		docType, metadata, extractedText, err := s.aiParser.ClassifyAndExtract(ctx, userID, doc.OriginalFileName, doc.MimeType, doc.OriginalFileContent)
+		if err == nil {
+			doc.Type = docType
+			doc.ExtractedText = extractedText
+			// Merge metadata
+			if doc.Metadata == nil {
+				doc.Metadata = make(map[string]interface{})
+			}
+			for k, v := range metadata {
+				doc.Metadata[k] = v
+			}
+		}
+	}
+
+	return s.repo.Update(ctx, doc)
 }
 
 func (s *DocumentService) Delete(ctx context.Context, id, userID uuid.UUID) error {

@@ -20,7 +20,7 @@ type Server struct {
 }
 
 // NewServer creates a configured HTTP server.
-func NewServer(addr string, handler *Handler) *Server {
+func NewServer(addr string, router *Router) *Server {
 	r := chi.NewRouter()
 
 	// Standard middleware
@@ -55,7 +55,9 @@ func NewServer(addr string, handler *Handler) *Server {
 			allowOriginFunc = func(r *http.Request, origin string) bool {
 				return true
 			}
-			handler.Logger.Warn("CORS: Wildcard origin enabled via reflection. This should only be used in development.")
+			if router.Logger != nil {
+				router.Logger.Warn("CORS: Wildcard origin enabled via reflection. This should only be used in development.")
+			}
 		} else {
 			for _, o := range strings.Split(raw, ",") {
 				if trimmed := strings.TrimSpace(o); trimmed != "" {
@@ -88,7 +90,7 @@ func NewServer(addr string, handler *Handler) *Server {
 		})
 	})
 
-	handler.RegisterRoutes(r)
+	router.RegisterRoutes(r)
 	return &Server{
 		httpServer: &http.Server{
 			Addr:         addr,
@@ -97,7 +99,7 @@ func NewServer(addr string, handler *Handler) *Server {
 			WriteTimeout: 120 * time.Second,
 			IdleTimeout:  120 * time.Second,
 		},
-		Logger: handler.Logger,
+		Logger: router.Logger,
 	}
 }
 

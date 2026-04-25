@@ -174,9 +174,9 @@ func (m *mockAuthRepo) FindRefreshToken(_ context.Context, hash string) (entity.
 	return entity.RefreshToken{}, errors.New("not found")
 }
 
-func (m *mockAuthRepo) RevokeRefreshToken(_ context.Context, id uuid.UUID) error {
+func (m *mockAuthRepo) RevokeRefreshToken(_ context.Context, id uuid.UUID, userID uuid.UUID) error {
 	for hash, t := range m.tokens {
-		if t.ID == id {
+		if t.ID == id && t.UserID == userID {
 			t.Revoked = true
 			m.tokens[hash] = t
 		}

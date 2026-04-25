@@ -16,7 +16,30 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type BankStatementHandler struct {
+	Logger *slog.Logger
+	bankStatementSvc port.BankStatementUseCase
+	bankStmtRepo port.BankStatementRepository
+	forecastingSvc port.ForecastingUseCase
+	settingsSvc port.SettingsUseCase
+	transactionSvc port.TransactionUseCase
+}
+
+func NewBankStatementHandler(Logger *slog.Logger, bankStatementSvc port.BankStatementUseCase, bankStmtRepo port.BankStatementRepository, forecastingSvc port.ForecastingUseCase, settingsSvc port.SettingsUseCase, transactionSvc port.TransactionUseCase) *BankStatementHandler {
+	return &BankStatementHandler{
+		Logger: Logger,
+		bankStatementSvc: bankStatementSvc,
+		bankStmtRepo: bankStmtRepo,
+		forecastingSvc: forecastingSvc,
+		settingsSvc: settingsSvc,
+		transactionSvc: transactionSvc,
+	}
+}
 
 // allowedBankStatementMIMETypes is the set of MIME types accepted by the bank
 // statement import endpoint. Image types are forwarded to the AI fallback parser
@@ -37,12 +60,12 @@ type updateTransactionCategoryRequest struct {
 	CategoryID string `json:"category_id"`
 }
 
-func (h *Handler) listBankStatements(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) listBankStatements(w http.ResponseWriter, r *http.Request) {
 	if h.bankStmtRepo == nil {
 		writeError(w, http.StatusServiceUnavailable, "bank statement repository not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -59,7 +82,7 @@ func (h *Handler) listBankStatements(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summaries)
 }
 
-func (h *Handler) getBankStatement(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) getBankStatement(w http.ResponseWriter, r *http.Request) {
 	if h.bankStmtRepo == nil {
 		writeError(w, http.StatusServiceUnavailable, "bank statement repository not available")
 		return
@@ -70,7 +93,7 @@ func (h *Handler) getBankStatement(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusBadRequest, "invalid bank statement id")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -83,7 +106,7 @@ func (h *Handler) getBankStatement(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, stmt)
 }
 
-func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 	const maxUpload = 32 << 20 // 32 MB hard cap
 	r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
 	if err := r.ParseMultipartForm(maxUpload); err != nil {
@@ -101,7 +124,7 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -195,7 +218,7 @@ func (h *Handler) importBankStatement(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (h *Handler) deleteBankStatement(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) deleteBankStatement(w http.ResponseWriter, r *http.Request) {
 	if h.bankStatementSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "bank statement service not available")
 		return
@@ -208,7 +231,7 @@ func (h *Handler) deleteBankStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -222,7 +245,7 @@ func (h *Handler) deleteBankStatement(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) downloadBankStatementFile(w http.ResponseWriter, r *http.Request) {
 	if h.bankStmtRepo == nil {
 		writeError(w, http.StatusServiceUnavailable, "bank statement repository not available")
 		return
@@ -235,7 +258,7 @@ func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -273,7 +296,7 @@ func (h *Handler) downloadBankStatementFile(w http.ResponseWriter, r *http.Reque
 	}
 }
 
-func (h *Handler) getTransactionAnalytics(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) getTransactionAnalytics(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "transaction service unavailable")
 		return
@@ -289,7 +312,7 @@ func (h *Handler) getTransactionAnalytics(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, analytics)
 }
 
-func (h *Handler) listTransactions(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) listTransactions(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "service unavailable")
 		return
@@ -333,7 +356,7 @@ func (h *Handler) listTransactions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, txns)
 }
 
-func (h *Handler) updateTransactionCategory(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) updateTransactionCategory(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "service not available")
 		return
@@ -361,7 +384,7 @@ func (h *Handler) updateTransactionCategory(w http.ResponseWriter, r *http.Reque
 		catIDPtr = &parsedID
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -374,7 +397,7 @@ func (h *Handler) updateTransactionCategory(w http.ResponseWriter, r *http.Reque
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) markTransactionReviewed(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) markTransactionReviewed(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "service not available")
 		return
@@ -386,7 +409,7 @@ func (h *Handler) markTransactionReviewed(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -400,7 +423,7 @@ func (h *Handler) markTransactionReviewed(w http.ResponseWriter, r *http.Request
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) markTransactionsReviewedBulk(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) markTransactionsReviewedBulk(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "service not available")
 		return
@@ -415,7 +438,7 @@ func (h *Handler) markTransactionsReviewedBulk(w http.ResponseWriter, r *http.Re
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -430,13 +453,13 @@ func (h *Handler) markTransactionsReviewedBulk(w http.ResponseWriter, r *http.Re
 }
 
 
-func (h *Handler) startAutoCategorize(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) startAutoCategorize(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "transaction service not available")
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -471,7 +494,7 @@ func (h *Handler) startAutoCategorize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"message": "Batch categorization started"})
 }
 
-func (h *Handler) getAutoCategorizeStatus(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) getAutoCategorizeStatus(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "transaction service not available")
 		return
@@ -480,7 +503,7 @@ func (h *Handler) getAutoCategorizeStatus(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, status)
 }
 
-func (h *Handler) cancelAutoCategorize(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) cancelAutoCategorize(w http.ResponseWriter, r *http.Request) {
 	if h.transactionSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "transaction service not available")
 		return
@@ -489,14 +512,14 @@ func (h *Handler) cancelAutoCategorize(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Cancellation requested"})
 }
 
-func (h *Handler) parseTransactionFilter(r *http.Request) entity.TransactionFilter {
+func (h *BankStatementHandler) parseTransactionFilter(r *http.Request) entity.TransactionFilter {
 	q := r.URL.Query()
 	f := entity.TransactionFilter{
 		Type:   q.Get("type"),
 		Search: q.Get("search"),
 	}
 
-	f.UserID = h.getUserID(r.Context())
+	f.UserID = GetUserID(r.Context())
 
 	if catID, err := uuid.Parse(q.Get("category_id")); err == nil {
 		f.CategoryID = &catID
@@ -581,7 +604,7 @@ func mapImportError(err error) string {
 	}
 }
 
-func (h *Handler) updateBankStatement(w http.ResponseWriter, r *http.Request) {
+func (h *BankStatementHandler) updateBankStatement(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -597,7 +620,7 @@ func (h *Handler) updateBankStatement(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

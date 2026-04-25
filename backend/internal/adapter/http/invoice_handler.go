@@ -14,7 +14,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"log/slog"
 )
+
+type InvoiceHandler struct {
+	Logger *slog.Logger
+	invoiceSvc port.InvoiceUseCase
+}
+
+func NewInvoiceHandler(Logger *slog.Logger, invoiceSvc port.InvoiceUseCase) *InvoiceHandler {
+	return &InvoiceHandler{
+		Logger: Logger,
+		invoiceSvc: invoiceSvc,
+	}
+}
 
 // allowedMIMETypes is the set of MIME types accepted by the invoice import endpoint.
 var allowedMIMETypes = map[string]bool{
@@ -24,17 +38,6 @@ var allowedMIMETypes = map[string]bool{
 	"image/png":       true,
 	"image/gif":       true,
 	"image/webp":      true,
-}
-
-// extToMIME maps common file extensions to their canonical MIME type so we can
-// fill in the content-type when the browser doesn't provide it.
-var extToMIME = map[string]string{
-	".pdf":  "application/pdf",
-	".jpg":  "image/jpeg",
-	".jpeg": "image/jpeg",
-	".png":  "image/png",
-	".gif":  "image/gif",
-	".webp": "image/webp",
 }
 
 // ── request / response types ─────────────────────────────────────────────────
@@ -67,7 +70,7 @@ type shareInvoiceRequest struct {
 // ── handlers ──────────────────────────────────────────────────────────────────
 
 // POST /api/v1/invoices/{id}/share/
-func (h *Handler) shareInvoice(w http.ResponseWriter, r *http.Request) {
+func (h *InvoiceHandler) shareInvoice(w http.ResponseWriter, r *http.Request) {
 	if h.invoiceSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "invoice service not available")
 		return
@@ -91,7 +94,7 @@ func (h *Handler) shareInvoice(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownerID := h.getUserID(r.Context())
+	ownerID := GetUserID(r.Context())
 	if ownerID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -111,7 +114,7 @@ func (h *Handler) shareInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /api/v1/invoices/{id}/share/{user_id}/
-func (h *Handler) revokeInvoiceShare(w http.ResponseWriter, r *http.Request) {
+func (h *InvoiceHandler) revokeInvoiceShare(w http.ResponseWriter, r *http.Request) {
 	if h.invoiceSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "invoice service not available")
 		return
@@ -129,7 +132,7 @@ func (h *Handler) revokeInvoiceShare(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -144,7 +147,7 @@ func (h *Handler) revokeInvoiceShare(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/v1/invoices/{id}/shares/
-func (h *Handler) listInvoiceShares(w http.ResponseWriter, r *http.Request) {
+func (h *InvoiceHandler) listInvoiceShares(w http.ResponseWriter, r *http.Request) {
 	if h.invoiceSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "invoice service not available")
 		return
@@ -156,7 +159,7 @@ func (h *Handler) listInvoiceShares(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	ownerID := h.getUserID(r.Context())
+	ownerID := GetUserID(r.Context())
 	if ownerID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -172,8 +175,8 @@ func (h *Handler) listInvoiceShares(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/v1/invoices/
-func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *InvoiceHandler) listInvoices(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -209,8 +212,8 @@ func (h *Handler) listInvoices(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/v1/invoices/{id}
-func (h *Handler) getInvoice(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *InvoiceHandler) getInvoice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -235,8 +238,8 @@ func (h *Handler) getInvoice(w http.ResponseWriter, r *http.Request) {
 
 // POST /api/v1/invoices/import   (multipart/form-data, field "file")
 // Accepts: application/pdf, image/jpeg, image/png, image/gif, image/webp
-func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *InvoiceHandler) importInvoice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -323,8 +326,8 @@ func (h *Handler) importInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 // POST /api/v1/invoices/ (manual import without file)
-func (h *Handler) importManual(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *InvoiceHandler) importManual(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -358,8 +361,8 @@ func (h *Handler) importManual(w http.ResponseWriter, r *http.Request) {
 }
 
 // PUT /api/v1/invoices/{id}
-func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *InvoiceHandler) updateInvoice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -426,8 +429,8 @@ func (h *Handler) updateInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 // DELETE /api/v1/invoices/{id}
-func (h *Handler) deleteInvoice(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *InvoiceHandler) deleteInvoice(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -450,8 +453,8 @@ func (h *Handler) deleteInvoice(w http.ResponseWriter, r *http.Request) {
 }
 
 // GET /api/v1/invoices/{id}/download
-func (h *Handler) downloadInvoiceFile(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *InvoiceHandler) downloadInvoiceFile(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

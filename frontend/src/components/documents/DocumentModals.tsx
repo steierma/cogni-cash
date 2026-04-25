@@ -17,7 +17,7 @@ export function PreviewDocumentModal({
     mimeType: string,
     document: Document,
     onClose: () => void,
-    onUpdate: (id: string, data: { file_name?: string, type?: DocumentType, document_date?: string }) => void,
+    onUpdate: (id: string, data: { file_name?: string, type?: DocumentType, document_date?: string, file?: File }) => void,
     isPending: boolean 
 }) {
     const { t } = useTranslation();
@@ -153,7 +153,7 @@ export function EditDocumentModal({
     isPending 
 }: { 
     document: Document, 
-    onUpdate: (id: string, data: { file_name?: string, type?: DocumentType, document_date?: string }) => void, 
+    onUpdate: (id: string, data: { file_name?: string, type?: DocumentType, document_date?: string, file?: File }) => void, 
     onClose: () => void,
     isPending: boolean 
 }) {
@@ -181,6 +181,7 @@ export function EditDocumentModal({
                         }} 
                         onSubmit={(data) => onUpdate(document.id, data)}
                         isPending={isPending}
+                        showFileUpload={true}
                         submitLabel={t('common.saveChanges')}
                     />
                 </div>

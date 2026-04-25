@@ -19,13 +19,14 @@ import (
 
 // InvoiceRepository implements port.InvoiceRepository using pgx.
 type InvoiceRepository struct {
-	pool   *pgxpool.Pool
-	Logger *slog.Logger
+	pool     *pgxpool.Pool
+	vaultKey string
+	Logger   *slog.Logger
 }
 
 // NewInvoiceRepository creates a new InvoiceRepository.
-func NewInvoiceRepository(pool *pgxpool.Pool, logger *slog.Logger) *InvoiceRepository {
-	return &InvoiceRepository{pool: pool, Logger: logger}
+func NewInvoiceRepository(pool *pgxpool.Pool, vaultKey string, logger *slog.Logger) *InvoiceRepository {
+	return &InvoiceRepository{pool: pool, vaultKey: vaultKey, Logger: logger}
 }
 
 // Save inserts or upserts an Invoice record (keyed on id).
@@ -59,7 +60,7 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv entity.Invoice) error 
 			id, user_id, vendor, amount, currency, base_amount, base_currency, invoice_date,
 			description, category_id,
 			content_hash, original_file_name, original_file_content
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,pgp_sym_encrypt_bytea($13, $14))
 		ON CONFLICT (id) DO UPDATE SET
 			user_id              = EXCLUDED.user_id,
 			vendor               = EXCLUDED.vendor,
@@ -75,7 +76,7 @@ func (r *InvoiceRepository) Save(ctx context.Context, inv entity.Invoice) error 
 			original_file_content= COALESCE(EXCLUDED.original_file_content, invoices.original_file_content)`,
 		inv.ID, inv.UserID, inv.Vendor.Name, inv.Amount, inv.Currency, inv.BaseAmount, inv.BaseCurrency, issuedAt,
 		inv.Description, inv.CategoryID,
-		contentHash, origName, origContent,
+		contentHash, origName, origContent, r.vaultKey,
 	)
 	if err != nil {
 		return fmt.Errorf("save invoice: %w", err)
@@ -314,7 +315,7 @@ func (r *InvoiceRepository) ExistsByContentHash(ctx context.Context, hash string
 // GetOriginalFile returns the stored binary content, MIME type and file name for
 // an invoice, or an error when no file was attached.
 func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error) {
-	var content []byte
+	var rawContent []byte
 	var name *string
 	err := r.pool.QueryRow(ctx, `
 		SELECT original_file_content, original_file_name 
@@ -324,16 +325,27 @@ func (r *InvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, u
 			OR id IN (SELECT invoice_id FROM shared_invoices WHERE shared_with_user_id = $2)
 			OR category_id IN (SELECT category_id FROM shared_categories WHERE shared_with_user_id = $2)
 		)`, id, userID).
-		Scan(&content, &name)
+		Scan(&rawContent, &name)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, "", "", entity.ErrInvoiceNotFound
 		}
 		return nil, "", "", fmt.Errorf("invoice repo: get original file: %w", err)
 	}
-	if len(content) == 0 {
+	if len(rawContent) == 0 {
 		return nil, "", "", fmt.Errorf("invoice repo: no file stored for invoice %s", id)
 	}
+
+	// Try decryption
+	var content []byte
+	decryptQuery := "SELECT pgp_sym_decrypt_bytea($1, $2)"
+	err = r.pool.QueryRow(ctx, decryptQuery, rawContent, r.vaultKey).Scan(&content)
+	if err != nil {
+		// Fallback: If decryption fails, it might be legacy plain text or corrupt.
+		r.Logger.Warn("Invoice decryption failed, returning raw content", "id", id, "error", err)
+		content = rawContent
+	}
+
 	nameStr := ""
 	if name != nil {
 		nameStr = *name

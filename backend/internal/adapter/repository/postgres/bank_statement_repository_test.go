@@ -18,7 +18,7 @@ func TestBankStatementRepository_SaveAndFindByID(t *testing.T) {
 	ctx := context.Background()
 	clearTables(ctx, t) // Instant cleanup!
 
-	repo := NewBankStatementRepository(globalPool, setupLogger())
+	repo := NewBankStatementRepository(globalPool, "test-key-123", setupLogger())
 
 	userID := uuid.New()
 	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'testuser_save', 'hash', 'test_save@example.com')", userID)
@@ -91,7 +91,7 @@ func TestBankStatementRepository_FindSummaries(t *testing.T) {
 	ctx := context.Background()
 	clearTables(ctx, t) // Instant cleanup!
 
-	repo := NewBankStatementRepository(globalPool, setupLogger())
+	repo := NewBankStatementRepository(globalPool, "test-key-123", setupLogger())
 
 	userID := uuid.New()
 	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'testuser_summary', 'hash', 'test_summary@example.com')", userID)
@@ -138,7 +138,7 @@ func TestBankStatementRepository_FindTransactionsAndReconciliationFilter(t *test
 	ctx := context.Background()
 	clearTables(ctx, t) // Instant cleanup!
 
-	repo := NewBankStatementRepository(globalPool, setupLogger())
+	repo := NewBankStatementRepository(globalPool, "test-key-123", setupLogger())
 
 	userID := uuid.New()
 	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'testuser_filter', 'hash', 'test_filter@example.com')", userID)
@@ -205,7 +205,7 @@ func TestBankStatementRepository_Mutations(t *testing.T) {
 	ctx := context.Background()
 	clearTables(ctx, t) // Instant cleanup!
 
-	repo := NewBankStatementRepository(globalPool, setupLogger())
+	repo := NewBankStatementRepository(globalPool, "test-key-123", setupLogger())
 
 	userID := uuid.New()
 	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'testuser_mutate', 'hash', 'test_mutate@example.com')", userID)
@@ -309,7 +309,7 @@ func TestBankStatementRepository_Delete(t *testing.T) {
 	ctx := context.Background()
 	clearTables(ctx, t) // Instant cleanup!
 
-	repo := NewBankStatementRepository(globalPool, setupLogger())
+	repo := NewBankStatementRepository(globalPool, "test-key-123", setupLogger())
 
 	userID := uuid.New()
 	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'testuser_delete', 'hash', 'test_delete@example.com')", userID)

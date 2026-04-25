@@ -12,11 +12,12 @@ import (
 )
 
 type PayslipRepository struct {
-	db *pgxpool.Pool
+	db       *pgxpool.Pool
+	vaultKey string
 }
 
-func NewPayslipRepository(db *pgxpool.Pool) *PayslipRepository {
-	return &PayslipRepository{db: db}
+func NewPayslipRepository(db *pgxpool.Pool, vaultKey string) *PayslipRepository {
+	return &PayslipRepository{db: db, vaultKey: vaultKey}
 }
 
 // Save inserts a new parsed payslip along with its raw file content and bonuses.
@@ -34,9 +35,9 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 			period_month_num, period_year, employer_name, tax_class, tax_id,
 			currency, gross_pay, base_gross_pay, net_pay, base_net_pay, payout_amount, base_payout_amount, custom_deductions
 		) VALUES (
-			$1, $2, $3, $4,
-			$5, $6, $7, $8, $9,
-			$10, $11, $12, $13, $14, $15, $16, $17
+			$1, $2, pgp_sym_encrypt_bytea($3, $4), $5,
+			$6, $7, $8, $9, $10,
+			$11, $12, $13, $14, $15, $16, $17, $18
 		) RETURNING id
 	`
 
@@ -47,7 +48,7 @@ func (r *PayslipRepository) Save(ctx context.Context, p *entity.Payslip) error {
 
 	var payslipID string
 	err = tx.QueryRow(ctx, insertPayslipSQL,
-		p.UserID, p.OriginalFileName, fileContent, p.ContentHash,
+		p.UserID, p.OriginalFileName, fileContent, r.vaultKey, p.ContentHash,
 		p.PeriodMonthNum, p.PeriodYear, p.EmployerName, p.TaxClass, p.TaxID,
 		p.Currency, p.GrossPay, p.BaseGrossPay, p.NetPay, p.BaseNetPay, p.PayoutAmount, p.BasePayoutAmount, p.CustomDeductions,
 	).Scan(&payslipID)
@@ -210,9 +211,9 @@ func (r *PayslipRepository) Update(ctx context.Context, p *entity.Payslip) error
 	if len(p.OriginalFileContent) > 0 {
 		_, err = tx.Exec(ctx, `
 			UPDATE payslips
-			SET original_file_name = $1, original_file_content = $2, content_hash = $3
-			WHERE id = $4 AND user_id = $5`,
-			p.OriginalFileName, p.OriginalFileContent, p.ContentHash,
+			SET original_file_name = $1, original_file_content = pgp_sym_encrypt_bytea($2, $3), content_hash = $4
+			WHERE id = $5 AND user_id = $6`,
+			p.OriginalFileName, p.OriginalFileContent, r.vaultKey, p.ContentHash,
 			p.ID, p.UserID,
 		)
 		if err != nil {
@@ -249,21 +250,38 @@ func (r *PayslipRepository) Delete(ctx context.Context, id string, userID uuid.U
 }
 
 func (r *PayslipRepository) GetOriginalFile(ctx context.Context, id string, userID uuid.UUID) ([]byte, string, string, error) {
-	var content []byte
+	var rawContent []byte
 	var filename string
 
 	query := `SELECT original_file_content, original_file_name FROM payslips WHERE id = $1 AND user_id = $2`
-	err := r.db.QueryRow(ctx, query, id, userID).Scan(&content, &filename)
+	err := r.db.QueryRow(ctx, query, id, userID).Scan(&rawContent, &filename)
+	if err != nil {
+		return nil, "", "", err
+	}
+
+	if len(rawContent) == 0 {
+		return nil, "application/octet-stream", filename, nil
+	}
+
+	// Try decryption
+	var content []byte
+	decryptQuery := "SELECT pgp_sym_decrypt_bytea($1, $2)"
+	err = r.db.QueryRow(ctx, decryptQuery, rawContent, r.vaultKey).Scan(&content)
+	if err != nil {
+		// Fallback for legacy data
+		fmt.Printf("WARNING: PAYSLIP DECRYPTION FAILED for id %s. Error: %v. Returning raw content.\n", id, err)
+		content = rawContent
+	}
 
 	mimeType := "application/octet-stream"
-	if err == nil && len(content) > 0 {
+	if len(content) > 0 {
 		mimeType = http.DetectContentType(content)
 		if idx := strings.IndexByte(mimeType, ';'); idx >= 0 {
 			mimeType = mimeType[:idx]
 		}
 	}
 
-	return content, mimeType, filename, err
+	return content, mimeType, filename, nil
 }
 
 func (r *PayslipRepository) GetSummary(ctx context.Context, userID uuid.UUID) (entity.PayslipSummary, error) {

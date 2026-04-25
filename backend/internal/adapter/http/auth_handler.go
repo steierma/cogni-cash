@@ -8,7 +8,26 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type AuthHandler struct {
+	Logger *slog.Logger
+	authSvc port.AuthUseCase
+	bridgeTokenSvc port.BridgeAccessTokenUseCase
+	userSvc port.UserUseCase
+}
+
+func NewAuthHandler(Logger *slog.Logger, authSvc port.AuthUseCase, bridgeTokenSvc port.BridgeAccessTokenUseCase, userSvc port.UserUseCase) *AuthHandler {
+	return &AuthHandler{
+		Logger: Logger,
+		authSvc: authSvc,
+		bridgeTokenSvc: bridgeTokenSvc,
+		userSvc: userSvc,
+	}
+}
 
 // maxFieldLen is the maximum byte length accepted for username / password
 // fields. bcrypt silently truncates at 72 bytes, so we reject anything
@@ -40,7 +59,7 @@ type resetPasswordConfirmRequest struct {
 	NewPassword string `json:"new_password"`
 }
 
-func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) login(w http.ResponseWriter, r *http.Request) {
 	var req loginRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		h.Logger.Warn("Invalid login request body", "error", err)
@@ -89,7 +108,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, authResponse)
 }
 
-func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) refresh(w http.ResponseWriter, r *http.Request) {
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -132,7 +151,7 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, authResponse)
 }
 
-func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) logout(w http.ResponseWriter, r *http.Request) {
 	// Optional: Revoke refresh token if provided in body
 	var req refreshRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err == nil && req.RefreshToken != "" {
@@ -162,7 +181,7 @@ func (h *Handler) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) changePassword(w http.ResponseWriter, r *http.Request) {
 	var req changePasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -178,7 +197,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -192,7 +211,7 @@ func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) forgotPassword(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) forgotPassword(w http.ResponseWriter, r *http.Request) {
 	var req forgotPasswordRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -212,7 +231,7 @@ func (h *Handler) forgotPassword(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "If an account exists with this email, a reset link has been sent."})
 }
 
-func (h *Handler) validateResetToken(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) validateResetToken(w http.ResponseWriter, r *http.Request) {
 	token := r.URL.Query().Get("token")
 	if token == "" {
 		writeError(w, http.StatusBadRequest, "token is required")
@@ -228,7 +247,7 @@ func (h *Handler) validateResetToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]bool{"valid": isValid})
 }
 
-func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
+func (h *AuthHandler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	var req resetPasswordConfirmRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -248,7 +267,7 @@ func (h *Handler) confirmPasswordReset(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Password updated successfully"})
 }
 
-func (h *Handler) authMiddleware(next http.Handler) http.Handler {
+func (h *AuthHandler) authMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// 1. Check for Bridge Access Token (BAT)
 		bridgeToken := r.Header.Get("X-Bridge-Token")
@@ -292,9 +311,9 @@ func (h *Handler) authMiddleware(next http.Handler) http.Handler {
 	})
 }
 
-func (h *Handler) adminMiddleware(next http.Handler) http.Handler {
+func (h *AuthHandler) adminMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		userID := h.getUserID(r.Context())
+		userID := GetUserID(r.Context())
 		if userID == uuid.Nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return

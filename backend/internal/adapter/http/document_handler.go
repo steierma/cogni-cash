@@ -7,15 +7,31 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
 
+type DocumentHandler struct {
+	Logger *slog.Logger
+	documentSvc port.DocumentUseCase
+}
+
+func NewDocumentHandler(Logger *slog.Logger, documentSvc port.DocumentUseCase) *DocumentHandler {
+	return &DocumentHandler{
+		Logger: Logger,
+		documentSvc: documentSvc,
+	}
+}
+
 // uploadDocument handles POST /api/v1/documents/upload/
-func (h *Handler) uploadDocument(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DocumentHandler) uploadDocument(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -93,8 +109,8 @@ func (h *Handler) uploadDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 // listDocuments handles GET /api/v1/documents/
-func (h *Handler) listDocuments(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DocumentHandler) listDocuments(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -120,8 +136,8 @@ func (h *Handler) listDocuments(w http.ResponseWriter, r *http.Request) {
 }
 
 // getDocument handles GET /api/v1/documents/{id}/
-func (h *Handler) getDocument(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DocumentHandler) getDocument(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -148,8 +164,8 @@ func (h *Handler) getDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 // deleteDocument handles DELETE /api/v1/documents/{id}/
-func (h *Handler) deleteDocument(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DocumentHandler) deleteDocument(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -176,8 +192,8 @@ func (h *Handler) deleteDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 // downloadDocument handles GET /api/v1/documents/{id}/download/
-func (h *Handler) downloadDocument(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DocumentHandler) downloadDocument(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -200,6 +216,13 @@ func (h *Handler) downloadDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Diagnostic: Check if we are sending PGP data as PDF (means decryption failed)
+	if len(content) > 3 && content[0] == 0xc3 && content[1] == 0x0d && content[2] == 0x04 {
+		h.Logger.Error("CRITICAL: Sending encrypted PGP data as raw document. Decryption definitely failed. Please check DOCUMENT_VAULT_KEY.", "id", id)
+	}
+
+	h.Logger.Info("Sending document to browser", "id", id, "mime_type", mimeType, "size", len(content), "filename", fileName)
+
 	w.Header().Set("Content-Type", mimeType)
 	w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", fileName))
 	w.WriteHeader(http.StatusOK)
@@ -207,8 +230,8 @@ func (h *Handler) downloadDocument(w http.ResponseWriter, r *http.Request) {
 }
 
 // getTaxYearSummary handles GET /api/v1/documents/tax-summary/{year}/
-func (h *Handler) getTaxYearSummary(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DocumentHandler) getTaxYearSummary(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -231,8 +254,8 @@ func (h *Handler) getTaxYearSummary(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, summary)
 }
 
-func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *DocumentHandler) updateDocument(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -244,33 +267,62 @@ func (h *Handler) updateDocument(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var req struct {
-		FileName     *string                `json:"file_name"`
-		Type         *entity.DocumentType   `json:"type"`
-		DocumentDate *string                `json:"document_date"`
-		Metadata     map[string]interface{} `json:"metadata"`
-	}
+	updateReq := entity.DocumentUpdateRequest{}
 
-	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
-		writeError(w, http.StatusBadRequest, "Invalid request body")
-		return
-	}
-
-	var docDate *time.Time
-	if req.DocumentDate != nil && *req.DocumentDate != "" {
-		parsedDate, err := time.Parse("2006-01-02", *req.DocumentDate)
-		if err != nil {
-			writeError(w, http.StatusBadRequest, "Invalid date format (expected YYYY-MM-DD)")
+	// Check content type for multipart (file upload) or JSON
+	if strings.HasPrefix(r.Header.Get("Content-Type"), "multipart/form-data") {
+		const maxUpload = 20 << 20
+		r.Body = http.MaxBytesReader(w, r.Body, maxUpload)
+		if err := r.ParseMultipartForm(maxUpload); err != nil {
+			writeError(w, http.StatusRequestEntityTooLarge, "upload too large")
 			return
 		}
-		docDate = &parsedDate
-	}
 
-	updateReq := entity.DocumentUpdateRequest{
-		OriginalFileName: req.FileName,
-		Type:             req.Type,
-		DocumentDate:     docDate,
-		Metadata:         req.Metadata,
+		file, header, err := r.FormFile("file")
+		if err == nil {
+			defer file.Close()
+			fileBytes, err := io.ReadAll(file)
+			if err == nil {
+				updateReq.OriginalFileContent = fileBytes
+				mimeType := resolveMIME(header.Header.Get("Content-Type"), header.Filename)
+				updateReq.MimeType = &mimeType
+			}
+		}
+
+		if val := r.FormValue("file_name"); val != "" {
+			updateReq.OriginalFileName = &val
+		}
+		if val := r.FormValue("document_type"); val != "" {
+			dt := entity.DocumentType(val)
+			updateReq.Type = &dt
+		}
+		if val := r.FormValue("document_date"); val != "" {
+			if parsedDate, err := time.Parse("2006-01-02", val); err == nil {
+				updateReq.DocumentDate = &parsedDate
+			}
+		}
+	} else {
+		var req struct {
+			FileName     *string                `json:"file_name"`
+			Type         *entity.DocumentType   `json:"type"`
+			DocumentDate *string                `json:"document_date"`
+			Metadata     map[string]interface{} `json:"metadata"`
+		}
+
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			writeError(w, http.StatusUnprocessableEntity, "Invalid request body")
+			return
+		}
+
+		updateReq.OriginalFileName = req.FileName
+		updateReq.Type = req.Type
+		updateReq.Metadata = req.Metadata
+
+		if req.DocumentDate != nil && *req.DocumentDate != "" {
+			if parsedDate, err := time.Parse("2006-01-02", *req.DocumentDate); err == nil {
+				updateReq.DocumentDate = &parsedDate
+			}
+		}
 	}
 
 	doc, err := h.documentSvc.Update(r.Context(), id, userID, updateReq)

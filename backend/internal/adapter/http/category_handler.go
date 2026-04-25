@@ -8,7 +8,21 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"cogni-cash/internal/domain/port"
 )
+
+type CategoryHandler struct {
+	categorySvc port.CategoryUseCase
+	forecastingSvc port.ForecastingUseCase
+}
+
+func NewCategoryHandler(categorySvc port.CategoryUseCase, forecastingSvc port.ForecastingUseCase) *CategoryHandler {
+	return &CategoryHandler{
+		categorySvc: categorySvc,
+		forecastingSvc: forecastingSvc,
+	}
+}
 
 type categoryRequest struct {
 	Name               string `json:"name"`
@@ -22,12 +36,12 @@ type shareCategoryRequest struct {
 	Permission string    `json:"permission"` // 'view' or 'edit'
 }
 
-func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) listCategories(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -44,12 +58,12 @@ func (h *Handler) listCategories(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cats)
 }
 
-func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) createCategory(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -77,12 +91,12 @@ func (h *Handler) createCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, cat)
 }
 
-func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) updateCategory(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -116,12 +130,12 @@ func (h *Handler) updateCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, cat)
 }
 
-func (h *Handler) getCategoryAverage(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) getCategoryAverage(w http.ResponseWriter, r *http.Request) {
 	if h.forecastingSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "forecasting service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -147,12 +161,12 @@ func (h *Handler) getCategoryAverage(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]float64{"average": avg})
 }
 
-func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -170,12 +184,12 @@ func (h *Handler) deleteCategory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) restoreCategory(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) restoreCategory(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -203,12 +217,12 @@ func (h *Handler) restoreCategory(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, restored)
 }
 
-func (h *Handler) shareCategory(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) shareCategory(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -237,12 +251,12 @@ func (h *Handler) shareCategory(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusCreated)
 }
 
-func (h *Handler) revokeCategoryShare(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) revokeCategoryShare(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -268,12 +282,12 @@ func (h *Handler) revokeCategoryShare(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) listCategoryShares(w http.ResponseWriter, r *http.Request) {
+func (h *CategoryHandler) listCategoryShares(w http.ResponseWriter, r *http.Request) {
 	if h.categorySvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "category service not available")
 		return
 	}
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

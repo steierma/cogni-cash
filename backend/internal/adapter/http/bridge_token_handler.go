@@ -6,14 +6,29 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type BridgeTokenHandler struct {
+	Logger *slog.Logger
+	bridgeTokenSvc port.BridgeAccessTokenUseCase
+}
+
+func NewBridgeTokenHandler(Logger *slog.Logger, bridgeTokenSvc port.BridgeAccessTokenUseCase) *BridgeTokenHandler {
+	return &BridgeTokenHandler{
+		Logger: Logger,
+		bridgeTokenSvc: bridgeTokenSvc,
+	}
+}
 
 type createBridgeTokenRequest struct {
 	Name string `json:"name"`
 }
 
-func (h *Handler) listBridgeTokens(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *BridgeTokenHandler) listBridgeTokens(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -27,7 +42,7 @@ func (h *Handler) listBridgeTokens(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, tokens)
 }
 
-func (h *Handler) createBridgeToken(w http.ResponseWriter, r *http.Request) {
+func (h *BridgeTokenHandler) createBridgeToken(w http.ResponseWriter, r *http.Request) {
 	var req createBridgeTokenRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		writeError(w, http.StatusBadRequest, "invalid request body")
@@ -39,7 +54,7 @@ func (h *Handler) createBridgeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -54,7 +69,7 @@ func (h *Handler) createBridgeToken(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, response)
 }
 
-func (h *Handler) revokeBridgeToken(w http.ResponseWriter, r *http.Request) {
+func (h *BridgeTokenHandler) revokeBridgeToken(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -62,7 +77,7 @@ func (h *Handler) revokeBridgeToken(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

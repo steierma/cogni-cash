@@ -7,9 +7,30 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"context"
+	"sync"
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
 
-func (h *Handler) listBankInstitutions(w http.ResponseWriter, r *http.Request) {
+type BankHandler struct {
+	AppCtx context.Context
+	Logger *slog.Logger
+	WaitGroup *sync.WaitGroup
+	bankSvc port.BankUseCase
+}
+
+func NewBankHandler(AppCtx context.Context, Logger *slog.Logger, WaitGroup *sync.WaitGroup, bankSvc port.BankUseCase) *BankHandler {
+	return &BankHandler{
+		AppCtx: AppCtx,
+		Logger: Logger,
+		WaitGroup: WaitGroup,
+		bankSvc: bankSvc,
+	}
+}
+
+func (h *BankHandler) listBankInstitutions(w http.ResponseWriter, r *http.Request) {
 	country := r.URL.Query().Get("country")
 	if country == "" {
 		country = "DE"
@@ -17,7 +38,7 @@ func (h *Handler) listBankInstitutions(w http.ResponseWriter, r *http.Request) {
 
 	isSandbox := r.URL.Query().Get("sandbox") == "true"
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -32,7 +53,7 @@ func (h *Handler) listBankInstitutions(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, insts)
 }
 
-func (h *Handler) createBankConnection(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) createBankConnection(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		InstitutionID   string `json:"institution_id"`
 		InstitutionName string `json:"institution_name"`
@@ -45,13 +66,13 @@ func (h *Handler) createBankConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
 
-	ip := h.getClientIP(r)
+	ip := getClientIP(r)
 	ua := r.Header.Get("User-Agent")
 
 	conn, err := h.bankSvc.CreateConnection(r.Context(), userID, req.InstitutionID, req.InstitutionName, req.Country, req.RedirectURL, req.Sandbox, ip, ua)
@@ -64,7 +85,7 @@ func (h *Handler) createBankConnection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, conn)
 }
 
-func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		RequisitionID string `json:"requisition_id"`
 		Code          string `json:"code"`
@@ -74,7 +95,7 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -99,7 +120,7 @@ func (h *Handler) finishBankConnection(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (h *Handler) createVirtualBankAccount(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) createVirtualBankAccount(w http.ResponseWriter, r *http.Request) {
 	var req struct {
 		Name        string  `json:"name"`
 		IBAN        string  `json:"iban"`
@@ -112,7 +133,7 @@ func (h *Handler) createVirtualBankAccount(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -136,8 +157,8 @@ func (h *Handler) createVirtualBankAccount(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, acc)
 }
 
-func (h *Handler) listBankConnections(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *BankHandler) listBankConnections(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -152,7 +173,7 @@ func (h *Handler) listBankConnections(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, conns)
 }
 
-func (h *Handler) deleteBankConnection(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) deleteBankConnection(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -160,7 +181,7 @@ func (h *Handler) deleteBankConnection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -174,8 +195,8 @@ func (h *Handler) deleteBankConnection(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) syncAllBankAccounts(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *BankHandler) syncAllBankAccounts(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -194,7 +215,7 @@ func (h *Handler) syncAllBankAccounts(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusAccepted, map[string]string{"message": "sync started in background"})
 }
 
-func (h *Handler) updateBankAccountType(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) updateBankAccountType(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	id, err := uuid.Parse(idStr)
 	if err != nil {
@@ -210,7 +231,7 @@ func (h *Handler) updateBankAccountType(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -224,7 +245,7 @@ func (h *Handler) updateBankAccountType(w http.ResponseWriter, r *http.Request) 
 	writeJSON(w, http.StatusOK, map[string]string{"status": "success"})
 }
 
-func (h *Handler) shareBankAccount(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) shareBankAccount(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	accountID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -241,7 +262,7 @@ func (h *Handler) shareBankAccount(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if err := h.bankSvc.ShareAccount(r.Context(), accountID, userID, req.SharedWithID, req.Permission); err != nil {
 		h.Logger.Error("Failed to share bank account", "error", err, "account_id", accountID)
 		writeError(w, http.StatusInternalServerError, "failed to share bank account")
@@ -251,7 +272,7 @@ func (h *Handler) shareBankAccount(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "shared"})
 }
 
-func (h *Handler) revokeBankAccountShare(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) revokeBankAccountShare(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	accountID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -266,7 +287,7 @@ func (h *Handler) revokeBankAccountShare(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if err := h.bankSvc.RevokeShare(r.Context(), accountID, userID, sharedWithID); err != nil {
 		h.Logger.Error("Failed to revoke bank account share", "error", err, "account_id", accountID)
 		writeError(w, http.StatusInternalServerError, "failed to revoke share")
@@ -276,7 +297,7 @@ func (h *Handler) revokeBankAccountShare(w http.ResponseWriter, r *http.Request)
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) listBankAccountShares(w http.ResponseWriter, r *http.Request) {
+func (h *BankHandler) listBankAccountShares(w http.ResponseWriter, r *http.Request) {
 	idStr := chi.URLParam(r, "id")
 	accountID, err := uuid.Parse(idStr)
 	if err != nil {
@@ -284,7 +305,7 @@ func (h *Handler) listBankAccountShares(w http.ResponseWriter, r *http.Request) 
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	shares, err := h.bankSvc.ListShares(r.Context(), accountID, userID)
 	if err != nil {
 		h.Logger.Error("Failed to list bank account shares", "error", err, "account_id", accountID)

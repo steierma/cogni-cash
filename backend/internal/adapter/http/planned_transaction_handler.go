@@ -9,7 +9,22 @@ import (
 	"github.com/google/uuid"
 
 	"cogni-cash/internal/domain/entity"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type PlannedTransactionHandler struct {
+	Logger *slog.Logger
+	plannedTransactionSvc port.PlannedTransactionUseCase
+}
+
+func NewPlannedTransactionHandler(Logger *slog.Logger, plannedTransactionSvc port.PlannedTransactionUseCase) *PlannedTransactionHandler {
+	return &PlannedTransactionHandler{
+		Logger: Logger,
+		plannedTransactionSvc: plannedTransactionSvc,
+	}
+}
 
 type createPlannedTransactionRequest struct {
 	Amount             float64                   `json:"amount"`
@@ -36,8 +51,8 @@ type updatePlannedTransactionRequest struct {
 	EndDate            *time.Time                      `json:"end_date"`
 }
 
-func (h *Handler) listPlannedTransactions(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PlannedTransactionHandler) listPlannedTransactions(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -56,8 +71,8 @@ func (h *Handler) listPlannedTransactions(w http.ResponseWriter, r *http.Request
 	writeJSON(w, http.StatusOK, pts)
 }
 
-func (h *Handler) createPlannedTransaction(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PlannedTransactionHandler) createPlannedTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -95,8 +110,8 @@ func (h *Handler) createPlannedTransaction(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusCreated, pt)
 }
 
-func (h *Handler) updatePlannedTransaction(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PlannedTransactionHandler) updatePlannedTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -146,8 +161,8 @@ func (h *Handler) updatePlannedTransaction(w http.ResponseWriter, r *http.Reques
 	writeJSON(w, http.StatusOK, pt)
 }
 
-func (h *Handler) deletePlannedTransaction(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+func (h *PlannedTransactionHandler) deletePlannedTransaction(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

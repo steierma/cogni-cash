@@ -13,7 +13,7 @@ func TestPayslipRepository(t *testing.T) {
 	ctx := context.Background()
 	clearTables(ctx, t) // Instant cleanup!
 
-	repo := NewPayslipRepository(globalPool)
+	repo := NewPayslipRepository(globalPool, "test-key-123")
 
 	userID := uuid.New()
 	_, err := globalPool.Exec(ctx, "INSERT INTO users (id, username, password_hash, email) VALUES ($1, 'payslip_user', 'hash', 'ps@example.com')", userID)

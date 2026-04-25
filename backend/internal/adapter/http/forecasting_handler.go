@@ -5,10 +5,25 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
 
-func (h *Handler) getForecast(w http.ResponseWriter, r *http.Request) {
-	userID := h.getUserID(r.Context())
+type ForecastingHandler struct {
+	Logger *slog.Logger
+	forecastingSvc port.ForecastingUseCase
+}
+
+func NewForecastingHandler(Logger *slog.Logger, forecastingSvc port.ForecastingUseCase) *ForecastingHandler {
+	return &ForecastingHandler{
+		Logger: Logger,
+		forecastingSvc: forecastingSvc,
+	}
+}
+
+func (h *ForecastingHandler) getForecast(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

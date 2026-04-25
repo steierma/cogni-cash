@@ -10,20 +10,37 @@ import (
 
 	"github.com/go-chi/chi/v5"
 	"github.com/google/uuid"
+
+	"log/slog"
+	"cogni-cash/internal/domain/port"
 )
+
+type ReconciliationHandler struct {
+	Logger *slog.Logger
+	reconciliationRepo port.ReconciliationRepository
+	reconciliationSvc port.ReconciliationUseCase
+}
+
+func NewReconciliationHandler(Logger *slog.Logger, reconciliationRepo port.ReconciliationRepository, reconciliationSvc port.ReconciliationUseCase) *ReconciliationHandler {
+	return &ReconciliationHandler{
+		Logger: Logger,
+		reconciliationRepo: reconciliationRepo,
+		reconciliationSvc: reconciliationSvc,
+	}
+}
 
 type createReconciliationRequest struct {
 	SettlementTxHash string `json:"settlement_tx_hash"`
 	TargetTxHash     string `json:"target_tx_hash"`
 }
 
-func (h *Handler) getReconciliationSuggestions(w http.ResponseWriter, r *http.Request) {
+func (h *ReconciliationHandler) getReconciliationSuggestions(w http.ResponseWriter, r *http.Request) {
 	if h.reconciliationSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "reconciliation service not available")
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -54,13 +71,13 @@ func (h *Handler) getReconciliationSuggestions(w http.ResponseWriter, r *http.Re
 	writeJSON(w, http.StatusOK, suggestions)
 }
 
-func (h *Handler) createReconciliation(w http.ResponseWriter, r *http.Request) {
+func (h *ReconciliationHandler) createReconciliation(w http.ResponseWriter, r *http.Request) {
 	if h.reconciliationSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "reconciliation service not available")
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -93,13 +110,13 @@ func (h *Handler) createReconciliation(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusCreated, rec)
 }
 
-func (h *Handler) listReconciliations(w http.ResponseWriter, r *http.Request) {
+func (h *ReconciliationHandler) listReconciliations(w http.ResponseWriter, r *http.Request) {
 	if h.reconciliationRepo == nil {
 		writeJSON(w, http.StatusOK, []entity.Reconciliation{})
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -117,13 +134,13 @@ func (h *Handler) listReconciliations(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, recs)
 }
 
-func (h *Handler) deleteReconciliation(w http.ResponseWriter, r *http.Request) {
+func (h *ReconciliationHandler) deleteReconciliation(w http.ResponseWriter, r *http.Request) {
 	if h.reconciliationSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "reconciliation service not available")
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return

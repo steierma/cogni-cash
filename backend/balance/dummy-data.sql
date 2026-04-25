@@ -112,44 +112,44 @@ BEGIN
         -- Insert Categorized Transactions
         -- ---------------------------------------------------------
         -- 1. Income (Einkommen)
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '1 day', curr_date + interval '1 day', 'Salary Mustermann GmbH', salary_net, salary_net, 'EUR', 'credit', cat_income, md5(gen_random_uuid()::text), false, 'giro', true, 'Mustermann GmbH', false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '1 day', curr_date + interval '1 day', 'Salary Mustermann GmbH', salary_net, salary_net, 'EUR', 'credit', cat_income, md5(gen_random_uuid()::text), false, 'giro', true, 'Mustermann GmbH', false);
 
         -- 2. Rent (Haus und Hausrat)
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '3 days', curr_date + interval '3 days', 'Rent Payment', -1200.00, -1200.00, 'EUR', 'debit', cat_housing, md5(gen_random_uuid()::text), false, 'giro', true, 'Hausverwaltung GmbH', false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '3 days', curr_date + interval '3 days', 'Rent Payment', -1200.00, -1200.00, 'EUR', 'debit', cat_housing, md5(gen_random_uuid()::text), false, 'giro', true, 'Hausverwaltung GmbH', false);
 
         -- 3. Utilities (Utilities & Internet)
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '4 days', curr_date + interval '4 days', 'Telekom Internet & Power', -utilities_amount, -utilities_amount, 'EUR', 'debit', cat_utilities, md5(gen_random_uuid()::text), false, 'giro', true, 'Deutsche Telekom', false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '4 days', curr_date + interval '4 days', 'Telekom Internet & Power', -utilities_amount, -utilities_amount, 'EUR', 'debit', cat_utilities, md5(gen_random_uuid()::text), false, 'giro', true, 'Deutsche Telekom', false);
 
         -- 4. Groceries (Groceries & Food)
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '10 days', curr_date + interval '10 days', 'REWE Supermarket', -groceries_amount, -groceries_amount, 'EUR', 'debit', cat_groceries, md5(gen_random_uuid()::text), false, 'giro', true, 'REWE', false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '10 days', curr_date + interval '10 days', 'REWE Supermarket', -groceries_amount, -groceries_amount, 'EUR', 'debit', cat_groceries, md5(gen_random_uuid()::text), false, 'giro', true, 'REWE', false);
 
         -- 5. Tech & Subscriptions (Tech & Software)
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '12 days', curr_date + interval '12 days', 'Hetzner Online GmbH', -25.00, -25.00, 'EUR', 'debit', cat_tech, md5(gen_random_uuid()::text), false, 'giro', true, 'Hetzner Online GmbH', false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '12 days', curr_date + interval '12 days', 'Hetzner Online GmbH', -25.00, -25.00, 'EUR', 'debit', cat_tech, md5(gen_random_uuid()::text), false, 'giro', true, 'Hetzner Online GmbH', false);
 
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '5 days', curr_date + interval '5 days', 'Netflix.com', -17.99, -17.99, 'EUR', 'debit', cat_misc, md5(gen_random_uuid()::text), false, 'giro', true, 'Netflix', false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, counterparty_name, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '5 days', curr_date + interval '5 days', 'Netflix.com', -17.99, -17.99, 'EUR', 'debit', cat_misc, md5(gen_random_uuid()::text), false, 'giro', true, 'Netflix', false);
 
         -- ---------------------------------------------------------
         -- OPEN RECONCILIATIONS (1:1 Transfers)
         -- ---------------------------------------------------------
         -- Pair A: Multi-day offset (Random amount)
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '15 days', curr_date + interval '15 days', 'Internal Transfer to Savings', -recon_amount, -recon_amount, 'EUR', 'debit', cat_misc, md5(gen_random_uuid()::text), false, 'giro', true, false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '15 days', curr_date + interval '15 days', 'Internal Transfer to Savings', -recon_amount, -recon_amount, 'EUR', 'debit', cat_misc, md5(gen_random_uuid()::text), false, 'giro', true, false);
 
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_savings_id, curr_date + interval '16 days', curr_date + interval '16 days', 'Internal Transfer from Giro', recon_amount, recon_amount, 'EUR', 'credit', cat_misc, md5(gen_random_uuid()::text), false, 'credit_card', true, false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, is_payslip_verified)
+        VALUES (admin_id, stmt_savings_id, curr_date + interval '16 days', curr_date + interval '16 days', 'Internal Transfer from Giro', recon_amount, recon_amount, 'EUR', 'credit', cat_misc, md5(gen_random_uuid()::text), false, 'credit_card', true, false);
 
         -- Pair B: Guaranteed same-day exact match (1500.00)
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_giro_id, curr_date + interval '20 days', curr_date + interval '20 days', 'Manual Transfer Extra (Out)', -1500.00, -1500.00, 'EUR', 'debit', cat_misc, md5(gen_random_uuid()::text), false, 'giro', true, false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, is_payslip_verified)
+        VALUES (admin_id, stmt_giro_id, curr_date + interval '20 days', curr_date + interval '20 days', 'Manual Transfer Extra (Out)', -1500.00, -1500.00, 'EUR', 'debit', cat_misc, md5(gen_random_uuid()::text), false, 'giro', true, false);
 
-        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, skip_forecasting, is_payslip_verified)
-        VALUES (admin_id, stmt_savings_id, curr_date + interval '20 days', curr_date + interval '20 days', 'Manual Transfer Extra (In)', 1500.00, 1500.00, 'EUR', 'credit', cat_misc, md5(gen_random_uuid()::text), false, 'credit_card', true, false, false);
+        INSERT INTO transactions (user_id, bank_statement_id, booking_date, valuta_date, description, amount, base_amount, base_currency, transaction_type, category_id, content_hash, is_reconciled, statement_type, reviewed, is_payslip_verified)
+        VALUES (admin_id, stmt_savings_id, curr_date + interval '20 days', curr_date + interval '20 days', 'Manual Transfer Extra (In)', 1500.00, 1500.00, 'EUR', 'credit', cat_misc, md5(gen_random_uuid()::text), false, 'credit_card', true, false);
 
         -- ---------------------------------------------------------
         -- Standalone Invoices & Payslips
@@ -197,14 +197,14 @@ BEGIN
     -- ---------------------------------------------------------
     -- Planned Transactions (Manual Forecasts)
     -- ---------------------------------------------------------
-    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date)
-    VALUES (gen_random_uuid(), admin_id, -800.00, 'EUR', -800.00, 'EUR', (CURRENT_DATE + interval '1 month')::DATE, 'Summer Vacation', cat_misc, 'pending', 0, NULL);
+    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, scheduling_strategy, end_date)
+    VALUES (gen_random_uuid(), admin_id, -800.00, 'EUR', -800.00, 'EUR', (CURRENT_DATE + interval '1 month')::DATE, 'Summer Vacation', cat_misc, 'pending', 0, 'fixed_day', NULL);
 
-    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date)
-    VALUES (gen_random_uuid(), admin_id, 300.00, 'EUR', 300.00, 'EUR', (CURRENT_DATE + interval '2 months')::DATE, 'Tax Refund', cat_income, 'pending', 0, NULL);
+    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, scheduling_strategy, end_date)
+    VALUES (gen_random_uuid(), admin_id, 300.00, 'EUR', 300.00, 'EUR', (CURRENT_DATE + interval '2 months')::DATE, 'Tax Refund', cat_income, 'pending', 0, 'fixed_day', NULL);
 
-    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, end_date)
-    VALUES (gen_random_uuid(), admin_id, -50.00, 'EUR', -50.00, 'EUR', (CURRENT_DATE + interval '15 days')::DATE, 'Recurring Subscription', cat_misc, 'pending', 1, (CURRENT_DATE + interval '1 year')::DATE);
+    INSERT INTO planned_transactions (id, user_id, amount, currency, base_amount, base_currency, date, description, category_id, status, interval_months, scheduling_strategy, end_date)
+    VALUES (gen_random_uuid(), admin_id, -50.00, 'EUR', -50.00, 'EUR', (CURRENT_DATE + interval '15 days')::DATE, 'Recurring Subscription', cat_misc, 'pending', 1, 'fixed_day', (CURRENT_DATE + interval '1 year')::DATE);
 
     -- ---------------------------------------------------------
     -- Subscriptions (New Feature Sample)

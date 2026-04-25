@@ -59,11 +59,12 @@ export default function DocumentVaultPage() {
     });
 
     const updateMutation = useMutation({
-        mutationFn: ({ id, data }: { id: string, data: { file_name?: string, type?: DocumentType, document_date?: string } }) =>
+        mutationFn: ({ id, data }: { id: string, data: { file_name?: string, type?: DocumentType, document_date?: string, file?: File } }) =>
             documentService.update(id, {
                 file_name: data.file_name,
                 type: data.type,
-                document_date: data.document_date || undefined
+                document_date: data.document_date || undefined,
+                file: data.file
             }),
         onSuccess: () => {
             queryClient.invalidateQueries({ queryKey: ['documents'] });

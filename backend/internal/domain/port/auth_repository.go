@@ -12,7 +12,7 @@ import (
 type AuthRepository interface {
 	SaveRefreshToken(ctx context.Context, token entity.RefreshToken) error
 	FindRefreshToken(ctx context.Context, tokenHash string) (entity.RefreshToken, error)
-	RevokeRefreshToken(ctx context.Context, id uuid.UUID) error
+	RevokeRefreshToken(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 	RevokeAllRefreshTokens(ctx context.Context, userID uuid.UUID) error
 	CleanupExpiredRefreshTokens(ctx context.Context) error
 }

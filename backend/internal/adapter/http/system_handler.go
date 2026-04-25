@@ -10,13 +10,39 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"cogni-cash/internal/domain/port"
 )
 
-func (h *Handler) healthCheck(w http.ResponseWriter, _ *http.Request) {
+type SystemHandler struct {
+	LogLevel *slog.LevelVar
+	Logger *slog.Logger
+	dbHost string
+	dbPinger func(context.Context) error
+	notificationSvc port.NotificationUseCase
+	settingsSvc port.SettingsUseCase
+	storageMode string
+	userSvc port.UserUseCase
+}
+
+func NewSystemHandler(LogLevel *slog.LevelVar, Logger *slog.Logger, dbHost string, dbPinger func(context.Context) error, notificationSvc port.NotificationUseCase, settingsSvc port.SettingsUseCase, storageMode string, userSvc port.UserUseCase) *SystemHandler {
+	return &SystemHandler{
+		LogLevel: LogLevel,
+		Logger: Logger,
+		dbHost: dbHost,
+		dbPinger: dbPinger,
+		notificationSvc: notificationSvc,
+		settingsSvc: settingsSvc,
+		storageMode: storageMode,
+		userSvc: userSvc,
+	}
+}
+
+func (h *SystemHandler) healthCheck(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (h *Handler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
+func (h *SystemHandler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
 	dbState := "disconnected"
 	if h.dbPinger != nil {
 		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
@@ -30,7 +56,7 @@ func (h *Handler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
 
 	bankProvider := "enablebanking"
 	if h.settingsSvc != nil {
-		userID := h.getUserID(r.Context())
+		userID := GetUserID(r.Context())
 		if userID == uuid.Nil {
 			writeError(w, http.StatusUnauthorized, "unauthorized")
 			return
@@ -61,13 +87,13 @@ func (h *Handler) getSystemInfo(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, info)
 }
 
-func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
+func (h *SystemHandler) getSettings(w http.ResponseWriter, r *http.Request) {
 	if h.settingsSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings service not available")
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -90,7 +116,7 @@ func (h *Handler) getSettings(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, settings)
 }
 
-func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
+func (h *SystemHandler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	if h.settingsSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "settings service not available")
 		return
@@ -102,7 +128,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -125,7 +151,7 @@ func (h *Handler) updateSettings(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
-func (h *Handler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
+func (h *SystemHandler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
 	if h.notificationSvc == nil {
 		writeError(w, http.StatusServiceUnavailable, "notification service not available")
 		return
@@ -144,7 +170,7 @@ func (h *Handler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	userID := h.getUserID(r.Context())
+	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
@@ -158,7 +184,7 @@ func (h *Handler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"message": "Test email sent successfully"})
 }
 
-func (h *Handler) getLogLevel(w http.ResponseWriter, _ *http.Request) {
+func (h *SystemHandler) getLogLevel(w http.ResponseWriter, _ *http.Request) {
 	if h.LogLevel == nil {
 		writeError(w, http.StatusServiceUnavailable, "log level control not available")
 		return
@@ -168,7 +194,7 @@ func (h *Handler) getLogLevel(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"level": level})
 }
 
-func (h *Handler) updateLogLevel(w http.ResponseWriter, r *http.Request) {
+func (h *SystemHandler) updateLogLevel(w http.ResponseWriter, r *http.Request) {
 	if h.LogLevel == nil {
 		writeError(w, http.StatusServiceUnavailable, "log level control not available")
 		return
@@ -202,7 +228,7 @@ func (h *Handler) updateLogLevel(w http.ResponseWriter, r *http.Request) {
 
 	// Persistence: Update in settings if settingsSvc is available
 	if h.settingsSvc != nil {
-		userID := h.getUserID(r.Context())
+		userID := GetUserID(r.Context())
 		if userID != uuid.Nil {
 			// Find admin ID to save it globally (for all users)
 			adminID, err := h.userSvc.GetAdminID(r.Context())

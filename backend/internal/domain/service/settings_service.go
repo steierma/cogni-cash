@@ -2,9 +2,11 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"log/slog"
 	"strings"
 
+	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
 
 	"github.com/google/uuid"
@@ -42,6 +44,21 @@ func (s *SettingsService) GetAllMasked(ctx context.Context, userID uuid.UUID, is
 		// Filter out admin-only keys completely for non-admin users
 		if adminOnlyKeys[k] && !isAdmin {
 			continue
+		}
+
+		if k == "llm_profiles" && v != "" {
+			var profiles []entity.LLMProfile
+			if err := json.Unmarshal([]byte(v), &profiles); err == nil {
+				for i := range profiles {
+					if profiles[i].Token != "" {
+						profiles[i].Token = maskValue
+					}
+				}
+				if maskedJSON, err := json.Marshal(profiles); err == nil {
+					masked[k] = string(maskedJSON)
+					continue
+				}
+			}
 		}
 
 		if s.isSensitiveKey(k) && v != "" {
@@ -97,6 +114,40 @@ func (s *SettingsService) UpdateMultiple(ctx context.Context, settings map[strin
 		if adminOnlyKeys[key] && !isAdmin {
 			s.logger.Warn("Non-admin user attempted to update restricted setting", "user_id", userID, "key", key)
 			continue // Or return error? The frontend already hides these, so a "continue" is a silent guard.
+		}
+
+		// Special handling for llm_profiles JSON merging
+		if key == "llm_profiles" && value != "" {
+			var newProfiles []entity.LLMProfile
+			if err := json.Unmarshal([]byte(value), &newProfiles); err == nil {
+				// Fetch existing to merge tokens
+				existingJSON, _ := s.repo.Get(ctx, key, userID)
+				if existingJSON != "" {
+					var oldProfiles []entity.LLMProfile
+					if err := json.Unmarshal([]byte(existingJSON), &oldProfiles); err == nil {
+						// Create map for easy lookup
+						oldMap := make(map[string]entity.LLMProfile)
+						for _, p := range oldProfiles {
+							oldMap[p.ID] = p
+						}
+
+						// Merge
+						for i := range newProfiles {
+							if newProfiles[i].Token == maskValue {
+								if old, ok := oldMap[newProfiles[i].ID]; ok {
+									newProfiles[i].Token = old.Token
+								} else {
+									newProfiles[i].Token = "" // Should not happen if masked
+								}
+							}
+						}
+					}
+				}
+				// Marshal back to save
+				if mergedJSON, err := json.Marshal(newProfiles); err == nil {
+					value = string(mergedJSON)
+				}
+			}
 		}
 
 		isSensitive := s.isSensitiveKey(key)

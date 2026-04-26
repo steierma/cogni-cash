@@ -19,6 +19,7 @@ import {
     EditPayslipModal,
     BatchResultsModal
 } from '../components/payslips/PayslipModals';
+import { LLMEnforcementWarning } from '../components/LLMEnforcementWarning';
 
 export default function PayslipsPage() {
     const { t } = useTranslation();
@@ -295,6 +296,7 @@ export default function PayslipsPage() {
 
     return (
         <div className="max-w-7xl mx-auto space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <LLMEnforcementWarning />
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>

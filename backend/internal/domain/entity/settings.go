@@ -9,3 +9,13 @@ type Setting struct {
 	Value       string    `json:"value"`
 	IsSensitive bool      `json:"is_sensitive"`
 }
+
+type LLMProfile struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"` // gemini, ollama, openai
+	URL      string `json:"url"`
+	Token    string `json:"token"`
+	Model    string `json:"model"`
+	IsActive bool   `json:"is_active"`
+}

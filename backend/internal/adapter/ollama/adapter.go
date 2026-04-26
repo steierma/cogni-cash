@@ -64,6 +64,26 @@ type ollamaGenerateResponse struct {
 	Response string `json:"response"`
 }
 
+// --- OpenAI / Groq Types ---
+
+type openaiRequest struct {
+	Model    string          `json:"model"`
+	Messages []openaiMessage `json:"messages"`
+}
+
+type openaiMessage struct {
+	Role    string `json:"role"`
+	Content string `json:"content"`
+}
+
+type openaiResponse struct {
+	Choices []struct {
+		Message struct {
+			Content string `json:"content"`
+		} `json:"message"`
+	} `json:"choices"`
+}
+
 // --- Internal Mapping Types ---
 
 type llmResponse struct {
@@ -77,17 +97,19 @@ type llmResponse struct {
 
 type Adapter struct {
 	settingsRepo port.SettingsRepository
+	userRepo     port.UserRepository
 	extractor    port.InvoiceParser // Injected to handle internal fallback for PDFs
 	client       *http.Client
 	logger       *slog.Logger
 }
 
-func NewAdapter(settingsRepo port.SettingsRepository, extractor port.InvoiceParser, logger *slog.Logger) *Adapter {
+func NewAdapter(settingsRepo port.SettingsRepository, userRepo port.UserRepository, extractor port.InvoiceParser, logger *slog.Logger) *Adapter {
 	if logger == nil {
 		logger = slog.Default()
 	}
 	return &Adapter{
 		settingsRepo: settingsRepo,
+		userRepo:     userRepo,
 		extractor:    extractor,
 		client: &http.Client{
 			Timeout: 2 * time.Minute,
@@ -96,56 +118,101 @@ func NewAdapter(settingsRepo port.SettingsRepository, extractor port.InvoicePars
 	}
 }
 
-func (a *Adapter) getLLMConfig(ctx context.Context, userID uuid.UUID) (baseURL, token, model string, err error) {
-	baseURL, err = a.settingsRepo.Get(ctx, "llm_api_url", userID)
-	if err != nil {
-		return "", "", "", err
+func (a *Adapter) getLLMConfig(ctx context.Context, userID uuid.UUID) (entity.LLMProfile, error) {
+	// 1. Check user-specific profiles
+	profilesJSON, _ := a.settingsRepo.Get(ctx, "llm_profiles", userID)
+	if profilesJSON != "" {
+		var profiles []entity.LLMProfile
+		if err := json.Unmarshal([]byte(profilesJSON), &profiles); err == nil {
+			for _, p := range profiles {
+				if p.IsActive {
+					return p, nil
+				}
+			}
+		}
 	}
+
+	// 2. Fallback logic
+	enforce, _ := a.settingsRepo.GetGlobal(ctx, "llm_enforce_user_config")
+	if enforce == "true" {
+		user, err := a.userRepo.FindByID(ctx, userID)
+		if err != nil {
+			return entity.LLMProfile{}, err
+		}
+		if user.Role != "admin" {
+			return entity.LLMProfile{}, entity.ErrLLMConfigRequired
+		}
+	}
+
+	// Fallback to global profiles
+	globalProfilesJSON, _ := a.settingsRepo.GetGlobal(ctx, "llm_profiles")
+	if globalProfilesJSON != "" {
+		var profiles []entity.LLMProfile
+		if err := json.Unmarshal([]byte(globalProfilesJSON), &profiles); err == nil {
+			for _, p := range profiles {
+				if p.IsActive {
+					return p, nil
+				}
+			}
+		}
+	}
+
+	// Legacy fallback
+	baseURL, _ := a.settingsRepo.Get(ctx, "llm_api_url", userID)
 	if baseURL == "" {
-		return "", "", "", fmt.Errorf("llm_api_url is not configured in settings")
+		return entity.LLMProfile{}, fmt.Errorf("no active llm profile and legacy llm_api_url is missing")
 	}
 
-	token, err = a.settingsRepo.Get(ctx, "llm_api_token", userID)
-	if err != nil {
-		return "", "", "", err
-	}
-
-	model, _ = a.settingsRepo.Get(ctx, "llm_model", userID)
+	token, _ := a.settingsRepo.Get(ctx, "llm_api_token", userID)
+	model, _ := a.settingsRepo.Get(ctx, "llm_model", userID)
 	if model == "" {
 		model = defaultModel
 	}
 
-	return strings.TrimRight(baseURL, "/"), token, model, nil
+	pType := "ollama"
+	if strings.Contains(baseURL, "googleapis.com") {
+		pType = "gemini"
+	}
+
+	return entity.LLMProfile{
+		Type:     pType,
+		URL:      strings.TrimRight(baseURL, "/"),
+		Token:    token,
+		Model:    model,
+		IsActive: true,
+	}, nil
 }
 
 // ─── CORE PROCESSING ENGINE (The Internal Fallback Logic) ────────────────────
 
 // processFileWithAI determines the capabilities of the configured model and routes the file appropriately.
 // It acts as the fallback mechanism if a non-multimodal model is given a PDF.
-func (a *Adapter) processFileWithAI(ctx context.Context, userID uuid.UUID, baseURL, token, model, mimeType string, fileBytes []byte, promptTemplate string) (string, error) {
+func (a *Adapter) processFileWithAI(ctx context.Context, userID uuid.UUID, profile entity.LLMProfile, mimeType string, fileBytes []byte, promptTemplate string) (string, error) {
 	imageTypes := map[string]bool{
 		"image/jpeg": true, "image/jpg": true, "image/png": true, "image/gif": true, "image/webp": true,
 	}
 
-	isGemini := strings.Contains(baseURL, "googleapis.com")
 	isPDF := mimeType == "application/pdf"
 	isImage := imageTypes[mimeType]
 
 	// Path 1: Native Multimodal Processing
-	if isImage || (isGemini && isPDF) {
-		a.logger.Info("Routing to native multimodal endpoint")
+	if isImage || (profile.Type == "gemini" && isPDF) {
+		a.logger.Info("Routing to native multimodal endpoint", "type", profile.Type)
 		systemPrompt := strings.ReplaceAll(promptTemplate, "\nTEXT:\n{{TEXT}}", "")
 		systemPrompt = strings.ReplaceAll(systemPrompt, "\nSource Text:\n{{TEXT}}", "")
 		systemPrompt = strings.ReplaceAll(systemPrompt, "{{TEXT}}", "")
 
-		if isGemini {
-			return a.doGeminiMultimodalRequest(ctx, baseURL, token, model, systemPrompt, mimeType, fileBytes)
+		if profile.Type == "gemini" {
+			return a.doGeminiMultimodalRequest(ctx, profile.URL, profile.Token, profile.Model, systemPrompt, mimeType, fileBytes)
 		}
-		return a.doOllamaRequest(ctx, baseURL, token, model, systemPrompt, []string{base64.StdEncoding.EncodeToString(fileBytes)})
+		if profile.Type == "openai" {
+			return a.doOpenAIRequest(ctx, profile.URL, profile.Token, profile.Model, systemPrompt)
+		}
+		return a.doOllamaRequest(ctx, profile.URL, profile.Token, profile.Model, systemPrompt, []string{base64.StdEncoding.EncodeToString(fileBytes)})
 	}
 
 	// Path 2: Internal Fallback for Text and PDFs without native multimodal support
-	a.logger.Info("Routing to text-only endpoint (triggering internal extraction if needed)")
+	a.logger.Info("Routing to text-only endpoint (triggering internal extraction if needed)", "type", profile.Type)
 
 	var rawText string
 	if isPDF {
@@ -163,14 +230,18 @@ func (a *Adapter) processFileWithAI(ctx context.Context, userID uuid.UUID, baseU
 	}
 
 	finalPrompt := strings.ReplaceAll(promptTemplate, "{{TEXT}}", rawText)
-	return a.doTextOnlyRequest(ctx, baseURL, token, model, finalPrompt)
+	return a.doTextOnlyRequest(ctx, profile, finalPrompt)
 }
 
-func (a *Adapter) doTextOnlyRequest(ctx context.Context, baseURL, token, model, prompt string) (string, error) {
-	if strings.Contains(baseURL, "googleapis.com") {
-		return a.doAIRequest(ctx, baseURL, token, model, prompt)
+func (a *Adapter) doTextOnlyRequest(ctx context.Context, profile entity.LLMProfile, prompt string) (string, error) {
+	switch profile.Type {
+	case "gemini":
+		return a.doAIRequest(ctx, profile.URL, profile.Token, profile.Model, prompt)
+	case "openai":
+		return a.doOpenAIRequest(ctx, profile.URL, profile.Token, profile.Model, prompt)
+	default:
+		return a.doOllamaRequest(ctx, profile.URL, profile.Token, profile.Model, prompt, nil)
 	}
-	return a.doOllamaRequest(ctx, baseURL, token, model, prompt, nil)
 }
 
 // ─── BANK STATEMENT PARSING ──────────────────────────────────────────────────
@@ -178,7 +249,7 @@ func (a *Adapter) doTextOnlyRequest(ctx context.Context, baseURL, token, model, 
 func (a *Adapter) ParseBankStatement(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.BankStatement, error) {
 	a.logger.Info("AI bank statement parsing initiated", "file", fileName, "mime_type", mimeType, "user_id", userID)
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return entity.BankStatement{}, err
 	}
@@ -195,7 +266,7 @@ func (a *Adapter) ParseBankStatement(ctx context.Context, userID uuid.UUID, file
 
 	promptTemplate = strings.ReplaceAll(promptTemplate, "{{DEFAULT_CURRENCY}}", fallbackCurrency)
 
-	rawResp, err := a.processFileWithAI(ctx, userID, baseURL, token, model, mimeType, fileBytes, promptTemplate)
+	rawResp, err := a.processFileWithAI(ctx, userID, profile, mimeType, fileBytes, promptTemplate)
 	if err != nil {
 		return entity.BankStatement{}, err
 	}
@@ -272,7 +343,7 @@ func (a *Adapter) unmarshalBankStatement(rawResp string, fallbackCurrency string
 func (a *Adapter) ParsePayslip(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.Payslip, error) {
 	a.logger.Info("AI payslip parsing initiated", "file", fileName, "mime_type", mimeType, "user_id", userID)
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return entity.Payslip{}, err
 	}
@@ -282,7 +353,7 @@ func (a *Adapter) ParsePayslip(ctx context.Context, userID uuid.UUID, fileName s
 		promptTemplate = defaultPayslipPromptTemplate
 	}
 
-	rawResp, err := a.processFileWithAI(ctx, userID, baseURL, token, model, mimeType, fileBytes, promptTemplate)
+	rawResp, err := a.processFileWithAI(ctx, userID, profile, mimeType, fileBytes, promptTemplate)
 	if err != nil {
 		return entity.Payslip{}, err
 	}
@@ -353,12 +424,12 @@ func (a *Adapter) CategorizeInvoice(ctx context.Context, userID uuid.UUID, req p
 	prompt = strings.ReplaceAll(prompt, "{{TEXT}}", req.RawText)
 	prompt = strings.ReplaceAll(prompt, "{{DEFAULT_CURRENCY}}", fallbackCurrency)
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return port.InvoiceCategorizationResult{}, err
 	}
 
-	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	rawResp, err := a.doTextOnlyRequest(ctx, profile, prompt)
 	if err != nil {
 		a.logger.Error("LLM request failed for single categorization", "error", err)
 		return port.InvoiceCategorizationResult{}, err
@@ -391,7 +462,7 @@ func (a *Adapter) normalizeCurrency(extracted, fallback string) string {
 }
 
 func (a *Adapter) CategorizeInvoiceImage(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, imageBytes []byte, categories []string) (port.InvoiceCategorizationResult, error) {
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return port.InvoiceCategorizationResult{}, err
 	}
@@ -413,16 +484,7 @@ func (a *Adapter) CategorizeInvoiceImage(ctx context.Context, userID uuid.UUID, 
 	systemPrompt = strings.ReplaceAll(systemPrompt, "{{TEXT}}", "")
 	systemPrompt = strings.ReplaceAll(systemPrompt, "{{DEFAULT_CURRENCY}}", fallbackCurrency)
 
-	var rawResp string
-	isGemini := strings.Contains(baseURL, "googleapis.com")
-
-	if isGemini {
-		rawResp, err = a.doGeminiMultimodalRequest(ctx, baseURL, token, model, systemPrompt, mimeType, imageBytes)
-	} else {
-		images := []string{base64.StdEncoding.EncodeToString(imageBytes)}
-		rawResp, err = a.doOllamaRequest(ctx, baseURL, token, model, systemPrompt, images)
-	}
-
+	rawResp, err := a.processFileWithAI(ctx, userID, profile, mimeType, imageBytes, systemPrompt)
 	if err != nil {
 		return port.InvoiceCategorizationResult{}, err
 	}
@@ -458,12 +520,12 @@ func (a *Adapter) CategorizeTransactionsBatch(ctx context.Context, userID uuid.U
 	prompt = strings.ReplaceAll(prompt, "{{EXAMPLES}}", string(examplesJSON))
 	prompt = strings.ReplaceAll(prompt, "{{DATA}}", string(txnsJSON))
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	rawResp, err := a.doTextOnlyRequest(ctx, profile, prompt)
 	if err != nil {
 		a.logger.Error("LLM request failed for batch categorization", "error", err)
 		return nil, err
@@ -507,7 +569,7 @@ func (a *Adapter) CategorizeTransactionsBatch(ctx context.Context, userID uuid.U
 func (a *Adapter) ClassifyAndExtract(ctx context.Context, userID uuid.UUID, fileName string, mimeType string, fileBytes []byte) (entity.DocumentType, map[string]interface{}, string, error) {
 	a.logger.Info("AI document classification and extraction initiated", "file", fileName, "mime_type", mimeType, "user_id", userID)
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return entity.DocTypeOther, nil, "", err
 	}
@@ -532,7 +594,7 @@ func (a *Adapter) ClassifyAndExtract(ctx context.Context, userID uuid.UUID, file
 	}
 
 	// 2. Call LLM for classification and metadata
-	rawResp, err := a.processFileWithAI(ctx, userID, baseURL, token, model, mimeType, fileBytes, promptTemplate)
+	rawResp, err := a.processFileWithAI(ctx, userID, profile, mimeType, fileBytes, promptTemplate)
 	if err != nil {
 		return entity.DocTypeOther, nil, extractedText, err
 	}
@@ -543,7 +605,7 @@ func (a *Adapter) ClassifyAndExtract(ctx context.Context, userID uuid.UUID, file
 func (a *Adapter) VerifySubscriptionSuggestion(ctx context.Context, userID uuid.UUID, merchantName string, amount float64, currency string, billingCycle string) (bool, error) {
 	a.logger.Info("AI subscription verification initiated", "merchant", merchantName, "user_id", userID)
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return false, err
 	}
@@ -554,7 +616,7 @@ func (a *Adapter) VerifySubscriptionSuggestion(ctx context.Context, userID uuid.
 	prompt = strings.ReplaceAll(prompt, "{{CURRENCY}}", currency)
 	prompt = strings.ReplaceAll(prompt, "{{CYCLE}}", billingCycle)
 
-	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	rawResp, err := a.doTextOnlyRequest(ctx, profile, prompt)
 	if err != nil {
 		return false, err
 	}
@@ -577,7 +639,7 @@ func (a *Adapter) VerifySubscriptionSuggestion(ctx context.Context, userID uuid.
 func (a *Adapter) EnrichSubscription(ctx context.Context, userID uuid.UUID, merchantName string, transactionDescriptions []string, language string) (port.SubscriptionEnrichmentResult, error) {
 	a.logger.Info("AI subscription enrichment initiated", "merchant", merchantName, "user_id", userID, "language", language)
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return port.SubscriptionEnrichmentResult{}, err
 	}
@@ -604,7 +666,7 @@ func (a *Adapter) EnrichSubscription(ctx context.Context, userID uuid.UUID, merc
 	prompt = strings.ReplaceAll(prompt, "{{TRANSACTIONS}}", txText)
 	prompt = strings.ReplaceAll(prompt, "{{LANGUAGE}}", langName)
 
-	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	rawResp, err := a.doTextOnlyRequest(ctx, profile, prompt)
 	if err != nil {
 		return port.SubscriptionEnrichmentResult{}, err
 	}
@@ -623,7 +685,7 @@ func (a *Adapter) EnrichSubscription(ctx context.Context, userID uuid.UUID, merc
 func (a *Adapter) GenerateCancellationLetter(ctx context.Context, userID uuid.UUID, req port.CancellationLetterRequest) (port.CancellationLetterResult, error) {
 	a.logger.Info("AI cancellation letter generation initiated", "merchant", req.MerchantName, "user_id", userID)
 
-	baseURL, token, model, err := a.getLLMConfig(ctx, userID)
+	profile, err := a.getLLMConfig(ctx, userID)
 	if err != nil {
 		return port.CancellationLetterResult{}, err
 	}
@@ -641,7 +703,7 @@ func (a *Adapter) GenerateCancellationLetter(ctx context.Context, userID uuid.UU
 	prompt = strings.ReplaceAll(prompt, "{{NOTICE_PERIOD}}", fmt.Sprintf("%d", req.NoticePeriodDays))
 	prompt = strings.ReplaceAll(prompt, "{{LANGUAGE}}", req.Language)
 
-	rawResp, err := a.doTextOnlyRequest(ctx, baseURL, token, model, prompt)
+	rawResp, err := a.doTextOnlyRequest(ctx, profile, prompt)
 	if err != nil {
 		return port.CancellationLetterResult{}, err
 	}
@@ -733,6 +795,49 @@ func (a *Adapter) doGeminiMultimodalRequest(ctx context.Context, url, token, mod
 		return gResp.Candidates[0].Content.Parts[0].Text, nil
 	}
 	return "", fmt.Errorf("empty response from gemini")
+}
+
+func (a *Adapter) doOpenAIRequest(ctx context.Context, url, token, model, prompt string) (string, error) {
+	payload, err := json.Marshal(openaiRequest{
+		Model: model,
+		Messages: []openaiMessage{
+			{Role: "user", Content: prompt},
+		},
+	})
+	if err != nil {
+		return "", fmt.Errorf("failed to marshal openai payload: %w", err)
+	}
+
+	endpoint := url + "/v1/chat/completions"
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return "", fmt.Errorf("failed to create openai request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+	}
+
+	resp, err := a.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+
+	bodyBytes, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("openai api error: status %d, body: %s", resp.StatusCode, string(bodyBytes))
+	}
+
+	var oResp openaiResponse
+	if err := json.Unmarshal(bodyBytes, &oResp); err != nil {
+		return "", fmt.Errorf("failed to decode openai response: %w", err)
+	}
+
+	if len(oResp.Choices) > 0 {
+		return oResp.Choices[0].Message.Content, nil
+	}
+	return "", fmt.Errorf("empty response from openai")
 }
 
 func (a *Adapter) doAIRequest(ctx context.Context, url, token, model, prompt string) (string, error) {

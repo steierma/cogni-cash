@@ -78,3 +78,6 @@ var ErrResetTokenInvalid = errors.New("invalid or expired reset token")
 
 // ErrExchangeRateNotFound is returned when a requested currency pair or date has no rate available.
 var ErrExchangeRateNotFound = errors.New("exchange rate not found")
+
+// ErrLLMConfigRequired is returned when an active LLM profile is missing and enforcement is active.
+var ErrLLMConfigRequired = errors.New("active llm profile is required")

@@ -14,7 +14,7 @@ jobs:
       - name: Manual Checkout
         shell: sh
         run: |
-          git clone --branch public-main --depth 1 http://192.168.20.53:3000/steierma/cogni-cash.git .
+          git clone --branch public-main http://192.168.20.53:3000/steierma/cogni-cash.git .
 
       - name: Get Version
         id: get_version
@@ -86,7 +86,7 @@ jobs:
       - name: Manual Checkout
         shell: sh
         run: |
-          git clone --branch public-main --depth 1 http://192.168.20.53:3000/steierma/cogni-cash.git .
+          git clone --branch public-main http://192.168.20.53:3000/steierma/cogni-cash.git .
 
       - name: Push to GitHub
         shell: sh

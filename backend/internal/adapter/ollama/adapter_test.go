@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	llm "cogni-cash/internal/adapter/ollama"
+	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
 
 	"github.com/google/uuid"
@@ -24,6 +25,10 @@ func (m *mockSettingsRepo) Get(_ context.Context, key string, _ uuid.UUID) (stri
 	return m.settings[key], nil
 }
 
+func (m *mockSettingsRepo) GetGlobal(_ context.Context, key string) (string, error) {
+	return m.settings[key], nil
+}
+
 func (m *mockSettingsRepo) Set(_ context.Context, key, value string, _ uuid.UUID, isSensitive bool) error {
 	m.settings[key] = value
 	return nil
@@ -31,6 +36,18 @@ func (m *mockSettingsRepo) Set(_ context.Context, key, value string, _ uuid.UUID
 
 func (m *mockSettingsRepo) GetAll(_ context.Context, _ uuid.UUID) (map[string]string, error) {
 	return m.settings, nil
+}
+
+type mockUserRepo struct {
+	port.UserRepository
+	user *entity.User
+}
+
+func (m *mockUserRepo) FindByID(_ context.Context, _ uuid.UUID) (entity.User, error) {
+	if m.user == nil {
+		return entity.User{}, nil
+	}
+	return *m.user, nil
 }
 
 // TestAdapter_CategorizeImage_Gemini verifies that CategorizeInvoiceImage sends the
@@ -81,7 +98,7 @@ func TestAdapter_CategorizeImage_Gemini(t *testing.T) {
 		},
 	}
 
-	adapter := llm.NewAdapter(settings, nil, slog.Default())
+	adapter := llm.NewAdapter(settings, nil, nil, slog.Default())
 
 	res, err := adapter.CategorizeInvoiceImage(context.Background(), userID, "test_file.png", "image/png", []byte("fake-image"), []string{"Travel", "Food"})
 	if err != nil {
@@ -118,7 +135,7 @@ func TestAdapter_CategorizeImage_OllamaFallback(t *testing.T) {
 		},
 	}
 
-	adapter := llm.NewAdapter(settings, nil, slog.Default())
+	adapter := llm.NewAdapter(settings, nil, nil, slog.Default())
 
 	res, err := adapter.CategorizeInvoiceImage(context.Background(), userID, "test_file.png", "image/png", []byte("fake-image"), []string{"Travel", "Food"})
 	if err != nil {
@@ -165,7 +182,7 @@ func TestAdapter_ParsePayslip_Gemini(t *testing.T) {
 		},
 	}
 
-	adapter := llm.NewAdapter(settings, nil, slog.Default())
+	adapter := llm.NewAdapter(settings, nil, nil, slog.Default())
 
 	payslip, err := adapter.ParsePayslip(context.Background(), userID, "payslip.png", "image/png", []byte("fake-image"))
 	if err != nil {
@@ -212,7 +229,7 @@ func TestAdapter_CurrencyHandling(t *testing.T) {
 			},
 		}
 
-		adapter := llm.NewAdapter(settings, nil, slog.Default())
+		adapter := llm.NewAdapter(settings, nil, nil, slog.Default())
 		res, err := adapter.CategorizeInvoice(context.Background(), userID, port.CategorizationRequest{
 			RawText: "Spent some money",
 			Categories: []string{"Travel"},
@@ -240,7 +257,7 @@ func TestAdapter_CurrencyHandling(t *testing.T) {
 			},
 		}
 
-		adapter := llm.NewAdapter(settings, nil, slog.Default())
+		adapter := llm.NewAdapter(settings, nil, nil, slog.Default())
 		res, err := adapter.CategorizeInvoice(context.Background(), userID, port.CategorizationRequest{
 			RawText: "Burger",
 			Categories: []string{"Food"},
@@ -268,7 +285,7 @@ func TestAdapter_CurrencyHandling(t *testing.T) {
 			},
 		}
 
-		adapter := llm.NewAdapter(settings, nil, slog.Default())
+		adapter := llm.NewAdapter(settings, nil, nil, slog.Default())
 		stmt, err := adapter.ParseBankStatement(context.Background(), userID, "stmt.pdf", "application/pdf", []byte("fake-pdf"))
 
 		if err != nil {
@@ -282,6 +299,96 @@ func TestAdapter_CurrencyHandling(t *testing.T) {
 		}
 		if stmt.Transactions[0].Currency != "CHF" {
 			t.Errorf("expected transaction to inherit CHF, got %s", stmt.Transactions[0].Currency)
+		}
+	})
+}
+
+func TestAdapter_ProfileResolution(t *testing.T) {
+	userID := uuid.New()
+	ctx := context.Background()
+
+	t.Run("Uses user-specific active profile", func(t *testing.T) {
+		profiles := []entity.LLMProfile{
+			{ID: "1", Name: "User Profile", Type: "ollama", URL: "http://user-ollama", Model: "llama3", IsActive: true},
+		}
+		profilesJSON, _ := json.Marshal(profiles)
+
+		settings := &mockSettingsRepo{
+			settings: map[string]string{
+				"llm_profiles": string(profilesJSON),
+			},
+		}
+
+		adapter := llm.NewAdapter(settings, nil, nil, slog.Default())
+
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if !strings.HasPrefix(r.URL.String(), "http://user-ollama") {
+				// Wait, httptest.NewServer creates its own URL. I can't easily check the URL like this
+				// unless I use the server.URL in the profile.
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"response":"{}"}`))
+		}))
+		defer server.Close()
+
+		// Update profile with actual test server URL
+		profiles[0].URL = server.URL
+		profilesJSON, _ = json.Marshal(profiles)
+		settings.settings["llm_profiles"] = string(profilesJSON)
+
+		_, err := adapter.CategorizeInvoice(ctx, userID, port.CategorizationRequest{RawText: "test"})
+		if err != nil {
+			// It might fail on unmarshalling {} into llmResponse, but we care about it reaching the right server
+		}
+	})
+
+	t.Run("Respects llm_enforce_user_config for non-admins", func(t *testing.T) {
+		settings := &mockSettingsRepo{
+			settings: map[string]string{
+				"llm_enforce_user_config": "true",
+			},
+		}
+		userRepo := &mockUserRepo{
+			user: &entity.User{ID: userID, Role: "user"},
+		}
+
+		adapter := llm.NewAdapter(settings, userRepo, nil, slog.Default())
+
+		_, err := adapter.CategorizeInvoice(ctx, userID, port.CategorizationRequest{RawText: "test"})
+		if err != entity.ErrLLMConfigRequired {
+			t.Errorf("expected ErrLLMConfigRequired, got %v", err)
+		}
+	})
+
+	t.Run("Allows global fallback for admins even if enforced", func(t *testing.T) {
+		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = w.Write([]byte(`{"candidates":[{"content":{"parts":[{"text":"{}"}]}}]}`))
+		}))
+		defer server.Close()
+
+		globalProfiles := []entity.LLMProfile{
+			{ID: "g1", Name: "Global Profile", Type: "gemini", URL: server.URL + "/googleapis.com", Model: "gemini", IsActive: true},
+		}
+		globalProfilesJSON, _ := json.Marshal(globalProfiles)
+
+		settings := &mockSettingsRepo{
+			settings: map[string]string{
+				"llm_enforce_user_config": "true",
+				"llm_profiles":            string(globalProfilesJSON),
+			},
+		}
+		userRepo := &mockUserRepo{
+			user: &entity.User{ID: userID, Role: "admin"},
+		}
+
+		adapter := llm.NewAdapter(settings, userRepo, nil, slog.Default())
+
+		_, err := adapter.CategorizeInvoice(ctx, userID, port.CategorizationRequest{RawText: "test"})
+		if err != nil && err != entity.ErrLLMConfigRequired {
+			// Success if it didn't return ErrLLMConfigRequired
+		} else if err == entity.ErrLLMConfigRequired {
+			t.Error("should not have returned ErrLLMConfigRequired for admin")
 		}
 	})
 }

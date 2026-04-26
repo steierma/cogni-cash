@@ -10,6 +10,7 @@ import type { Document, DocumentType } from "../api/types/document";
 import { fmtDate } from '../utils/formatters';
 import { NavLink } from 'react-router-dom';
 import { ImportDocumentModal, EditDocumentModal, PreviewDocumentModal } from '../components/documents/DocumentModals';
+import { LLMEnforcementWarning } from '../components/LLMEnforcementWarning';
 
 const TYPE_ICONS: Record<string, LucideIcon> = {
     tax_certificate: ShieldCheck,
@@ -119,6 +120,7 @@ export default function DocumentVaultPage() {
 
     return (
         <div className="max-w-7xl mx-auto space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+            <LLMEnforcementWarning />
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>

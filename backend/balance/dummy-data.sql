@@ -81,6 +81,23 @@ BEGIN
     INSERT INTO categories (name, color, user_id, is_variable_spending, forecast_strategy) VALUES ('Utilities & Internet', '#f97316', admin_id, false, '3y')
     ON CONFLICT (name, user_id) DO UPDATE SET name=EXCLUDED.name RETURNING id INTO cat_utilities;
 
+    -- 4. Set Default Admin Settings
+    INSERT INTO settings (key, user_id, value, is_sensitive)
+    VALUES ('currency', admin_id, 'EUR', false)
+    ON CONFLICT (key, user_id) DO NOTHING;
+
+    INSERT INTO settings (key, user_id, value, is_sensitive)
+    VALUES ('ui_language', admin_id, 'en', false)
+    ON CONFLICT (key, user_id) DO NOTHING;
+
+    INSERT INTO settings (key, user_id, value, is_sensitive)
+    VALUES ('llm_enforce_user_config', admin_id, 'false', false)
+    ON CONFLICT (key, user_id) DO NOTHING;
+
+    INSERT INTO settings (key, user_id, value, is_sensitive)
+    VALUES ('llm_profiles', admin_id, '[{"id":"def-gemini","name":"Global Gemini","type":"gemini","url":"https://generativelanguage.googleapis.com","token":"","model":"gemini-1.5-flash","isActive":true}]', false)
+    ON CONFLICT (key, user_id) DO NOTHING;
+
     -- 3. Loop month by month for 10 years
     WHILE curr_date <= end_date LOOP
         -- Apply yearly salary increase in May (1.5% - 3.0%)

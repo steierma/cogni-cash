@@ -37,14 +37,7 @@ func (r *SettingsRepository) Get(ctx context.Context, key string, userID uuid.UU
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Fallback to admin settings
-			adminID, err := r.userRepo.GetAdminID(ctx)
-			if err != nil || adminID == userID {
-				return "", nil
-			}
-			err = r.pool.QueryRow(ctx, query, key, adminID).Scan(&rawBytes, &isSensitive)
-			if err != nil {
-				return "", nil // Not found for admin either
-			}
+			return r.GetGlobal(ctx, key)
 		} else {
 			return "", err
 		}
@@ -59,6 +52,32 @@ func (r *SettingsRepository) Get(ctx context.Context, key string, userID uuid.UU
 	err = r.pool.QueryRow(ctx, "SELECT convert_from(pgp_sym_decrypt_bytea($1, $2), 'utf8')", rawBytes, r.vaultKey).Scan(&decrypted)
 	if err != nil {
 		return string(rawBytes), nil // Fallback
+	}
+	return decrypted, nil
+}
+
+func (r *SettingsRepository) GetGlobal(ctx context.Context, key string) (string, error) {
+	adminID, err := r.userRepo.GetAdminID(ctx)
+	if err != nil {
+		return "", nil
+	}
+
+	var rawBytes []byte
+	var isSensitive bool
+	query := "SELECT value, is_sensitive FROM settings WHERE key = $1 AND user_id = $2"
+	err = r.pool.QueryRow(ctx, query, key, adminID).Scan(&rawBytes, &isSensitive)
+	if err != nil {
+		return "", nil
+	}
+
+	if !isSensitive {
+		return string(rawBytes), nil
+	}
+
+	var decrypted string
+	err = r.pool.QueryRow(ctx, "SELECT convert_from(pgp_sym_decrypt_bytea($1, $2), 'utf8')", rawBytes, r.vaultKey).Scan(&decrypted)
+	if err != nil {
+		return string(rawBytes), nil
 	}
 	return decrypted, nil
 }

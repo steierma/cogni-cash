@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"cogni-cash/internal/domain/service"
@@ -23,6 +24,13 @@ func newMockSimpleSettingsRepo() *mockSimpleSettingsRepo {
 }
 
 func (m *mockSimpleSettingsRepo) Get(_ context.Context, key string, _ uuid.UUID) (string, error) {
+	if v, ok := m.data[key]; ok {
+		return v, nil
+	}
+	return "", errors.New("key not found")
+}
+
+func (m *mockSimpleSettingsRepo) GetGlobal(_ context.Context, key string) (string, error) {
 	if v, ok := m.data[key]; ok {
 		return v, nil
 	}
@@ -236,6 +244,55 @@ func TestSettingsService_UpdateMultiple_Error(t *testing.T) {
 	if err == nil {
 		t.Error("expected error when Set fails")
 	}
+}
+
+func TestSettingsService_LLMProfiles_MaskingAndMerging(t *testing.T) {
+	repo := newMockSimpleSettingsRepo()
+	originalProfiles := `[{"id":"1","name":"Profile 1","token":"secret-1"},{"id":"2","name":"Profile 2","token":"secret-2"}]`
+	repo.data["llm_profiles"] = originalProfiles
+
+	svc := service.NewSettingsService(repo, setupLogger())
+	userID := uuid.New()
+
+	t.Run("Masks tokens in GetAllMasked", func(t *testing.T) {
+		settings, err := svc.GetAllMasked(context.Background(), userID, true)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+		
+		val := settings["llm_profiles"]
+		if !strings.Contains(val, "********") {
+			t.Errorf("expected masked tokens, got %s", val)
+		}
+		if strings.Contains(val, "secret-1") {
+			t.Errorf("expected secret-1 to be hidden, got %s", val)
+		}
+	})
+
+	t.Run("Merges tokens in UpdateMultiple", func(t *testing.T) {
+		newProfiles := `[{"id":"1","name":"Profile 1 Updated","token":"********"},{"id":"2","name":"Profile 2","token":"new-secret-2"},{"id":"3","name":"New Profile","token":"secret-3"}]`
+		
+		err := svc.UpdateMultiple(context.Background(), map[string]string{
+			"llm_profiles": newProfiles,
+		}, userID, true)
+		if err != nil {
+			t.Fatalf("unexpected error: %v", err)
+		}
+
+		savedJSON := repo.data["llm_profiles"]
+		if !strings.Contains(savedJSON, "secret-1") {
+			t.Errorf("expected secret-1 to be preserved for profile 1, got %s", savedJSON)
+		}
+		if !strings.Contains(savedJSON, "new-secret-2") {
+			t.Errorf("expected new-secret-2 to be saved for profile 2, got %s", savedJSON)
+		}
+		if !strings.Contains(savedJSON, "secret-3") {
+			t.Errorf("expected secret-3 to be saved for new profile 3, got %s", savedJSON)
+		}
+		if strings.Contains(savedJSON, "********") {
+			t.Errorf("saved JSON should not contain asterisks, got %s", savedJSON)
+		}
+	})
 }
 
 func TestSettingsService_NilLogger(t *testing.T) {

@@ -216,7 +216,7 @@ func main() {
 	invoiceFileParser := invoiceparser.NewParser()
 
 	// Inject the text extractor into the LLM adapter so it can handle the fallback internally
-	llmClient := llmadapter.NewAdapter(settingsRepo, invoiceFileParser, logger)
+	llmClient := llmadapter.NewAdapter(settingsRepo, userRepo, invoiceFileParser, logger)
 
 	invoiceSvc := service.NewInvoiceService(invoiceRepo, llmClient, invoiceFileParser, categoryRepo, sharingRepo, logger)
 

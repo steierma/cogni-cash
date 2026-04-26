@@ -222,6 +222,9 @@ type mockSettingsRepoForAuth struct {
 func (m *mockSettingsRepoForAuth) Get(_ context.Context, key string, _ uuid.UUID) (string, error) {
 	return m.settings[key], nil
 }
+func (m *mockSettingsRepoForAuth) GetGlobal(_ context.Context, key string) (string, error) {
+	return m.settings[key], nil
+}
 func (m *mockSettingsRepoForAuth) GetAll(_ context.Context, _ uuid.UUID) (map[string]string, error) {
 	return m.settings, nil
 }

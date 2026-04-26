@@ -768,6 +768,11 @@ func (m *MockSettingsRepository) Get(ctx context.Context, key string, userID uui
 	return args.String(0), args.Error(1)
 }
 
+func (m *MockSettingsRepository) GetGlobal(ctx context.Context, key string) (string, error) {
+	args := m.Called(ctx, key)
+	return args.String(0), args.Error(1)
+}
+
 func (m *MockSettingsRepository) GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
 	args := m.Called(ctx, userID)
 	return args.Get(0).(map[string]string), args.Error(1)

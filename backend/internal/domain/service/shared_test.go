@@ -92,6 +92,10 @@ func (m *mockSettingsRepo) Get(ctx context.Context, key string, userID uuid.UUID
 	args := m.Called(ctx, key, userID)
 	return args.String(0), args.Error(1)
 }
+func (m *mockSettingsRepo) GetGlobal(ctx context.Context, key string) (string, error) {
+	args := m.Called(ctx, key)
+	return args.String(0), args.Error(1)
+}
 func (m *mockSettingsRepo) GetAll(ctx context.Context, userID uuid.UUID) (map[string]string, error) {
 	args := m.Called(ctx, userID)
 	return args.Get(0).(map[string]string), args.Error(1)

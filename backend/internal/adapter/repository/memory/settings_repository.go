@@ -37,19 +37,19 @@ func (r *SettingsRepository) Get(ctx context.Context, key string, userID uuid.UU
 	}
 
 	// Fallback to admin settings
+	return r.GetGlobal(ctx, key)
+}
+
+func (r *SettingsRepository) GetGlobal(ctx context.Context, key string) (string, error) {
 	adminID, err := r.userRepo.GetAdminID(ctx)
-	if err != nil || adminID == userID {
-		return val, nil
+	if err != nil {
+		return "", nil
 	}
 
 	r.mu.RLock()
 	defer r.mu.RUnlock()
 	adminVal, _ := r.getSetting(adminID, key)
-	if adminVal != "" {
-		return adminVal, nil
-	}
-
-	return val, nil
+	return adminVal, nil
 }
 
 func (r *SettingsRepository) getSetting(userID uuid.UUID, key string) (string, bool) {

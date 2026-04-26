@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import axios from 'axios';
@@ -6,11 +6,13 @@ import type { TFunction } from 'i18next';
 import {
     KeyRound, CheckCircle2, AlertCircle, Settings, Server, Database,
     Save, Palette, Globe, ChevronDown, ChevronRight, MessageSquareCode,
-    Landmark, Info, Mail, Bot, Zap, Monitor, Layers, Smartphone, Plus, Trash2, Copy, Clock, CalendarClock, Loader2
+    Landmark, Info, Mail, Bot, Zap, Monitor, Layers, Smartphone, Plus, Trash2, Copy, Clock, CalendarClock, Loader2,
+    ShieldAlert, UserCog
 } from 'lucide-react';
 import { authService } from '../api/services/authService';
 import { settingsService } from '../api/services/settingsService';
 import type { BridgeAccessToken } from "../api/types/system";
+import { LLMProfileManager, type LLMProfile } from '../components/settings/LLMProfileManager';
 const DEFAULT_SINGLE_PROMPT = `Categorize the following invoice text. 
 Use EXACTLY ONE category from: [{{CATEGORIES}}].
 Return ONLY a valid JSON object. Do not include explanations.
@@ -251,6 +253,26 @@ export default function SettingsPage() {
     const [settingsChanges, setSettingsChanges] = useState<Record<string, string>>({});
     const settingsParams = { ...currentSettings, ...settingsChanges };
 
+    const [profiles, setProfiles] = useState<LLMProfile[]>([]);
+
+    useEffect(() => {
+        if (currentSettings?.llm_profiles) {
+            try {
+                setProfiles(JSON.parse(currentSettings.llm_profiles));
+            } catch (e) {
+                console.error("Failed to parse llm_profiles", e);
+                setProfiles([]);
+            }
+        } else {
+            setProfiles([]);
+        }
+    }, [currentSettings?.llm_profiles]);
+
+    const handleProfilesChange = (newProfiles: LLMProfile[]) => {
+        setProfiles(newProfiles);
+        setSettingsChanges(prev => ({ ...prev, llm_profiles: JSON.stringify(newProfiles) }));
+    };
+
     const [settingsSuccess, setSettingsSuccess] = useState(false);
     const [settingsError, setSettingsError] = useState('');
 
@@ -435,36 +457,32 @@ export default function SettingsPage() {
                         </h2>
 
                         <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <div className="space-y-4">
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.apiUrl')}</label>
-                                    <input
-                                        type="text"
-                                        value={settingsParams['llm_api_url'] || ''}
-                                        onChange={(e) => handleSettingChange('llm_api_url', e.target.value)}
-                                        placeholder={t('settings.apiUrlPlaceholder')}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.apiToken')}</label>
-                                    <input
-                                        type="password"
-                                        value={settingsParams['llm_api_token'] || ''}
-                                        onChange={(e) => handleSettingChange('llm_api_token', e.target.value)}
-                                        placeholder={t('settings.apiTokenPlaceholder')}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
-                                    />
-                                </div>
-                                <div>
-                                    <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.modelName')}</label>
-                                    <input
-                                        type="text"
-                                        value={settingsParams['llm_model'] || ''}
-                                        onChange={(e) => handleSettingChange('llm_model', e.target.value)}
-                                        placeholder={t('settings.modelNamePlaceholder')}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
-                                    />
+                            <div className="space-y-6">
+                                <LLMProfileManager 
+                                    profiles={profiles} 
+                                    onChange={handleProfilesChange} 
+                                    title={t('settings.llm.globalProfiles')}
+                                />
+
+                                <div className="pt-4 border-t border-gray-100 dark:border-gray-800">
+                                    <div className="flex items-center justify-between">
+                                        <div className="flex items-center gap-2">
+                                            <ShieldAlert size={18} className="text-amber-500" />
+                                            <div>
+                                                <p className="text-sm font-medium text-gray-900 dark:text-gray-100">{t('settings.llm.enforceUserConfig')}</p>
+                                                <p className="text-[11px] text-gray-500 dark:text-gray-400">{t('settings.llm.enforceUserConfigDesc')}</p>
+                                            </div>
+                                        </div>
+                                        <label className="relative inline-flex items-center cursor-pointer">
+                                            <input
+                                                type="checkbox"
+                                                className="sr-only peer"
+                                                checked={settingsParams['llm_enforce_user_config'] === 'true'}
+                                                onChange={(e) => handleSettingChange('llm_enforce_user_config', e.target.checked ? 'true' : 'false')}
+                                            />
+                                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer dark:bg-gray-700 peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all dark:border-gray-600 peer-checked:bg-indigo-600"></div>
+                                        </label>
+                                    </div>
                                 </div>
                             </div>
 
@@ -521,6 +539,23 @@ export default function SettingsPage() {
                                 />
                             </div>
                         </div>
+                    </div>
+                )}
+
+                {/* AI PREFERENCES (NON-ADMINS) */}
+                {!isAdmin && (
+                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
+                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                            <UserCog size={20} className="text-gray-500 dark:text-gray-400" />
+                            {t('settings.aiPrefs') || "AI Preferences"}
+                        </h2>
+                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-6">
+                            {t('settings.aiPrefsDesc') || "Configure your own LLM profiles to override global defaults or if required by the administrator."}
+                        </p>
+                        <LLMProfileManager 
+                            profiles={profiles} 
+                            onChange={handleProfilesChange} 
+                        />
                     </div>
                 )}
 

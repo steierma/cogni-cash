@@ -24,6 +24,7 @@ import {
 import type { BankAccount } from "../api/types/bank";
 import type { User } from "../api/types/system";
 import { fmtCurrency } from '../utils/formatters';
+import { LLMEnforcementWarning } from '../components/LLMEnforcementWarning';
 
 export default function BankConnectionsPage() {
     const { t } = useTranslation();
@@ -135,6 +136,7 @@ export default function BankConnectionsPage() {
 
     return (
         <div className="space-y-8 animate-in fade-in duration-500">
+            <LLMEnforcementWarning />
             {/* ── Header ── */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>

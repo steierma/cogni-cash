@@ -100,6 +100,9 @@ var adminOnlyKeys = map[string]bool{
 	"bank_sync_next_run":       true,
 	"payslip_import_json_path": true,
 	"payslip_import_interval":  true,
+	"llm_enforce_user_config":  true,
+	"llm_subscription_prompt":  true,
+	"llm_cancellation_prompt":  true,
 }
 
 func (s *SettingsService) UpdateMultiple(ctx context.Context, settings map[string]string, userID uuid.UUID, isAdmin bool) error {

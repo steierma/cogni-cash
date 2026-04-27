@@ -137,6 +137,10 @@ func (m *mockBankUseCase) CreateConnection(ctx context.Context, userID uuid.UUID
 	args := m.Called(ctx, userID, instID, instName, country, redirect, sandbox, ip, ua)
 	return args.Get(0).(*entity.BankConnection), args.Error(1)
 }
+func (m *mockBankUseCase) RefreshConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
+	args := m.Called(ctx, id, userID, redirectURL, isSandbox, ip, userAgent)
+	return args.Get(0).(*entity.BankConnection), args.Error(1)
+}
 func (m *mockBankUseCase) FinishConnection(ctx context.Context, userID uuid.UUID, reqID, code string) error {
 	return m.Called(ctx, userID, reqID, code).Error(0)
 }
@@ -197,6 +201,9 @@ func (m *mockInvoiceUseCase) GetByID(ctx context.Context, id, userID uuid.UUID) 
 func (m *mockInvoiceUseCase) Update(ctx context.Context, invoice entity.Invoice) (entity.Invoice, error) {
 	args := m.Called(ctx, invoice)
 	return args.Get(0).(entity.Invoice), args.Error(1)
+}
+func (m *mockInvoiceUseCase) UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return m.Called(ctx, ids, categoryID, userID).Error(0)
 }
 func (m *mockInvoiceUseCase) Delete(ctx context.Context, id, userID uuid.UUID) error {
 	return m.Called(ctx, id, userID).Error(0)
@@ -338,6 +345,35 @@ func TestBankHandler(t *testing.T) {
 		handler.Bank.syncAllBankAccounts(rr, req)
 
 		assert.Equal(t, http.StatusAccepted, rr.Code)
+	})
+
+	t.Run("refreshBankConnection - Success", func(t *testing.T) {
+		connID := uuid.New()
+		expectedConn := &entity.BankConnection{ID: connID, AuthLink: "http://reauth.link"}
+		mockSvc.On("RefreshConnection", mock.Anything, connID, userID, "http://localhost/callback", false, mock.Anything, mock.Anything).
+			Return(expectedConn, nil).Once()
+
+		body, _ := json.Marshal(map[string]interface{}{
+			"redirect_url": "http://localhost/callback",
+			"sandbox":      false,
+		})
+		req := httptest.NewRequest("POST", "/api/v1/bank/connections/"+connID.String()+"/reauth/", bytes.NewBuffer(body))
+		ctx := req.Context()
+		ctx = context.WithValue(ctx, userIDKey, userID)
+		req = req.WithContext(ctx)
+		
+		// Set URL parameter manually for chi
+		rctx := chi.NewRouteContext()
+		rctx.URLParams.Add("id", connID.String())
+		req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, rctx))
+
+		rr := httptest.NewRecorder()
+		handler.Bank.refreshBankConnection(rr, req)
+
+		assert.Equal(t, http.StatusOK, rr.Code)
+		var resp entity.BankConnection
+		json.Unmarshal(rr.Body.Bytes(), &resp)
+		assert.Equal(t, "http://reauth.link", resp.AuthLink)
 	})
 }
 

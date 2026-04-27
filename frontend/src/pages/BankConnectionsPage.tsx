@@ -96,6 +96,18 @@ export default function BankConnectionsPage() {
         },
     });
 
+    const reauthConnMut = useMutation({
+        mutationFn: (id: string) => {
+            const redirectUrl = window.location.origin + '/bank-connections';
+            return bankService.reauthenticateConnection(id, redirectUrl, isSandbox);
+        },
+        onSuccess: (data) => {
+            if (data.auth_link) {
+                window.location.href = data.auth_link;
+            }
+        },
+    });
+
     const updateAccTypeMut = useMutation({
         mutationFn: ({ id, type }: { id: string, type: string }) => bankService.updateAccountType(id, type),
         onSuccess: () => {
@@ -135,7 +147,7 @@ export default function BankConnectionsPage() {
     const isSyncing = syncAllMut.isPending || isRefetching;
 
     return (
-        <div className="space-y-8 animate-in fade-in duration-500">
+        <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
             <LLMEnforcementWarning />
             {/* ── Header ── */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -253,6 +265,17 @@ export default function BankConnectionsPage() {
                                         <Trash2 size={18} />
                                     </button>
                                 </div>
+
+                                {conn.status !== 'initialized' && (
+                                    <button
+                                        onClick={() => reauthConnMut.mutate(conn.id)}
+                                        disabled={reauthConnMut.isPending}
+                                        className="mb-4 flex items-center justify-center gap-2 w-full py-2 bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-sm font-medium rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/40 transition-colors disabled:opacity-50"
+                                    >
+                                        {reauthConnMut.isPending ? <Loader2 size={16} className="animate-spin" /> : <RefreshCw size={16} />}
+                                        {t('bankConnections.reauthenticate')}
+                                    </button>
+                                )}
 
                                 <div className="space-y-3 pt-4 border-t border-gray-100 dark:border-gray-800">
                                     {conn.accounts && conn.accounts.length > 0 && (

@@ -1,7 +1,5 @@
 import { useEffect } from 'react';
 import { BrowserRouter, Navigate, Outlet, Route, Routes } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { settingsService } from './api/services/settingsService';
 import i18n from './i18n';
 import Layout from './components/Layout';
 import DashboardPage from './pages/DashboardPage';
@@ -25,16 +23,15 @@ import ResetPasswordPage from './pages/ResetPasswordPage';
 import SubscriptionsPage from './pages/SubscriptionsPage';
 import SubscriptionDetailPage from './pages/SubscriptionDetailPage';
 
+import { useEffectiveSettings } from './hooks/useEffectiveSettings';
+
 const isAuthenticated = () => {
     return document.cookie.split(';').some((item) => item.trim().startsWith('cogni_cash_logged_in=true'));
 };
 
 function ProtectedRoutes() {
     // Fetch settings to apply the language preference globally
-    const { data: settings } = useQuery<Record<string, string>, Error>({
-        queryKey: ['settings'],
-        queryFn: settingsService.fetchSettings,
-    });
+    const { data: settings } = useEffectiveSettings();
 
     useEffect(() => {
         if (settings?.ui_language) {

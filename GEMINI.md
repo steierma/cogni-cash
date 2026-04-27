@@ -1,6 +1,7 @@
 # Gemini CLI Foundational Mandates: CogniCash
 
 These instructions are foundational mandates for Gemini CLI. They take absolute precedence over general workflows and tool defaults.
+Do not store any sensitive information in GEMINI.md files. If you need to store sensitive information use SENSITIVE.md.
 
 ## 1. Architectural Integrity (Hexagonal)
 - **Strict Hexagonal Architecture:** Maintain a clean separation between Core Domain, Ports (interfaces), and Adapters (infrastructure).

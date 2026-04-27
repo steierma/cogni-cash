@@ -143,7 +143,7 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 
 		batch.Queue(`
 			INSERT INTO transactions
-			        (id, user_id, bank_account_id, booking_date, valuta_date,
+			        (id, user_id, bank_account_id, bank_statement_id, booking_date, valuta_date,
 			         description, location, amount, currency, base_amount, base_currency, transaction_type, reference, category_id, content_hash, statement_type, reviewed,
 			         counterparty_name, counterparty_iban, bank_transaction_code, mandate_reference, is_payslip_verified, subscription_id)
 			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20, $21, $22, $23, $24)
@@ -157,6 +157,7 @@ func (r *BankStatementRepository) CreateTransactions(ctx context.Context, txns [
 			t.ID,
 			t.UserID,
 			t.BankAccountID,
+			nil,
 			t.BookingDate,
 			t.ValutaDate,
 			t.Description,
@@ -675,6 +676,24 @@ func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context,
 	}
 	if tag.RowsAffected() == 0 {
 		return fmt.Errorf("bank_statement repo: transaction not found: %s", hash)
+	}
+	return nil
+}
+
+func (r *BankStatementRepository) UpdateTransactionCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	if len(hashes) == 0 {
+		return nil
+	}
+	tag, err := r.pool.Exec(ctx, `
+		UPDATE transactions
+		SET category_id = $1, reviewed = true
+		WHERE content_hash = ANY($2) AND user_id = $3`,
+		categoryID, hashes, userID)
+	if err != nil {
+		return fmt.Errorf("bank_statement repo: bulk update transaction category: %w", err)
+	}
+	if tag.RowsAffected() == 0 {
+		return nil
 	}
 	return nil
 }

@@ -63,6 +63,9 @@ export const bankService = {
     deleteConnection: (id: string): Promise<void> =>
         api.delete(`bank/connections/${id}/`).then(() => undefined),
 
+    reauthenticateConnection: (id: string, redirectUrl: string, sandbox: boolean = false): Promise<BankConnection> =>
+        api.post<BankConnection>(`bank/connections/${id}/reauth/`, { redirect_url: redirectUrl, sandbox }).then(r => r.data),
+
     updateAccountType: (accountId: string, accountType: string): Promise<void> =>
         api.put(`bank/accounts/${accountId}/type/`, { account_type: accountType }).then(() => undefined),
 

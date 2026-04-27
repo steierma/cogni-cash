@@ -116,6 +116,16 @@ func (m *MockNotificationUseCase) SendTestEmail(ctx context.Context, to string, 
 	return args.Error(0)
 }
 
+func (m *MockNotificationUseCase) SendAdminAlert(ctx context.Context, subject, message string) error {
+	args := m.Called(ctx, subject, message)
+	return args.Error(0)
+}
+
+func (m *MockNotificationUseCase) SendBankExpiryWarning(ctx context.Context, user entity.User, connection entity.BankConnection, daysRemaining int) error {
+	args := m.Called(ctx, user, connection, daysRemaining)
+	return args.Error(0)
+}
+
 // MockEmailProvider is a mock for infrastructure providers, although used like a port
 // for Mocking NotificationService dependencies
 type MockEmailProvider struct {
@@ -139,6 +149,11 @@ func (m *MockBankUseCase) GetInstitutions(ctx context.Context, userID uuid.UUID,
 
 func (m *MockBankUseCase) CreateConnection(ctx context.Context, userID uuid.UUID, institutionID string, institutionName string, country string, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
 	args := m.Called(ctx, userID, institutionID, institutionName, country, redirectURL, isSandbox, ip, userAgent)
+	return args.Get(0).(*entity.BankConnection), args.Error(1)
+}
+
+func (m *MockBankUseCase) RefreshConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
+	args := m.Called(ctx, id, userID, redirectURL, isSandbox, ip, userAgent)
 	return args.Get(0).(*entity.BankConnection), args.Error(1)
 }
 
@@ -386,6 +401,10 @@ func (m *MockTransactionUseCase) UpdateCategory(ctx context.Context, hash string
 	return m.Called(ctx, hash, categoryID, userID).Error(0)
 }
 
+func (m *MockTransactionUseCase) UpdateCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return m.Called(ctx, hashes, categoryID, userID).Error(0)
+}
+
 func (m *MockTransactionUseCase) MarkAsReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	return m.Called(ctx, hash, userID).Error(0)
 }
@@ -525,6 +544,10 @@ func (m *MockInvoiceUseCase) GetByID(ctx context.Context, id uuid.UUID, userID u
 func (m *MockInvoiceUseCase) Update(ctx context.Context, invoice entity.Invoice) (entity.Invoice, error) {
 	args := m.Called(ctx, invoice)
 	return args.Get(0).(entity.Invoice), args.Error(1)
+}
+
+func (m *MockInvoiceUseCase) UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return m.Called(ctx, ids, categoryID, userID).Error(0)
 }
 
 func (m *MockInvoiceUseCase) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
@@ -708,6 +731,11 @@ func (m *MockBankStatementRepository) UpdateTransactionCategory(ctx context.Cont
 	return args.Error(0)
 }
 
+func (m *MockBankStatementRepository) UpdateTransactionCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	args := m.Called(ctx, hashes, categoryID, userID)
+	return args.Error(0)
+}
+
 func (m *MockBankStatementRepository) UpdateTransactionSubscription(ctx context.Context, hash string, subscriptionID *uuid.UUID, userID uuid.UUID) error {
 	args := m.Called(ctx, hash, subscriptionID, userID)
 	return args.Error(0)
@@ -825,4 +853,53 @@ func (m *MockCancellationLetterGenerator) Generate(ctx context.Context, userID u
 func (m *MockCancellationLetterGenerator) GenerateCancellationLetter(ctx context.Context, userID uuid.UUID, req port.CancellationLetterRequest) (port.CancellationLetterResult, error) {
 	args := m.Called(ctx, userID, req)
 	return args.Get(0).(port.CancellationLetterResult), args.Error(1)
+}
+
+// MockInvoiceRepository is a mock for port.InvoiceRepository
+type MockInvoiceRepository struct {
+	mock.Mock
+}
+
+func (m *MockInvoiceRepository) Save(ctx context.Context, invoice entity.Invoice) error {
+	return m.Called(ctx, invoice).Error(0)
+}
+
+func (m *MockInvoiceRepository) Update(ctx context.Context, invoice entity.Invoice) error {
+	return m.Called(ctx, invoice).Error(0)
+}
+
+func (m *MockInvoiceRepository) UpdateBaseAmount(ctx context.Context, id uuid.UUID, baseAmount float64, baseCurrency string, userID uuid.UUID) error {
+	return m.Called(ctx, id, baseAmount, baseCurrency, userID).Error(0)
+}
+
+func (m *MockInvoiceRepository) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error) {
+	args := m.Called(ctx, id, userID)
+	return args.Get(0).(entity.Invoice), args.Error(1)
+}
+
+func (m *MockInvoiceRepository) FindAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error) {
+	args := m.Called(ctx, filter)
+	return args.Get(0).([]entity.Invoice), args.Error(1)
+}
+
+func (m *MockInvoiceRepository) UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return m.Called(ctx, ids, categoryID, userID).Error(0)
+}
+
+func (m *MockInvoiceRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
+	return m.Called(ctx, id, userID).Error(0)
+}
+
+func (m *MockInvoiceRepository) DeleteSplits(ctx context.Context, invoiceID, userID uuid.UUID) error {
+	return m.Called(ctx, invoiceID, userID).Error(0)
+}
+
+func (m *MockInvoiceRepository) ExistsByContentHash(ctx context.Context, hash string, userID uuid.UUID) (bool, error) {
+	args := m.Called(ctx, hash, userID)
+	return args.Bool(0), args.Error(1)
+}
+
+func (m *MockInvoiceRepository) GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error) {
+	args := m.Called(ctx, id, userID)
+	return args.Get(0).([]byte), args.String(1), args.String(2), args.Error(3)
 }

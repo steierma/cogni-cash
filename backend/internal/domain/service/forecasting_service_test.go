@@ -39,6 +39,9 @@ func (m *mockForecastingRepo) Delete(_ context.Context, _ uuid.UUID, _ uuid.UUID
 func (m *mockForecastingRepo) UpdateTransactionCategory(_ context.Context, _ string, _ *uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockForecastingRepo) UpdateTransactionCategoriesBulk(_ context.Context, _ []string, _ *uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
 func (m *mockForecastingRepo) UpdateTransactionSubscription(_ context.Context, _ string, _ *uuid.UUID, _ uuid.UUID) error {
 	return nil
 }
@@ -194,6 +197,12 @@ func (m *mockForecastingBankRepo) FindAccountByIBAN(_ context.Context, _ string,
 }
 func (m *mockForecastingBankRepo) DeleteAccount(_ context.Context, _ uuid.UUID, _ uuid.UUID) error {
 	return nil
+}
+func (m *mockForecastingBankRepo) UpdateExpiryNotifiedAt(_ context.Context, _ uuid.UUID, _ *time.Time) error {
+	return nil
+}
+func (m *mockForecastingBankRepo) GetExpiringConnections(_ context.Context, _ int) ([]entity.BankConnection, error) {
+	return nil, nil
 }
 
 func TestForecastingService_VariableSpending(t *testing.T) {

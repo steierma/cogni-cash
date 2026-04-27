@@ -67,6 +67,11 @@ type shareInvoiceRequest struct {
 	Permission string `json:"permission"` // "view" or "edit"
 }
 
+type updateInvoicesBulkRequest struct {
+	IDs        []uuid.UUID `json:"ids"`
+	CategoryID *uuid.UUID  `json:"category_id"`
+}
+
 // ── handlers ──────────────────────────────────────────────────────────────────
 
 // POST /api/v1/invoices/{id}/share/
@@ -172,6 +177,38 @@ func (h *InvoiceHandler) listInvoiceShares(w http.ResponseWriter, r *http.Reques
 	}
 
 	writeJSON(w, http.StatusOK, shares)
+}
+
+// PATCH /api/v1/invoices/bulk-category/
+func (h *InvoiceHandler) updateInvoicesBulk(w http.ResponseWriter, r *http.Request) {
+	if h.invoiceSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "invoice service not available")
+		return
+	}
+
+	var req updateInvoicesBulkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.IDs) == 0 {
+		writeError(w, http.StatusBadRequest, "missing invoice ids")
+		return
+	}
+
+	userID := GetUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.invoiceSvc.UpdateCategoriesBulk(r.Context(), req.IDs, req.CategoryID, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 // GET /api/v1/invoices/

@@ -23,6 +23,9 @@ export const transactionService = {
     updateCategory: (contentHash: string, categoryId: string): Promise<void> =>
         api.patch(`transactions/${contentHash}/category/`, { category_id: categoryId }).then(() => undefined),
 
+    updateCategoryBulk: (hashes: string[], categoryId: string): Promise<void> =>
+        api.patch('transactions/bulk-category/', { hashes, category_id: categoryId }).then(() => undefined),
+
     markReviewed: (contentHash: string): Promise<void> =>
         api.patch(`transactions/${contentHash}/review/`).then(() => undefined),
 

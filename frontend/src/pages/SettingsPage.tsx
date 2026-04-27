@@ -13,6 +13,8 @@ import { authService } from '../api/services/authService';
 import { settingsService } from '../api/services/settingsService';
 import type { BridgeAccessToken } from "../api/types/system";
 import { LLMProfileManager, type LLMProfile } from '../components/settings/LLMProfileManager';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
+
 const DEFAULT_SINGLE_PROMPT = `Categorize the following invoice text. 
 Use EXACTLY ONE category from: [{{CATEGORIES}}].
 Return ONLY a valid JSON object. Do not include explanations.
@@ -147,7 +149,7 @@ const LogLevelControl = ({ t }: { t: TFunction }) => {
     });
 
     if (isLoading) return <div className="text-[10px] text-gray-500 animate-pulse bg-gray-100 dark:bg-gray-800 px-2 py-1 rounded-md">Loading logs...</div>;
-    
+
     if (error) {
         return (
             <div className="flex items-center gap-1 text-[10px] text-red-500 bg-red-50 dark:bg-red-900/20 px-2 py-1 rounded-md border border-red-100 dark:border-red-900/50">
@@ -170,8 +172,8 @@ const LogLevelControl = ({ t }: { t: TFunction }) => {
                         onClick={() => mutation.mutate(lvl)}
                         disabled={mutation.isPending}
                         className={`px-2 py-0.5 text-[10px] font-black rounded-md transition-all duration-200 ${
-                            logData?.level === lvl 
-                                ? 'bg-indigo-600 text-white shadow-md scale-105 z-10' 
+                            logData?.level === lvl
+                                ? 'bg-indigo-600 text-white shadow-md scale-105 z-10'
                                 : 'text-gray-400 dark:text-gray-600 hover:text-gray-600 dark:hover:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-900'
                         }`}
                     >
@@ -191,9 +193,10 @@ interface PromptAccordionProps {
     value: string;
     onChange: (key: string, val: string) => void;
     t: TFunction;
+    isCompact: boolean;
 }
 
-const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t }: PromptAccordionProps) => {
+const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t, isCompact }: PromptAccordionProps) => {
     const [isOpen, setIsOpen] = useState(false);
 
     return (
@@ -201,7 +204,7 @@ const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t 
             <button
                 type="button"
                 onClick={() => setIsOpen(!isOpen)}
-                className="w-full flex items-center justify-between px-4 py-3 bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors text-sm font-medium text-gray-900 dark:text-gray-100"
+                className={`w-full flex items-center justify-between ${isCompact ? 'px-3 py-2' : 'px-4 py-3'} bg-gray-50 dark:bg-gray-800/50 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors text-sm font-medium text-gray-900 dark:text-gray-100`}
             >
                 <div className="flex items-center gap-2">
                     <MessageSquareCode size={16} className="text-gray-500 dark:text-gray-400" />
@@ -210,7 +213,7 @@ const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t 
                 {isOpen ? <ChevronDown size={18} className="text-gray-500" /> : <ChevronRight size={18} className="text-gray-500" />}
             </button>
             {isOpen && (
-                <div className="p-4 border-t border-gray-200 dark:border-gray-700 space-y-2 animate-in slide-in-from-top-2 duration-200">
+                <div className={`border-t border-gray-200 dark:border-gray-700 animate-in slide-in-from-top-2 duration-200 ${isCompact ? 'p-3 space-y-1.5' : 'p-4 space-y-2'}`}>
                     <div className="flex items-center justify-between">
                         <span className="text-xs text-gray-500 dark:text-gray-400">{t('settings.editPromptTemplate') || "Edit the system prompt template below."}</span>
                         <button
@@ -226,7 +229,7 @@ const PromptAccordion = ({ title, settingKey, defaultPrompt, value, onChange, t 
                         value={value || ''}
                         onChange={(e) => onChange(settingKey, e.target.value)}
                         placeholder={defaultPrompt}
-                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono whitespace-pre-wrap"
+                        className={`w-full px-4 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono whitespace-pre-wrap ${isCompact ? 'py-1.5' : 'py-2.5'}`}
                     />
                 </div>
             )}
@@ -245,10 +248,7 @@ export default function SettingsPage() {
 
     const isAdmin = currentUser?.role === 'admin';
 
-    const { data: currentSettings } = useQuery({
-        queryKey: ['settings'],
-        queryFn: () => settingsService.fetchSettings(),
-    });
+    const { data: currentSettings } = useEffectiveSettings();
 
     const [settingsChanges, setSettingsChanges] = useState<Record<string, string>>({});
     const settingsParams = { ...currentSettings, ...settingsChanges };
@@ -388,33 +388,41 @@ export default function SettingsPage() {
         });
     };
 
+    // --- Dynamic Layout Density Classes ---
+    const isCompact = settingsParams['layout_mode'] === 'compact';
+
+    const cardClass = `bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm ${isCompact ? 'p-4' : 'p-6'}`;
+    const headingClass = `text-lg font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2 ${isCompact ? 'mb-4' : 'mb-6'}`;
+    const inputClass = `w-full px-4 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 ${isCompact ? 'py-1.5' : 'py-2.5'}`;
+    const inputMonoClass = `${inputClass} font-mono`;
+
     return (
-        <div className="max-w-4xl mx-auto space-y-6 animate-in fade-in duration-300 pb-12">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+        <div className={`max-w-4xl mx-auto animate-in fade-in duration-300 pb-12 ${isCompact ? 'space-y-4' : 'space-y-6'}`}>
+            <h1 className={`text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2 ${isCompact ? 'mb-4' : 'mb-6'}`}>
                 <Settings size={28} className="text-indigo-600 dark:text-indigo-400" />
                 {t('settings.title')}
             </h1>
 
             {/* SYSTEM STATUS CARD (ADMIN ONLY) */}
             {isAdmin && (
-                <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                    <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center justify-between">
+                <div className={cardClass}>
+                    <h2 className={`text-lg font-medium text-gray-900 dark:text-gray-100 flex items-center justify-between ${isCompact ? 'mb-3' : 'mb-4'}`}>
                         <div className="flex items-center gap-2">
                             <Server size={20} className="text-gray-500 dark:text-gray-400" />
                             {t('settings.systemStatus')}
                         </div>
                         <LogLevelControl t={t} />
                     </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-4 gap-4">
-                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                    <div className={`grid grid-cols-1 sm:grid-cols-4 ${isCompact ? 'gap-2' : 'gap-4'}`}>
+                        <div className={`bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800 ${isCompact ? 'p-3' : 'p-4'}`}>
                             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.storageMode')}</p>
                             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.storage_mode || 'Loading...'}</p>
                         </div>
-                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                        <div className={`bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800 ${isCompact ? 'p-3' : 'p-4'}`}>
                             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.dbHost')}</p>
                             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 font-mono">{sysInfo?.db_host || 'Loading...'}</p>
                         </div>
-                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                        <div className={`bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800 ${isCompact ? 'p-3' : 'p-4'}`}>
                             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1 flex items-center gap-1">
                                 <Database size={14} /> {t('settings.connState')}
                             </p>
@@ -423,7 +431,7 @@ export default function SettingsPage() {
                                 <p className="text-sm font-semibold text-gray-900 dark:text-gray-100 capitalize">{sysInfo?.db_state || 'Checking...'}</p>
                             </div>
                         </div>
-                        <div className="p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
+                        <div className={`bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800 ${isCompact ? 'p-3' : 'p-4'}`}>
                             <p className="text-xs font-medium text-gray-500 dark:text-gray-400 uppercase mb-1">{t('settings.version')}</p>
                             <p className="text-sm font-semibold text-gray-900 dark:text-gray-100">{sysInfo?.version || '...'}</p>
                         </div>
@@ -432,7 +440,7 @@ export default function SettingsPage() {
             )}
 
             {/* MASTER SETTINGS FORM */}
-            <form onSubmit={handleSettingsSubmit} className="space-y-6">
+            <form onSubmit={handleSettingsSubmit} className={isCompact ? 'space-y-4' : 'space-y-6'}>
 
                 {/* Global Settings Alerts */}
                 {settingsSuccess && (
@@ -450,17 +458,17 @@ export default function SettingsPage() {
 
                 {/* 1. LLM & AI CONFIGURATION (ADMIN ONLY) */}
                 {isAdmin && (
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                    <div className={cardClass}>
+                        <h2 className={headingClass}>
                             <Bot size={20} className="text-gray-500 dark:text-gray-400" />
                             {t('settings.llmConfig')}
                         </h2>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <div className="space-y-6">
-                                <LLMProfileManager 
-                                    profiles={profiles} 
-                                    onChange={handleProfilesChange} 
+                        <div className={`grid grid-cols-1 md:grid-cols-2 ${isCompact ? 'gap-4' : 'gap-8'}`}>
+                            <div className={`min-w-0 ${isCompact ? 'space-y-4' : 'space-y-6'}`}>
+                                <LLMProfileManager
+                                    profiles={profiles}
+                                    onChange={handleProfilesChange}
                                     title={t('settings.llm.globalProfiles')}
                                 />
 
@@ -486,7 +494,7 @@ export default function SettingsPage() {
                                 </div>
                             </div>
 
-                            <div className="space-y-3">
+                            <div className={`min-w-0 ${isCompact ? 'space-y-2' : 'space-y-3'}`}>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">{t('settings.promptEngineering') || "Prompt Engineering"}</label>
 
                                 <PromptAccordion
@@ -496,6 +504,7 @@ export default function SettingsPage() {
                                     value={settingsParams['llm_single_prompt']}
                                     onChange={handleSettingChange}
                                     t={t}
+                                    isCompact={isCompact}
                                 />
                                 <PromptAccordion
                                     title={t('settings.batchPrompt') || "Batch Transaction Prompt"}
@@ -504,6 +513,7 @@ export default function SettingsPage() {
                                     value={settingsParams['llm_batch_prompt']}
                                     onChange={handleSettingChange}
                                     t={t}
+                                    isCompact={isCompact}
                                 />
                                 <PromptAccordion
                                     title={t('settings.statementPrompt') || "Bank Statement Prompt"}
@@ -512,6 +522,7 @@ export default function SettingsPage() {
                                     value={settingsParams['llm_statement_prompt']}
                                     onChange={handleSettingChange}
                                     t={t}
+                                    isCompact={isCompact}
                                 />
                                 <PromptAccordion
                                     title={t('settings.payslipPrompt') || "Payslip Extraction Prompt"}
@@ -520,6 +531,7 @@ export default function SettingsPage() {
                                     value={settingsParams['llm_payslip_prompt']}
                                     onChange={handleSettingChange}
                                     t={t}
+                                    isCompact={isCompact}
                                 />
                                 <PromptAccordion
                                     title={t('settings.subscriptionPrompt') || "Subscription Enrichment Prompt"}
@@ -528,6 +540,7 @@ export default function SettingsPage() {
                                     value={settingsParams['llm_subscription_prompt']}
                                     onChange={handleSettingChange}
                                     t={t}
+                                    isCompact={isCompact}
                                 />
                                 <PromptAccordion
                                     title={t('settings.cancellationPrompt') || "Cancellation Letter Prompt"}
@@ -536,6 +549,7 @@ export default function SettingsPage() {
                                     value={settingsParams['llm_cancellation_prompt']}
                                     onChange={handleSettingChange}
                                     t={t}
+                                    isCompact={isCompact}
                                 />
                             </div>
                         </div>
@@ -544,31 +558,31 @@ export default function SettingsPage() {
 
                 {/* AI PREFERENCES (NON-ADMINS) */}
                 {!isAdmin && (
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                    <div className={cardClass}>
+                        <h2 className={headingClass}>
                             <UserCog size={20} className="text-gray-500 dark:text-gray-400" />
                             {t('settings.aiPrefs') || "AI Preferences"}
                         </h2>
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-6">
+                        <p className={`text-xs text-gray-500 dark:text-gray-400 ${isCompact ? 'mb-4' : 'mb-6'}`}>
                             {t('settings.aiPrefsDesc') || "Configure your own LLM profiles to override global defaults or if required by the administrator."}
                         </p>
-                        <LLMProfileManager 
-                            profiles={profiles} 
-                            onChange={handleProfilesChange} 
+                        <LLMProfileManager
+                            profiles={profiles}
+                            onChange={handleProfilesChange}
                         />
                     </div>
                 )}
 
                 {/* 2. AUTOMATION & BACKGROUND JOBS (ADMIN ONLY) */}
                 {isAdmin && (
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                    <div className={cardClass}>
+                        <h2 className={headingClass}>
                             <Zap size={20} className="text-gray-500 dark:text-gray-400" />
                             {t('settings.bgImport') || "Automation & Background Jobs"}
                         </h2>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-                            <div className="space-y-4">
+                        <div className={`grid grid-cols-1 md:grid-cols-2 ${isCompact ? 'gap-4' : 'gap-8'}`}>
+                            <div className={isCompact ? 'space-y-3' : 'space-y-4'}>
                                 <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 border-b dark:border-gray-800 pb-2">File Auto-Import</h3>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.importDir')}</label>
@@ -577,7 +591,7 @@ export default function SettingsPage() {
                                         value={settingsParams['import_dir'] || ''}
                                         onChange={(e) => handleSettingChange('import_dir', e.target.value)}
                                         placeholder={t('settings.importDirPlaceholder')}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        className={inputMonoClass}
                                     />
                                 </div>
                                 <div>
@@ -587,12 +601,12 @@ export default function SettingsPage() {
                                         value={settingsParams['import_interval'] || ''}
                                         onChange={(e) => handleSettingChange('import_interval', e.target.value)}
                                         placeholder={t('settings.pollIntervalPlaceholder')}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        className={inputMonoClass}
                                     />
                                 </div>
                             </div>
 
-                            <div className="space-y-4">
+                            <div className={isCompact ? 'space-y-3' : 'space-y-4'}>
                                 <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 border-b dark:border-gray-800 pb-2">{t('settings.autoCat')}</h3>
                                 <div className="flex items-center justify-between py-1">
                                     <div>
@@ -617,7 +631,7 @@ export default function SettingsPage() {
                                             value={settingsParams['auto_categorization_interval'] || ''}
                                             onChange={(e) => handleSettingChange('auto_categorization_interval', e.target.value)}
                                             placeholder={t('settings.bgImportIntervalPlaceholder')}
-                                            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                            className={inputMonoClass}
                                         />
                                     </div>
                                     <div>
@@ -629,7 +643,7 @@ export default function SettingsPage() {
                                             value={settingsParams['auto_categorization_batch_size'] || ''}
                                             onChange={(e) => handleSettingChange('auto_categorization_batch_size', e.target.value)}
                                             placeholder={t('settings.batchSizePlaceholder')}
-                                            className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                            className={inputMonoClass}
                                         />
                                     </div>
                                 </div>
@@ -642,7 +656,7 @@ export default function SettingsPage() {
                                         value={settingsParams['auto_categorization_examples_per_category'] || ''}
                                         onChange={(e) => handleSettingChange('auto_categorization_examples_per_category', e.target.value)}
                                         placeholder={t('settings.examplesPerCategoryPlaceholder')}
-                                        className="w-full px-3 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        className={inputMonoClass}
                                     />
                                 </div>
                             </div>
@@ -652,23 +666,23 @@ export default function SettingsPage() {
 
                 {/* 3. EMAIL CONFIGURATION (HIGHLIGHTED) (ADMIN ONLY) */}
                 {isAdmin && (
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border-2 border-indigo-100 dark:border-indigo-900/40 shadow-sm p-6 relative overflow-hidden">
+                    <div className={`bg-white dark:bg-gray-900 rounded-2xl border-2 border-indigo-100 dark:border-indigo-900/40 shadow-sm relative overflow-hidden ${isCompact ? 'p-4' : 'p-6'}`}>
                         <div className="absolute top-0 right-0 p-8 opacity-5 dark:opacity-[0.03] pointer-events-none">
                             <Mail size={160} />
                         </div>
 
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2 relative z-10">
+                        <h2 className={`text-lg font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2 relative z-10 ${isCompact ? 'mb-1' : 'mb-2'}`}>
                             <Mail size={20} className="text-indigo-500" />
                             {t('settings.emailConfig') || "Email Configuration (SMTP)"}
                         </h2>
 
-                        <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 max-w-2xl relative z-10">
+                        <p className={`text-xs text-gray-500 dark:text-gray-400 max-w-2xl relative z-10 ${isCompact ? 'mb-4' : 'mb-6'}`}>
                             {t('settings.smtpInfo') || "SMTP settings are used for sending password reset emails and monthly reports."}
                         </p>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 relative z-10">
-                            <div className="space-y-4">
-                                <div className="grid grid-cols-3 gap-4">
+                        <div className={`grid grid-cols-1 md:grid-cols-2 relative z-10 ${isCompact ? 'gap-4' : 'gap-8'}`}>
+                            <div className={isCompact ? 'space-y-3' : 'space-y-4'}>
+                                <div className={`grid grid-cols-3 ${isCompact ? 'gap-3' : 'gap-4'}`}>
                                     <div className="col-span-2">
                                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpHost') || "SMTP Host"}</label>
                                         <input
@@ -676,7 +690,7 @@ export default function SettingsPage() {
                                             value={settingsParams['smtp_host'] || ''}
                                             onChange={(e) => handleSettingChange('smtp_host', e.target.value)}
                                             placeholder={t('settings.smtpHostPlaceholder') || "smtp.gmail.com"}
-                                            className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                            className={inputMonoClass}
                                         />
                                     </div>
                                     <div>
@@ -686,7 +700,7 @@ export default function SettingsPage() {
                                             value={settingsParams['smtp_port'] || ''}
                                             onChange={(e) => handleSettingChange('smtp_port', e.target.value)}
                                             placeholder={t('settings.smtpPortPlaceholder') || "587"}
-                                            className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                            className={inputMonoClass}
                                         />
                                     </div>
                                 </div>
@@ -698,7 +712,7 @@ export default function SettingsPage() {
                                         value={settingsParams['smtp_user'] || ''}
                                         onChange={(e) => handleSettingChange('smtp_user', e.target.value)}
                                         placeholder={t('settings.smtpUserPlaceholder') || "user@example.com"}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        className={inputMonoClass}
                                     />
                                 </div>
 
@@ -708,12 +722,12 @@ export default function SettingsPage() {
                                         type="password"
                                         value={settingsParams['smtp_password'] || ''}
                                         onChange={(e) => handleSettingChange('smtp_password', e.target.value)}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                        className={inputClass}
                                     />
                                 </div>
                             </div>
 
-                            <div className="space-y-6">
+                            <div className={isCompact ? 'space-y-4' : 'space-y-6'}>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.smtpFromEmail') || "Sender Email (From)"}</label>
                                     <input
@@ -721,7 +735,7 @@ export default function SettingsPage() {
                                         value={settingsParams['smtp_from_email'] || ''}
                                         onChange={(e) => handleSettingChange('smtp_from_email', e.target.value)}
                                         placeholder={t('settings.smtpFromPlaceholder') || "noreply@cognicash.local"}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                        className={inputMonoClass}
                                     />
                                 </div>
 
@@ -733,13 +747,13 @@ export default function SettingsPage() {
                                             value={testEmail}
                                             onChange={(e) => setTestEmail(e.target.value)}
                                             placeholder={t('settings.testEmailPlaceholder') || "recipient@example.com"}
-                                            className="flex-1 px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                            className={`flex-1 px-4 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 ${isCompact ? 'py-1.5' : 'py-2.5'}`}
                                         />
                                         <button
                                             type="button"
                                             onClick={() => testEmailMut.mutate()}
                                             disabled={testEmailMut.isPending || !testEmail}
-                                            className="px-5 py-2.5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-sm font-semibold rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50 whitespace-nowrap"
+                                            className={`px-5 bg-indigo-50 dark:bg-indigo-900/30 text-indigo-700 dark:text-indigo-400 text-sm font-semibold rounded-xl hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors disabled:opacity-50 whitespace-nowrap ${isCompact ? 'py-1.5' : 'py-2.5'}`}
                                         >
                                             {testEmailMut.isPending ? t('settings.sending') || "Sending..." : t('settings.sendTest') || "Send Test"}
                                         </button>
@@ -764,13 +778,13 @@ export default function SettingsPage() {
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
                     {/* Bank Integration (ADMIN ONLY) */}
                     {isAdmin && (
-                        <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                            <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                        <div className={cardClass}>
+                            <h2 className={headingClass}>
                                 <Landmark size={20} className="text-gray-500 dark:text-gray-400" />
                                 {t('settings.bankIntegration') || "Bank Integration"}
                             </h2>
 
-                            <div className="space-y-4">
+                            <div className={isCompact ? 'space-y-3' : 'space-y-4'}>
                                 <div>
                                     <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
                                         {t('settings.bankProvider') || "Bank Provider"}
@@ -778,15 +792,15 @@ export default function SettingsPage() {
                                     <select
                                         value={settingsParams['bank_provider'] || 'enablebanking'}
                                         onChange={(e) => handleSettingChange('bank_provider', e.target.value)}
-                                        className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                        className={inputClass}
                                     >
                                         <option value="enablebanking">Enable Banking</option>
                                     </select>
                                 </div>
 
                                 {settingsParams['bank_provider'] === 'enablebanking' && (
-                                    <div className="space-y-4 animate-in slide-in-from-top-2 duration-200">
-                                        <div className="p-3 bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50 rounded-xl flex items-start gap-2 text-xs text-indigo-700 dark:text-indigo-300">
+                                    <div className={`animate-in slide-in-from-top-2 duration-200 ${isCompact ? 'space-y-3' : 'space-y-4'}`}>
+                                        <div className={`bg-indigo-50 dark:bg-indigo-900/20 border border-indigo-100 dark:border-indigo-800/50 rounded-xl flex items-start gap-2 text-xs text-indigo-700 dark:text-indigo-300 ${isCompact ? 'p-2' : 'p-3'}`}>
                                             <Info size={14} className="shrink-0 mt-0.5" />
                                             <div className="space-y-1">
                                                 <p>{t('settings.enablebankingInfo') || "Register your application at EnableBanking.com to get your App ID."}</p>
@@ -798,7 +812,7 @@ export default function SettingsPage() {
                                                 type="text"
                                                 value={settingsParams['enablebanking_app_id'] || ''}
                                                 onChange={(e) => handleSettingChange('enablebanking_app_id', e.target.value)}
-                                                className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 font-mono"
+                                                className={inputMonoClass}
                                             />
                                         </div>
                                     </div>
@@ -808,13 +822,13 @@ export default function SettingsPage() {
                     )}
 
                     {/* UI Preferences (USER RELATED) */}
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                    <div className={cardClass}>
+                        <h2 className={headingClass}>
                             <Monitor size={20} className="text-gray-500 dark:text-gray-400" />
                             {t('settings.uiPrefs') || "UI Preferences"}
                         </h2>
 
-                        <div className="space-y-6">
+                        <div className={isCompact ? 'space-y-4' : 'space-y-6'}>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
                                     <Globe size={16} className="text-gray-400"/> {t('settings.language')}
@@ -825,7 +839,7 @@ export default function SettingsPage() {
                                         handleSettingChange('ui_language', e.target.value);
                                         i18n.changeLanguage(e.target.value);
                                     }}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    className={inputClass}
                                 >
                                     <option value="en">{t('settings.languages.en')}</option>
                                     <option value="de">{t('settings.languages.de')}</option>
@@ -841,7 +855,7 @@ export default function SettingsPage() {
                                 <select
                                     value={settingsParams['BASE_DISPLAY_CURRENCY'] || 'EUR'}
                                     onChange={(e) => handleSettingChange('BASE_DISPLAY_CURRENCY', e.target.value)}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    className={inputClass}
                                 >
                                     <option value="EUR">EUR (€)</option>
                                     <option value="USD">USD ($)</option>
@@ -857,7 +871,7 @@ export default function SettingsPage() {
                                 <select
                                     value={settingsParams['theme'] || 'system'}
                                     onChange={(e) => handleSettingChange('theme', e.target.value)}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    className={inputClass}
                                 >
                                     <option value="system">{t('settings.themeSystem')}</option>
                                     <option value="light">{t('settings.themeLight')}</option>
@@ -872,7 +886,7 @@ export default function SettingsPage() {
                                 <select
                                     value={settingsParams['layout_mode'] || 'standard'}
                                     onChange={(e) => handleSettingChange('layout_mode', e.target.value)}
-                                    className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    className={inputClass}
                                 >
                                     <option value="standard">{t('settings.layoutStandard')}</option>
                                     <option value="compact">{t('settings.layoutCompact')}</option>
@@ -882,13 +896,13 @@ export default function SettingsPage() {
                     </div>
 
                     {/* Subscription Management (USER RELATED) */}
-                    <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6 mt-6 md:col-span-2">
-                        <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-6 flex items-center gap-2">
+                    <div className={`bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm mt-6 md:col-span-2 ${isCompact ? 'p-4' : 'p-6'}`}>
+                        <h2 className={headingClass}>
                             <CalendarClock size={20} className="text-gray-500 dark:text-gray-400" />
                             {t('settings.subscriptionManagement') || "Subscription Management"}
                         </h2>
 
-                        <div className="space-y-6">
+                        <div className={isCompact ? 'space-y-4' : 'space-y-6'}>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1 flex items-center gap-2">
                                     {t('settings.subLookback') || "Discovery Lookback Period (Years)"}
@@ -899,7 +913,7 @@ export default function SettingsPage() {
                                 <select
                                     value={settingsParams['subscription_lookback_years'] || '3'}
                                     onChange={(e) => handleSettingChange('subscription_lookback_years', e.target.value)}
-                                    className="w-full md:w-64 px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                                    className={`w-full md:w-64 px-4 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 ${isCompact ? 'py-1.5' : 'py-2.5'}`}
                                 >
                                     <option value="1">1 Year</option>
                                     <option value="2">2 Years</option>
@@ -928,18 +942,18 @@ export default function SettingsPage() {
             <hr className="border-gray-200 dark:border-gray-800 my-8" />
 
             {/* DEVICES & BRIDGE CARD */}
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-2 flex items-center gap-2">
+            <div className={cardClass}>
+                <h2 className={`text-lg font-medium text-gray-900 dark:text-gray-100 flex items-center gap-2 ${isCompact ? 'mb-1' : 'mb-2'}`}>
                     <Smartphone size={20} className="text-gray-500 dark:text-gray-400" />
                     {t('settings.devicesBridge') || "Devices & Bridge"}
                 </h2>
-                <p className="text-xs text-gray-500 dark:text-gray-400 mb-6 max-w-2xl">
+                <p className={`text-xs text-gray-500 dark:text-gray-400 max-w-2xl ${isCompact ? 'mb-4' : 'mb-6'}`}>
                     {t('settings.bridgeInfo') || "Manage long-lived tokens for the Cogni-Hermit mobile app. These tokens allow secure synchronization without your password."}
                 </p>
 
                 {/* Token Creation */}
-                <div className="mb-8 p-4 bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800">
-                    <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 mb-3 flex items-center gap-2">
+                <div className={`bg-gray-50 dark:bg-gray-800/50 rounded-xl border border-gray-100 dark:border-gray-800 ${isCompact ? 'mb-4 p-3' : 'mb-8 p-4'}`}>
+                    <h3 className={`text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2 ${isCompact ? 'mb-2' : 'mb-3'}`}>
                         <Plus size={16} /> {t('settings.generateNewToken') || "Generate New Token"}
                     </h3>
                     <div className="flex gap-2">
@@ -948,19 +962,19 @@ export default function SettingsPage() {
                             value={newTokenName}
                             onChange={(e) => setNewTokenName(e.target.value)}
                             placeholder={t('settings.deviceNamePlaceholder') || "e.g., My iPhone 15"}
-                            className="flex-1 px-4 py-2 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                            className={`flex-1 px-4 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300 ${isCompact ? 'py-1.5' : 'py-2'}`}
                         />
                         <button
                             onClick={() => createTokenMut.mutate()}
                             disabled={createTokenMut.isPending || !newTokenName}
-                            className="px-4 py-2 bg-indigo-600 dark:bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 dark:hover:bg-indigo-600 disabled:opacity-50 transition-all flex items-center gap-2"
+                            className={`px-4 bg-indigo-600 dark:bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 dark:hover:bg-indigo-600 disabled:opacity-50 transition-all flex items-center gap-2 ${isCompact ? 'py-1.5' : 'py-2'}`}
                         >
                             {createTokenMut.isPending ? t('common.loading') || "Loading..." : t('settings.generate') || "Generate"}
                         </button>
                     </div>
 
                     {revealedToken && (
-                        <div className="mt-4 p-4 bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800 rounded-xl animate-in zoom-in-95 duration-200">
+                        <div className={`bg-indigo-50 dark:bg-indigo-900/30 border border-indigo-100 dark:border-indigo-800 rounded-xl animate-in zoom-in-95 duration-200 ${isCompact ? 'mt-3 p-3' : 'mt-4 p-4'}`}>
                             <p className="text-xs font-bold text-indigo-800 dark:text-indigo-300 mb-2 flex items-center gap-1">
                                 <AlertCircle size={14} /> {t('settings.tokenSecretWarning') || "Copy this token now! It will not be shown again."}
                             </p>
@@ -985,11 +999,11 @@ export default function SettingsPage() {
                 </div>
 
                 {/* Token List */}
-                <div className="space-y-3">
+                <div className={isCompact ? 'space-y-2' : 'space-y-3'}>
                     <h3 className="text-sm font-semibold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                         <Monitor size={16} /> {t('settings.activeTokens') || "Active Bridge Tokens"}
                     </h3>
-                    
+
                     {loadingTokens ? (
                         <div className="text-center py-8 text-gray-500 text-sm">{t('common.loading')}</div>
                     ) : bridgeTokens?.length === 0 ? (
@@ -999,7 +1013,7 @@ export default function SettingsPage() {
                     ) : (
                         <div className="divide-y divide-gray-100 dark:divide-gray-800 border border-gray-100 dark:border-gray-800 rounded-xl overflow-hidden">
                             {bridgeTokens?.map((token: BridgeAccessToken) => (
-                                <div key={token.id} className="flex items-center justify-between p-4 bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors">
+                                <div key={token.id} className={`flex items-center justify-between bg-white dark:bg-gray-900 hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isCompact ? 'p-3' : 'p-4'}`}>
                                     <div className="flex items-center gap-3">
                                         <div className="w-10 h-10 rounded-full bg-indigo-50 dark:bg-indigo-900/30 flex items-center justify-center text-indigo-600 dark:text-indigo-400">
                                             <Smartphone size={20} />
@@ -1036,26 +1050,26 @@ export default function SettingsPage() {
             <hr className="border-gray-200 dark:border-gray-800 my-8" />
 
             {/* SECURITY CARD */}
-            <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm p-6">
-                <h2 className="text-lg font-medium text-gray-900 dark:text-gray-100 mb-4 flex items-center gap-2">
+            <div className={cardClass}>
+                <h2 className={headingClass}>
                     <KeyRound size={20} className="text-gray-500 dark:text-gray-400" />
                     {t('settings.security')}
                 </h2>
 
                 {passwordMut.isSuccess && (
-                    <div className="mb-6 flex items-center gap-2 p-3 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 rounded-xl text-green-700 dark:text-green-400 text-sm">
+                    <div className={`flex items-center gap-2 bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800/50 rounded-xl text-green-700 dark:text-green-400 text-sm ${isCompact ? 'mb-4 p-2' : 'mb-6 p-3'}`}>
                         <CheckCircle2 size={16} />
                         {t('settings.pwdSuccess')}
                     </div>
                 )}
                 {pwdErrorMsg && (
-                    <div className="mb-6 flex items-center gap-2 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl text-red-700 dark:text-red-400 text-sm">
+                    <div className={`flex items-center gap-2 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800/50 rounded-xl text-red-700 dark:text-red-400 text-sm ${isCompact ? 'mb-4 p-2' : 'mb-6 p-3'}`}>
                         <AlertCircle size={16} />
                         {pwdErrorMsg}
                     </div>
                 )}
 
-                <form onSubmit={handlePasswordSubmit} className="space-y-4 max-w-md">
+                <form onSubmit={handlePasswordSubmit} className={`max-w-md ${isCompact ? 'space-y-3' : 'space-y-4'}`}>
                     <div>
                         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">{t('settings.currentPwd')}</label>
                         <input
@@ -1063,7 +1077,7 @@ export default function SettingsPage() {
                             required
                             value={oldPassword}
                             onChange={(e) => setOldPassword(e.target.value)}
-                            className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                            className={inputClass}
                         />
                     </div>
                     <div className="pt-2">
@@ -1073,7 +1087,7 @@ export default function SettingsPage() {
                             required
                             value={newPassword}
                             onChange={(e) => setNewPassword(e.target.value)}
-                            className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                            className={inputClass}
                         />
                     </div>
                     <div>
@@ -1083,7 +1097,7 @@ export default function SettingsPage() {
                             required
                             value={confirmPassword}
                             onChange={(e) => setConfirmPassword(e.target.value)}
-                            className="w-full px-4 py-2.5 text-sm rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 focus:ring-2 focus:ring-indigo-300"
+                            className={inputClass}
                         />
                     </div>
 
@@ -1091,7 +1105,7 @@ export default function SettingsPage() {
                         <button
                             type="submit"
                             disabled={passwordMut.isPending || !oldPassword || !newPassword || !confirmPassword}
-                            className="px-6 py-2.5 bg-indigo-600 dark:bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 dark:hover:bg-indigo-600 disabled:opacity-50 transition-all"
+                            className={`px-6 bg-indigo-600 dark:bg-indigo-500 text-white text-sm font-medium rounded-xl hover:bg-indigo-700 dark:hover:bg-indigo-600 disabled:opacity-50 transition-all ${isCompact ? 'py-1.5' : 'py-2.5'}`}
                         >
                             {passwordMut.isPending ? t('settings.updating') : t('settings.updatePwd')}
                         </button>

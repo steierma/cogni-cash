@@ -60,6 +60,11 @@ type updateTransactionCategoryRequest struct {
 	CategoryID string `json:"category_id"`
 }
 
+type updateTransactionCategoriesBulkRequest struct {
+	Hashes     []string `json:"hashes"`
+	CategoryID string   `json:"category_id"`
+}
+
 func (h *BankStatementHandler) listBankStatements(w http.ResponseWriter, r *http.Request) {
 	if h.bankStmtRepo == nil {
 		writeError(w, http.StatusServiceUnavailable, "bank statement repository not available")
@@ -390,6 +395,47 @@ func (h *BankStatementHandler) updateTransactionCategory(w http.ResponseWriter, 
 		return
 	}
 	if err := h.transactionSvc.UpdateCategory(r.Context(), contentHash, catIDPtr, userID); err != nil {
+		writeError(w, http.StatusInternalServerError, err.Error())
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *BankStatementHandler) updateTransactionCategoriesBulk(w http.ResponseWriter, r *http.Request) {
+	if h.transactionSvc == nil {
+		writeError(w, http.StatusServiceUnavailable, "service not available")
+		return
+	}
+
+	var req updateTransactionCategoriesBulkRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	if len(req.Hashes) == 0 {
+		writeError(w, http.StatusBadRequest, "missing transaction hashes")
+		return
+	}
+
+	var catIDPtr *uuid.UUID
+	if req.CategoryID != "" {
+		parsedID, err := uuid.Parse(req.CategoryID)
+		if err != nil {
+			writeError(w, http.StatusBadRequest, "invalid category_id")
+			return
+		}
+		catIDPtr = &parsedID
+	}
+
+	userID := GetUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	if err := h.transactionSvc.UpdateCategoriesBulk(r.Context(), req.Hashes, catIDPtr, userID); err != nil {
 		writeError(w, http.StatusInternalServerError, err.Error())
 		return
 	}

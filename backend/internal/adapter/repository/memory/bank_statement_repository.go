@@ -343,7 +343,22 @@ func (r *BankStatementRepository) UpdateTransactionCategory(ctx context.Context,
 		return errors.New("transaction not found")
 	}
 	tx.CategoryID = categoryID
+	tx.Reviewed = true
 	r.transactions[hash] = tx
+	return nil
+}
+
+func (r *BankStatementRepository) UpdateTransactionCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, hash := range hashes {
+		tx, ok := r.transactions[hash]
+		if ok && tx.UserID == userID {
+			tx.CategoryID = categoryID
+			tx.Reviewed = true
+			r.transactions[hash] = tx
+		}
+	}
 	return nil
 }
 

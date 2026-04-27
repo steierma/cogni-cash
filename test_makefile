@@ -1,0 +1,3 @@
+SHELL := /bin/bash
+test:
+	@set -o pipefail; if ! (false && true) 2>&1 | tee log.txt; then echo "Failed as expected"; exit 1; fi

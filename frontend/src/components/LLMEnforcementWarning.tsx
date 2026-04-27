@@ -3,8 +3,8 @@ import { ShieldAlert, ArrowRight } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import { settingsService } from '../api/services/settingsService';
 import { authService } from '../api/services/authService';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
 
 export const LLMEnforcementWarning: React.FC = () => {
     const { t } = useTranslation();
@@ -14,10 +14,7 @@ export const LLMEnforcementWarning: React.FC = () => {
         queryFn: () => authService.fetchMe(),
     });
 
-    const { data: settings } = useQuery({
-        queryKey: ['settings'],
-        queryFn: () => settingsService.fetchSettings(),
-    });
+    const { data: settings } = useEffectiveSettings();
 
     if (!settings || !currentUser) return null;
 
@@ -30,7 +27,7 @@ export const LLMEnforcementWarning: React.FC = () => {
     let hasActiveProfile = false;
     try {
         const profiles = JSON.parse(settings['llm_profiles'] || '[]');
-        hasActiveProfile = Array.isArray(profiles) && profiles.some((p: any) => p.active);
+        hasActiveProfile = Array.isArray(profiles) && profiles.some((p: any) => p.is_active);
     } catch (e) {
         hasActiveProfile = false;
     }

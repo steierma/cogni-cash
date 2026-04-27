@@ -122,6 +122,9 @@ func (m *mockInvoiceRepoDocSvc) FindByID(context.Context, uuid.UUID, uuid.UUID) 
 	return entity.Invoice{}, nil
 }
 func (m *mockInvoiceRepoDocSvc) Update(context.Context, entity.Invoice) error { return nil }
+func (m *mockInvoiceRepoDocSvc) UpdateCategoriesBulk(context.Context, []uuid.UUID, *uuid.UUID, uuid.UUID) error {
+	return nil
+}
 func (m *mockInvoiceRepoDocSvc) UpdateBaseAmount(context.Context, uuid.UUID, float64, string, uuid.UUID) error {
 	return nil
 }

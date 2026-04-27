@@ -1,5 +1,5 @@
 import { useState, useMemo, useEffect } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import PlannedTransactionsList from '../components/forecasting/PlannedTransactionsList';
@@ -12,8 +12,6 @@ import {
     AlertCircle,
     Info,
     Search,
-    Columns,
-    Check,
     X
 } from 'lucide-react';
 import {
@@ -29,6 +27,8 @@ import {
 import { forecastingService } from '../api/services/forecastingService';
 import { categoryService } from '../api/services/categoryService';
 import { settingsService } from '../api/services/settingsService';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
+import { getNamespacedKey } from '../api/utils/settingsHelper';
 import type { CashFlowForecast } from "../api/types/transaction";
 import type { Category } from "../api/types/category";
 import { fmtCurrency, fmtDate, getLocalISODate } from '../utils/formatters';
@@ -74,6 +74,7 @@ const CustomTooltip = ({ active, payload, label, t, baseCurrency }: CustomToolti
 export default function ForecastingPage() {
     const { t, i18n } = useTranslation();
     const [searchParams, setSearchParams] = useSearchParams();
+    const qc = useQueryClient();
 
     const [range, setRange] = useState<'30' | '60' | '90' | '180' | '365' | '730'>(() => {
         const r = searchParams.get('range');
@@ -88,6 +89,13 @@ export default function ForecastingPage() {
     });
     const [search, setSearch] = useState(searchParams.get('search') || '');
     const [showColMenu, setShowColMenu] = useState(false);
+
+    const { data: settings } = useEffectiveSettings();
+
+    const updateSettingsMut = useMutation({
+        mutationFn: (data: Record<string, string>) => settingsService.updateSettings(data),
+        onSuccess: () => qc.invalidateQueries({ queryKey: ['settings'] })
+    });
 
     // Update URL when state changes
     useEffect(() => {
@@ -104,21 +112,28 @@ export default function ForecastingPage() {
         }
     }, [range, activeTab, search, setSearchParams, searchParams]);
 
-    // Columns Configuration with Local Storage
-    const [visibleCols, setVisibleCols] = useState<Record<ForecastColKey, boolean>>(() => {
-        const saved = localStorage.getItem('forecast_visible_cols');
-        if (saved) {
-            try { return JSON.parse(saved); } catch { /* fallback */ }
-        }
-        return { date: true, description: true, category: true, probability: true, amount: true };
+    // Columns Configuration
+    const [visibleCols, setVisibleCols] = useState<Record<ForecastColKey, boolean>>({
+        date: true, description: true, category: true, probability: true, amount: true
     });
 
     useEffect(() => {
-        localStorage.setItem('forecast_visible_cols', JSON.stringify(visibleCols));
-    }, [visibleCols]);
+        if (settings?.forecast_visible_cols) {
+            try {
+                setVisibleCols(JSON.parse(settings.forecast_visible_cols));
+            } catch (e) {
+                console.error("Failed to parse forecast column settings", e);
+            }
+        }
+    }, [settings?.forecast_visible_cols]);
 
     const toggleColumn = (key: ForecastColKey) => {
-        setVisibleCols(prev => ({ ...prev, [key]: !prev[key] }));
+        setVisibleCols(prev => {
+            const next = { ...prev, [key]: !prev[key] };
+            const nsKey = getNamespacedKey('forecast_visible_cols', true);
+            updateSettingsMut.mutate({ [nsKey]: JSON.stringify(next) });
+            return next;
+        });
     };
 
     // Memoize the target date string to prevent unnecessary query invalidations on every render
@@ -143,10 +158,7 @@ export default function ForecastingPage() {
         queryFn: () => categoryService.fetchCategories(),
     });
 
-    const { data: baseCurrency = 'EUR' } = useQuery({
-        queryKey: ['settings', 'BASE_DISPLAY_CURRENCY'],
-        queryFn: () => settingsService.fetchSettings().then((s) => s['BASE_DISPLAY_CURRENCY'] || 'EUR'),
-    });
+    const baseCurrency = settings?.['BASE_DISPLAY_CURRENCY'] || 'EUR';
 
     const forecast = forecastQuery.data;
     const isLoading = forecastQuery.isLoading;
@@ -187,7 +199,7 @@ export default function ForecastingPage() {
     };
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
+        <div className="space-y-6 pb-20 animate-in fade-in duration-300">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>
@@ -435,41 +447,6 @@ export default function ForecastingPage() {
                                     </button>
                                 )}
                             </div>
-
-                            <div className="relative">
-                                <button
-                                    onClick={() => setShowColMenu(!showColMenu)}
-                                    className={`p-1.5 rounded-lg border transition-all ${showColMenu
-                                        ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400'
-                                        : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
-                                    title={t('transactions.columns', 'Columns')}
-                                >
-                                    <Columns size={14} />
-                                </button>
-
-                                {showColMenu && (
-                                    <>
-                                        <div className="fixed inset-0 z-10" onClick={() => setShowColMenu(false)} />
-                                        <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-20 animate-in fade-in zoom-in duration-150 origin-top-right">
-                                            {[
-                                                { key: 'date', label: t('dashboard.recentTxns.date') },
-                                                { key: 'description', label: t('dashboard.recentTxns.description') },
-                                                { key: 'category', label: t('dashboard.recentTxns.category') },
-                                                { key: 'probability', label: t('forecasting.probability') },
-                                                { key: 'amount', label: t('dashboard.recentTxns.amount') },
-                                            ].map(({ key, label }) => (
-                                                <button
-                                                    key={key}
-                                                    onClick={() => toggleColumn(key as ForecastColKey)}
-                                                    className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-colors"
-                                                >
-                                                    {label} {visibleCols[key as ForecastColKey] && <Check size={16} className="text-indigo-600 dark:text-indigo-400" />}
-                                                </button>
-                                            ))}
-                                        </div>
-                                    </>
-                                )}
-                            </div>
                         </div>
                     )}
                 </div>
@@ -479,6 +456,9 @@ export default function ForecastingPage() {
                         predictions={filteredPredictions}
                         isLoading={isLoading}
                         visibleCols={visibleCols}
+                        showColMenu={showColMenu}
+                        onToggleColMenu={() => setShowColMenu(!showColMenu)}
+                        onToggleColumn={toggleColumn}
                     />
                 )}
             </div>

@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import { subscriptionService } from '../api/services/subscriptionService';
 import { settingsService } from '../api/services/settingsService';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
 import { categoryService } from '../api/services/categoryService';
 import { fmtCurrency, fmtDate } from '../utils/formatters';
 import type { Category } from '../api/types/category';
@@ -552,10 +553,7 @@ function DiscoverySettings() {
     const queryClient = useQueryClient();
     const [isOpen, setIsOpen] = useState(false);
 
-    const { data: settings = {}, isLoading } = useQuery({
-        queryKey: ['settings'],
-        queryFn: settingsService.fetchSettings
-    });
+    const { data: settings = {}, isLoading } = useEffectiveSettings();
 
     const [formChanges, setFormChanges] = useState<Record<string, string>>({});
     

@@ -38,6 +38,10 @@ func (m *MockBankProvider) CreateRequisition(ctx context.Context, userID uuid.UU
 	}, nil
 }
 
+func (m *MockBankProvider) GenerateReauthLink(ctx context.Context, userID uuid.UUID, institutionID, country, redirectURL, referenceID string, isSandbox bool, ip string, userAgent string) (string, string, error) {
+	return redirectURL + "?code=mock_reauth_code", "mock_reauth_req_" + uuid.New().String(), nil
+}
+
 func (m *MockBankProvider) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error) {
 	return "mock_session_" + uuid.New().String(), nil
 }

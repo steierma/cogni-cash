@@ -104,6 +104,14 @@ func (m *mockBankSvcRepo) DeleteConnection(ctx context.Context, id uuid.UUID, us
 	args := m.Called(ctx, id, userID)
 	return args.Error(0)
 }
+func (m *mockBankSvcRepo) UpdateExpiryNotifiedAt(ctx context.Context, id uuid.UUID, notifiedAt *time.Time) error {
+	args := m.Called(ctx, id, notifiedAt)
+	return args.Error(0)
+}
+func (m *mockBankSvcRepo) GetExpiringConnections(ctx context.Context, days int) ([]entity.BankConnection, error) {
+	args := m.Called(ctx, days)
+	return args.Get(0).([]entity.BankConnection), args.Error(1)
+}
 
 type mockBankSvcProvider struct {
 	mock.Mock
@@ -116,6 +124,10 @@ func (m *mockBankSvcProvider) GetInstitutions(ctx context.Context, userID uuid.U
 func (m *mockBankSvcProvider) CreateRequisition(ctx context.Context, userID uuid.UUID, instID, instName, country, redirectURL, refID string, isSandbox bool, ip, ua string) (*entity.BankConnection, error) {
 	args := m.Called(ctx, userID, instID, instName, country, redirectURL, refID, isSandbox, ip, ua)
 	return args.Get(0).(*entity.BankConnection), args.Error(1)
+}
+func (m *mockBankSvcProvider) GenerateReauthLink(ctx context.Context, userID uuid.UUID, institutionID, country, redirectURL, referenceID string, isSandbox bool, ip, ua string) (string, string, error) {
+	args := m.Called(ctx, userID, institutionID, country, redirectURL, referenceID, isSandbox, ip, ua)
+	return args.String(0), args.String(1), args.Error(2)
 }
 func (m *mockBankSvcProvider) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error) {
 	args := m.Called(ctx, userID, code)
@@ -172,6 +184,10 @@ func (m *mockBankSvcStmtRepo) Save(ctx context.Context, stmt entity.BankStatemen
 }
 func (m *mockBankSvcStmtRepo) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	args := m.Called(ctx, hash, categoryID, userID)
+	return args.Error(0)
+}
+func (m *mockBankSvcStmtRepo) UpdateTransactionCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	args := m.Called(ctx, hashes, categoryID, userID)
 	return args.Error(0)
 }
 func (m *mockBankSvcStmtRepo) UpdateTransactionSubscription(ctx context.Context, hash string, subID *uuid.UUID, userID uuid.UUID) error {

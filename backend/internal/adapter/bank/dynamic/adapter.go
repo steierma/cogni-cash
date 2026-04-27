@@ -97,6 +97,14 @@ func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, insti
 	return p.CreateRequisition(ctx, userID, institutionID, institutionName, country, redirectURL, referenceID, isSandbox, ip, userAgent)
 }
 
+func (a *Adapter) GenerateReauthLink(ctx context.Context, userID uuid.UUID, institutionID, country, redirectURL, referenceID string, isSandbox bool, ip string, userAgent string) (string, string, error) {
+	p, err := a.getProvider(ctx, userID)
+	if err != nil {
+		return "", "", err
+	}
+	return p.GenerateReauthLink(ctx, userID, institutionID, country, redirectURL, referenceID, isSandbox, ip, userAgent)
+}
+
 func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error) {
 	p, err := a.getProvider(ctx, userID)
 	if err != nil {

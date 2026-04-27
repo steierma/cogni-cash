@@ -201,6 +201,50 @@ func (a *Adapter) CreateRequisition(ctx context.Context, userID uuid.UUID, insti
 	}, nil
 }
 
+func (a *Adapter) GenerateReauthLink(ctx context.Context, userID uuid.UUID, institutionID, country, redirectURL, referenceID string, isSandbox bool, ip string, userAgent string) (string, string, error) {
+	// Re-authentication in Enable Banking uses the same /auth endpoint but typically
+	// we just need the URL and potentially a new session ID (which is returned as part of the flow).
+	headers := make(map[string]string)
+	if ip != "" {
+		headers["psu-ip-address"] = ip
+	}
+	if userAgent != "" {
+		headers["psu-user-agent"] = userAgent
+	}
+
+	access := map[string]interface{}{
+		"valid_until": time.Now().Add(90 * 24 * time.Hour).Format(time.RFC3339),
+		"scopes":      []string{"accounts", "balances", "transactions"},
+	}
+	if isSandbox {
+		access["psu_type"] = "personal"
+	}
+
+	payloadBytes, _ := json.Marshal(map[string]interface{}{
+		"aspsp": map[string]string{
+			"name":    institutionID,
+			"country": country,
+		},
+		"redirect_url": redirectURL,
+		"state":        referenceID,
+		"access":       access,
+	})
+
+	resp, err := a.doRequest(ctx, "POST", "/auth", bytes.NewReader(payloadBytes), headers)
+	if err != nil {
+		return "", "", err
+	}
+
+	var res struct {
+		URL string `json:"url"`
+	}
+	if err := json.Unmarshal(resp, &res); err != nil {
+		return "", "", err
+	}
+
+	return res.URL, referenceID, nil
+}
+
 func (a *Adapter) ExchangeCodeForSession(ctx context.Context, userID uuid.UUID, code string) (string, error) {
 	payload, _ := json.Marshal(map[string]string{
 		"code": code,

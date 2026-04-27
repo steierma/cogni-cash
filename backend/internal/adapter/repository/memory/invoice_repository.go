@@ -122,6 +122,18 @@ func (r *InvoiceRepository) FindAll(ctx context.Context, filter entity.InvoiceFi
 	return invoices[filter.Offset:end], nil
 }
 
+func (r *InvoiceRepository) UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, id := range ids {
+		if inv, ok := r.invoices[id]; ok && inv.UserID == userID {
+			inv.CategoryID = categoryID
+			r.invoices[id] = inv
+		}
+	}
+	return nil
+}
+
 func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

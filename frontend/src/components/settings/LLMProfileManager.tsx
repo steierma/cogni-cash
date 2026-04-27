@@ -9,7 +9,7 @@ export interface LLMProfile {
     url: string;
     token: string;
     model: string;
-    active: boolean;
+    is_active: boolean;
 }
 
 interface LLMProfileManagerProps {
@@ -33,7 +33,7 @@ export const LLMProfileManager: React.FC<LLMProfileManagerProps> = ({ profiles, 
         url: '',
         token: '',
         model: '',
-        active: true
+        is_active: true
     });
 
     const handleAdd = () => {
@@ -44,7 +44,7 @@ export const LLMProfileManager: React.FC<LLMProfileManagerProps> = ({ profiles, 
             url: '',
             token: '',
             model: '',
-            active: true
+            is_active: profiles.length === 0 // Default to active if it's the first one
         });
         setIsAdding(true);
         setEditingId(null);
@@ -61,22 +61,13 @@ export const LLMProfileManager: React.FC<LLMProfileManagerProps> = ({ profiles, 
 
         let updatedProfiles: LLMProfile[];
         
-        // If it's a new profile or we are editing, and it's set to active, 
-        // we might want to deactivate others. 
-        // But the requirement says "an 'Active' toggle", implying there could be multiple?
-        // Usually only one is active at a time for a specific purpose.
-        // Let's assume only one can be active.
         const finalForm = { ...editForm };
-        
-        // Handle token masking: if it's still MASKED_TOKEN, we don't change it.
-        // The backend will see MASKED_TOKEN and know not to update it.
         
         if (isAdding) {
             updatedProfiles = [...profiles, finalForm];
         } else {
             updatedProfiles = profiles.map(p => {
                 if (p.id === editingId) {
-                    // If token is MASKED_TOKEN, preserve the old one
                     const tokenToSave = finalForm.token === MASKED_TOKEN ? p.token : finalForm.token;
                     return { ...finalForm, token: tokenToSave };
                 }
@@ -85,11 +76,17 @@ export const LLMProfileManager: React.FC<LLMProfileManagerProps> = ({ profiles, 
         }
 
         // If the saved profile is active, deactivate others
-        if (finalForm.active) {
+        if (finalForm.is_active) {
             updatedProfiles = updatedProfiles.map(p => ({
                 ...p,
-                active: p.id === (isAdding ? finalForm.id : editingId)
+                is_active: p.id === (isAdding ? finalForm.id : editingId)
             }));
+        } else if (updatedProfiles.every(p => !p.is_active) && updatedProfiles.length > 0) {
+            // If none are active after save, make the saved one (or the first one) active
+            // Actually, if we just saved it as inactive, maybe we should respect that,
+            // but the user's issue was none being active.
+            // Let's force at least one active if possible.
+            updatedProfiles[0].is_active = true;
         }
 
         onChange(updatedProfiles);
@@ -99,14 +96,19 @@ export const LLMProfileManager: React.FC<LLMProfileManagerProps> = ({ profiles, 
 
     const handleDelete = (id: string) => {
         if (window.confirm(t('settings.llm.confirmDelete'))) {
-            onChange(profiles.filter(p => p.id !== id));
+            const newProfiles = profiles.filter(p => p.id !== id);
+            // Ensure at least one is active if list is not empty
+            if (newProfiles.length > 0 && newProfiles.every(p => !p.is_active)) {
+                newProfiles[0].is_active = true;
+            }
+            onChange(newProfiles);
         }
     };
 
     const toggleActive = (id: string) => {
         const updatedProfiles = profiles.map(p => ({
             ...p,
-            active: p.id === id ? !p.active : false // Only one active at a time
+            is_active: p.id === id ? true : false // Clicking one makes it active, others inactive
         }));
         onChange(updatedProfiles);
     };
@@ -203,8 +205,8 @@ export const LLMProfileManager: React.FC<LLMProfileManagerProps> = ({ profiles, 
                         <label className="flex items-center gap-2 cursor-pointer">
                             <input
                                 type="checkbox"
-                                checked={editForm.active}
-                                onChange={e => setEditForm({ ...editForm, active: e.target.checked })}
+                                checked={editForm.is_active}
+                                onChange={e => setEditForm({ ...editForm, is_active: e.target.checked })}
                                 className="rounded text-indigo-600 focus:ring-indigo-500"
                             />
                             <span className="text-xs font-medium text-gray-700 dark:text-gray-300">{t('settings.llm.activeProfile')}</span>
@@ -240,42 +242,42 @@ export const LLMProfileManager: React.FC<LLMProfileManagerProps> = ({ profiles, 
                     <div
                         key={profile.id}
                         className={`group p-3 rounded-xl border transition-all ${
-                            profile.active
+                            profile.is_active
                                 ? 'bg-indigo-50/50 dark:bg-indigo-900/10 border-indigo-200 dark:border-indigo-800/50'
                                 : 'bg-white dark:bg-gray-900 border-gray-100 dark:border-gray-800 hover:border-gray-200 dark:hover:border-gray-700'
                         }`}
                     >
                         <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                                <div className={`w-10 h-10 rounded-full flex items-center justify-center ${
-                                    profile.active ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
+                            <div className="flex items-center gap-3 min-w-0 flex-1">
+                                <div className={`w-10 h-10 rounded-full flex-shrink-0 flex items-center justify-center ${
+                                    profile.is_active ? 'bg-indigo-600 text-white shadow-md shadow-indigo-200 dark:shadow-none' : 'bg-gray-100 dark:bg-gray-800 text-gray-400'
                                 }`}>
                                     <Bot size={20} />
                                 </div>
-                                <div>
-                                    <div className="flex items-center gap-2">
-                                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100">{profile.name}</p>
+                                <div className="min-w-0 flex-1">
+                                    <div className="flex flex-wrap items-center gap-2">
+                                        <p className="text-sm font-bold text-gray-900 dark:text-gray-100 truncate">{profile.name}</p>
                                         <span className="px-1.5 py-0.5 text-[10px] font-black uppercase tracking-wider bg-gray-100 dark:bg-gray-800 text-gray-500 dark:text-gray-400 rounded">
                                             {profile.type}
                                         </span>
-                                        {profile.active && (
+                                        {profile.is_active && (
                                             <span className="flex items-center gap-0.5 text-[10px] font-bold text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 px-1.5 py-0.5 rounded-full">
                                                 <Power size={10} /> {t('settings.llm.active')}
                                             </span>
                                         )}
                                     </div>
-                                    <p className="text-[11px] text-gray-500 dark:text-gray-400 font-mono mt-0.5">
+                                    <p className="text-[11px] text-gray-500 dark:text-gray-400 font-mono mt-0.5 truncate">
                                         {profile.model} • {profile.url || 'Default URL'}
                                     </p>
                                 </div>
                             </div>
 
-                            <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                            <div className="flex items-center gap-1 md:opacity-0 md:group-hover:opacity-100 transition-opacity flex-shrink-0 ml-2">
                                 <button
                                     type="button"
                                     onClick={() => toggleActive(profile.id)}
-                                    className={`p-1.5 rounded-lg transition-colors ${profile.active ? 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
-                                    title={profile.active ? t('settings.llm.deactivate') : t('settings.llm.activate')}
+                                    className={`p-1.5 rounded-lg transition-colors ${profile.is_active ? 'text-indigo-600 bg-indigo-50 dark:bg-indigo-900/30' : 'text-gray-400 hover:bg-gray-100 dark:hover:bg-gray-800'}`}
+                                    title={profile.is_active ? t('settings.llm.deactivate') : t('settings.llm.activate')}
                                 >
                                     <Power size={16} />
                                 </button>

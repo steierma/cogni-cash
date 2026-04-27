@@ -117,6 +117,19 @@ func (m *mockRepo) UpdateTransactionCategory(_ context.Context, hash string, cat
 	return errors.New("transaction not found")
 }
 
+func (m *mockRepo) UpdateTransactionCategoriesBulk(_ context.Context, hashes []string, categoryID *uuid.UUID, _ uuid.UUID) error {
+	hashSet := make(map[string]bool)
+	for _, h := range hashes {
+		hashSet[h] = true
+	}
+	for i, tx := range m.existingTxns {
+		if hashSet[tx.ContentHash] {
+			m.existingTxns[i].CategoryID = categoryID
+		}
+	}
+	return nil
+}
+
 func (m *mockRepo) UpdateTransactionSubscription(_ context.Context, contentHash string, subscriptionID *uuid.UUID, _ uuid.UUID) error {
 	for i, tx := range m.existingTxns {
 		if tx.ContentHash == contentHash {

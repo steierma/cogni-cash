@@ -3,6 +3,7 @@ package memory
 import (
 	"context"
 	"sync"
+	"time"
 
 	"cogni-cash/internal/domain/entity"
 	"cogni-cash/internal/domain/port"
@@ -132,6 +133,36 @@ func (r *BankRepository) DeleteConnection(ctx context.Context, id uuid.UUID, use
 	}
 
 	return nil
+}
+
+func (r *BankRepository) UpdateExpiryNotifiedAt(ctx context.Context, id uuid.UUID, notifiedAt *time.Time) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	conn, ok := r.connections[id]
+	if !ok {
+		return entity.ErrBankConnectionNotFound
+	}
+	conn.ExpiryNotifiedAt = notifiedAt
+	r.connections[id] = conn
+	return nil
+}
+
+func (r *BankRepository) GetExpiringConnections(ctx context.Context, days int) ([]entity.BankConnection, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	var conns []entity.BankConnection
+	now := time.Now()
+	targetDate := time.Date(now.Year(), now.Month(), now.Day(), 0, 0, 0, 0, now.Location()).AddDate(0, 0, days)
+
+	for _, conn := range r.connections {
+		if conn.ExpiresAt != nil && conn.ExpiryNotifiedAt == nil {
+			expDate := time.Date(conn.ExpiresAt.Year(), conn.ExpiresAt.Month(), conn.ExpiresAt.Day(), 0, 0, 0, 0, conn.ExpiresAt.Location())
+			if expDate.Equal(targetDate) {
+				conns = append(conns, conn)
+			}
+		}
+	}
+	return conns, nil
 }
 
 func (r *BankRepository) UpsertAccounts(ctx context.Context, accounts []entity.BankAccount, userID uuid.UUID) error {

@@ -100,6 +100,22 @@ func (m *mockInvoiceRepo) FindAll(_ context.Context, _ entity.InvoiceFilter) ([]
 	return m.saved, nil
 }
 
+func (m *mockInvoiceRepo) UpdateCategoriesBulk(_ context.Context, ids []uuid.UUID, categoryID *uuid.UUID, _ uuid.UUID) error {
+	if m.err != nil {
+		return m.err
+	}
+	idSet := make(map[uuid.UUID]bool)
+	for _, id := range ids {
+		idSet[id] = true
+	}
+	for i, inv := range m.saved {
+		if idSet[inv.ID] {
+			m.saved[i].CategoryID = categoryID
+		}
+	}
+	return nil
+}
+
 func (m *mockInvoiceRepo) Delete(_ context.Context, id uuid.UUID, _ uuid.UUID) error {
 	if m.err != nil {
 		return m.err

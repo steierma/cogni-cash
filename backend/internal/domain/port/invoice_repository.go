@@ -13,6 +13,7 @@ type InvoiceRepository interface {
 	UpdateBaseAmount(ctx context.Context, id uuid.UUID, baseAmount float64, baseCurrency string, userID uuid.UUID) error
 	FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error)
 	FindAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error)
+	UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error
 	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 
 	// Split management

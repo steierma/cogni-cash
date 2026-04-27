@@ -281,6 +281,22 @@ func (r *InvoiceRepository) FindAll(ctx context.Context, filter entity.InvoiceFi
 	return invoices, rows.Err()
 }
 
+func (r *InvoiceRepository) UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error {
+	if len(ids) == 0 {
+		return nil
+	}
+	r.Logger.Info("Bulk updating invoice categories", "count", len(ids), "user_id", userID)
+	_, err := r.pool.Exec(ctx, `
+		UPDATE invoices 
+		SET category_id = $1 
+		WHERE id = ANY($2) AND user_id = $3`,
+		categoryID, ids, userID)
+	if err != nil {
+		return fmt.Errorf("invoice repo: bulk update categories: %w", err)
+	}
+	return nil
+}
+
 // Delete removes an Invoice by UUID.
 func (r *InvoiceRepository) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	r.Logger.Info("Deleting invoice", "id", id, "user_id", userID)

@@ -229,6 +229,37 @@ func (h *DocumentHandler) downloadDocument(w http.ResponseWriter, r *http.Reques
 	_, _ = w.Write(content)
 }
 
+// previewDocument handles GET /api/v1/documents/{id}/preview/
+func (h *DocumentHandler) previewDocument(w http.ResponseWriter, r *http.Request) {
+	userID := GetUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	id, err := uuid.Parse(chi.URLParam(r, "id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "Invalid document ID")
+		return
+	}
+
+	content, mimeType, _, err := h.documentSvc.Download(r.Context(), id, userID)
+	if err != nil {
+		if errors.Is(err, entity.ErrDocumentNotFound) {
+			writeError(w, http.StatusNotFound, "Document not found")
+			return
+		}
+		h.Logger.Error("Failed to preview document", "id", id, "error", err, "user_id", userID)
+		writeError(w, http.StatusInternalServerError, "Failed to preview document")
+		return
+	}
+
+	w.Header().Set("Content-Type", mimeType)
+	w.Header().Set("Content-Disposition", "inline")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write(content)
+}
+
 // getTaxYearSummary handles GET /api/v1/documents/tax-summary/{year}/
 func (h *DocumentHandler) getTaxYearSummary(w http.ResponseWriter, r *http.Request) {
 	userID := GetUserID(r.Context())

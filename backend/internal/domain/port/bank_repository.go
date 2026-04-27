@@ -4,6 +4,7 @@ package port
 import (
 	"cogni-cash/internal/domain/entity"
 	"context"
+	"time"
 
 	"github.com/google/uuid"
 )
@@ -16,6 +17,8 @@ type BankRepository interface {
 	UpdateConnectionStatus(ctx context.Context, id uuid.UUID, status entity.ConnectionStatus, userID uuid.UUID) error
 	UpdateRequisitionID(ctx context.Context, id uuid.UUID, requisitionID string, userID uuid.UUID) error
 	DeleteConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
+	UpdateExpiryNotifiedAt(ctx context.Context, id uuid.UUID, notifiedAt *time.Time) error
+	GetExpiringConnections(ctx context.Context, days int) ([]entity.BankConnection, error)
 
 	UpsertAccounts(ctx context.Context, accounts []entity.BankAccount, userID uuid.UUID) error
 	GetAccountByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*entity.BankAccount, error)

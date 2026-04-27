@@ -57,6 +57,7 @@ type InvoiceUseCase interface {
 	GetAll(ctx context.Context, filter entity.InvoiceFilter) ([]entity.Invoice, error)
 	GetByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error)
 	Update(ctx context.Context, invoice entity.Invoice) (entity.Invoice, error)
+	UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error
 	Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
 	GetOriginalFile(ctx context.Context, id uuid.UUID, userID uuid.UUID) ([]byte, string, string, error)
 
@@ -79,6 +80,7 @@ type TransactionUseCase interface {
 	ListTransactions(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
 	GetTransactionAnalytics(ctx context.Context, filter entity.TransactionFilter) (entity.TransactionAnalytics, error)
 	UpdateCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
+	UpdateCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error
 	MarkAsReviewed(ctx context.Context, hash string, userID uuid.UUID) error
 	MarkAsReviewedBulk(ctx context.Context, hashes []string, userID uuid.UUID) error
 
@@ -117,6 +119,7 @@ type BankUseCase interface {
 	// Connections
 	GetInstitutions(ctx context.Context, userID uuid.UUID, countryCode string, isSandbox bool) ([]entity.BankInstitution, error)
 	CreateConnection(ctx context.Context, userID uuid.UUID, institutionID string, institutionName string, country string, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error)
+	RefreshConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error)
 	FinishConnection(ctx context.Context, userID uuid.UUID, requisitionID string, code string) error
 	GetConnections(ctx context.Context, userID uuid.UUID) ([]entity.BankConnection, error)
 	DeleteConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) error
@@ -147,6 +150,8 @@ type NotificationUseCase interface {
 	SendWelcomeEmail(ctx context.Context, user entity.User) error
 	SendPasswordResetEmail(ctx context.Context, user entity.User, resetURL string) error
 	SendTestEmail(ctx context.Context, to string, userID uuid.UUID) error
+	SendAdminAlert(ctx context.Context, subject, message string) error
+	SendBankExpiryWarning(ctx context.Context, user entity.User, connection entity.BankConnection, daysRemaining int) error
 }
 
 // PlannedTransactionUseCase covers the management of user-defined manual transactions.

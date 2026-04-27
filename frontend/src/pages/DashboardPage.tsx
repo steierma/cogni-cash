@@ -12,11 +12,11 @@ import { transactionService } from '../api/services/transactionService';
 import { payslipService } from '../api/services/payslipService';
 import { forecastingService } from '../api/services/forecastingService';
 import { subscriptionService } from '../api/services/subscriptionService';
-import { settingsService } from '../api/services/settingsService';
 import type { BankStatementSummary } from "../api/types/bank";
 import type { Transaction, TransactionAnalytics, CashFlowForecast } from "../api/types/transaction";
 import type { Payslip } from "../api/types/payslip";
 import { fmtCurrency, fmtDate, getLocalISODate } from '../utils/formatters';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
 import CategoryBadge from '../components/CategoryBadge';
 
 // ── helpers ──────────────────────────────────────────────────────────────────
@@ -284,10 +284,8 @@ export default function DashboardPage() {
         queryFn: () => transactionService.fetchAnalytics(hideReconciled),
     });
 
-    const { data: baseCurrency = 'EUR' } = useQuery({
-        queryKey: ['settings', 'BASE_DISPLAY_CURRENCY'],
-        queryFn: () => settingsService.fetchSettings().then((s) => s['BASE_DISPLAY_CURRENCY'] || 'EUR'),
-    });
+    const { data: settings } = useEffectiveSettings();
+    const baseCurrency = settings?.['BASE_DISPLAY_CURRENCY'] || 'EUR';
 
     const isLoading = statementsQuery.isLoading || transactionsQuery.isLoading || analyticsQuery.isLoading;
     const isError = statementsQuery.isError || transactionsQuery.isError || analyticsQuery.isError;
@@ -309,7 +307,7 @@ export default function DashboardPage() {
         : 1;
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
+        <div className="space-y-6 pb-20 animate-in fade-in duration-300">
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
                 <div>

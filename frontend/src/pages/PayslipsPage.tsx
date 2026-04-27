@@ -2,10 +2,12 @@ import {useState, useRef, useMemo, useEffect} from 'react';
 import {useMutation, useQuery, useQueryClient} from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import {
-    Briefcase, Pencil, TrendingUp, Wallet, Filter, Columns, Check, FileUp, ArrowUpRight, ArrowDownRight, BrainCircuit, BarChart3
+    Briefcase, Pencil, TrendingUp, Wallet, Filter, FileUp, ArrowUpRight, ArrowDownRight, BrainCircuit, BarChart3
 } from 'lucide-react';
-import { payslipService } from '../api/services/payslipService';
-import { settingsService } from '../api/services/settingsService';
+import {payslipService} from '../api/services/payslipService';
+import {settingsService} from '../api/services/settingsService';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
+import { getNamespacedKey } from '../api/utils/settingsHelper';
 import type { Payslip } from "../api/types/payslip";
 import {fmtCurrency} from '../utils/formatters';
 
@@ -81,7 +83,7 @@ export default function PayslipsPage() {
         queryKey: ['payslips', 'summary'],
         queryFn: () => payslipService.fetchSummary()
     });
-    const {data: settings} = useQuery({queryKey: ['settings'], queryFn: () => settingsService.fetchSettings()});
+    const {data: settings} = useEffectiveSettings();
 
     useEffect(() => {
         if (settings?.payslips_visible_cols) {
@@ -163,7 +165,8 @@ export default function PayslipsPage() {
     const toggleColumn = (col: ColKey) => {
         setVisibleCols(prev => {
             const next = {...prev, [col]: !prev[col]};
-            updateSettingsMut.mutate({payslips_visible_cols: JSON.stringify(next)});
+            const nsKey = getNamespacedKey('payslips_visible_cols', true);
+            updateSettingsMut.mutate({ [nsKey]: JSON.stringify(next) });
             return next;
         });
     };
@@ -295,7 +298,7 @@ export default function PayslipsPage() {
     }
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="space-y-6 pb-10 animate-in fade-in slide-in-from-bottom-4 duration-500">
             <LLMEnforcementWarning />
             {/* Header */}
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -396,33 +399,6 @@ export default function PayslipsPage() {
                     <button onClick={handleApplyFilters}
                             className="px-4 py-1.5 bg-gray-900 dark:bg-gray-100 text-white dark:text-gray-900 text-sm font-medium rounded-lg hover:bg-gray-800 dark:hover:bg-gray-200 transition-colors">{t('payslips.applyFilters')}
                     </button>
-                </div>
-                <div className="relative">
-                    <button onClick={() => setShowColMenu(!showColMenu)}
-                            className="flex items-center gap-2 px-3 py-1.5 bg-gray-50 dark:bg-gray-800 border border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 text-sm rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors">
-                        <Columns size={16}/> {t('payslips.columns')}
-                    </button>
-                    {showColMenu && (
-                        <div
-                            className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-10 overflow-hidden p-2 space-y-1">
-                            {[{key: 'period', label: t('payslips.modals.period')}, {key: 'employer', label: t('payslips.modals.employer')}, {
-                                key: 'gross',
-                                label: t('payslips.modals.gross')
-                            }, {key: 'net', label: t('payslips.modals.net')}, {
-                                key: 'adjNet',
-                                label: t('payslips.adjustedNet')
-                            }, {key: 'payout', label: t('payslips.modals.payout')}, {key: 'leasing', label: t('payslips.modals.leasing')}].map(({
-                                                                                                                   key,
-                                                                                                                   label
-                                                                                                               }) => (
-                                <button key={key} onClick={() => toggleColumn(key as ColKey)}
-                                        className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-colors">
-                                    {label} {visibleCols[key as ColKey] &&
-                                    <Check size={16} className="text-indigo-600 dark:text-indigo-400"/>}
-                                </button>
-                            ))}
-                        </div>
-                    )}
                 </div>
             </div>
 
@@ -548,6 +524,9 @@ export default function PayslipsPage() {
                 excludedBonuses={excludedBonuses}
                 excludeLeasing={excludeLeasing}
                 useProportionalMath={useProportionalMath}
+                showColMenu={showColMenu}
+                onToggleColMenu={() => setShowColMenu(!showColMenu)}
+                onToggleColumn={toggleColumn}
             />
 
             {/* Modals */}

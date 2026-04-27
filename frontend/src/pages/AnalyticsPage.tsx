@@ -5,7 +5,6 @@ import { useSearchParams } from 'react-router-dom';
 import { transactionService } from '../api/services/transactionService';
 import { categoryService } from '../api/services/categoryService';
 import { payslipService } from '../api/services/payslipService';
-import { settingsService } from '../api/services/settingsService';
 import { BarChart3, Filter, X, ArrowRightLeft, TrendingUp, TrendingDown, Wallet, Search, BarChart as BarChartIcon, Briefcase, Activity } from 'lucide-react';
 import {
     AreaChart, Area, BarChart, Bar, LineChart, Line, XAxis, YAxis, CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Cell
@@ -14,6 +13,7 @@ import type { Transaction } from "../api/types/transaction";
 import type { Category } from "../api/types/category";
 import type { Payslip } from "../api/types/payslip";
 import { fmtCurrency } from '../utils/formatters';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
 
 interface FilterState {
     from: string;
@@ -52,10 +52,8 @@ export default function AnalyticsPage() {
         queryFn: () => payslipService.fetchPayslips(),
     });
 
-    const { data: baseCurrency = 'EUR' } = useQuery({
-        queryKey: ['settings', 'BASE_DISPLAY_CURRENCY'],
-        queryFn: () => settingsService.fetchSettings().then((s) => s['BASE_DISPLAY_CURRENCY'] || 'EUR'),
-    });
+    const { data: settings } = useEffectiveSettings();
+    const baseCurrency = settings?.['BASE_DISPLAY_CURRENCY'] || 'EUR';
 
     // --- State: Filters ---
     const [minDate, maxDate] = useMemo((): [string, string] => {
@@ -248,7 +246,7 @@ export default function AnalyticsPage() {
     if (isLoadingTxns) return <div className="p-8 text-gray-500 animate-pulse">{t('common.loading')}</div>;
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
+        <div className="space-y-6 pb-20 animate-in fade-in duration-300">
             <div>
                 <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                     <BarChart3 className="text-indigo-600 dark:text-indigo-400" /> {t('analytics.title')}

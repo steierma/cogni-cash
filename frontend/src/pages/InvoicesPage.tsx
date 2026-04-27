@@ -3,18 +3,19 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router-dom';
 import {
-    Trash2, Download, Edit2, Upload, X, Search, Database,
-    ChevronUp, ChevronDown, Loader2, Filter, BarChart3,
-    TrendingUp, Store, CheckSquare, Square, Layers, FileText, Share2, Users, Eye, PlusCircle
+    Upload, X, Search, Database,
+    Filter, BarChart3,
+    TrendingUp, Store, Layers, FileText, PlusCircle
 } from 'lucide-react';
 
 import ShareInvoiceModal from '../components/ShareInvoiceModal';
 import { EditInvoiceModal, PreviewInvoiceModal } from '../components/invoices/InvoiceModals';
 import { InvoiceForm } from '../components/invoices/InvoiceForm';
+import InvoiceTable from '../components/invoices/InvoiceTable';
 import { invoiceService, type InvoiceUpdatePayload } from '../api/services/invoiceService';
 import { categoryService } from '../api/services/categoryService';
 import { authService } from '../api/services/authService';
-import { fmtCurrency, fmtDate } from '../utils/formatters';
+import { fmtCurrency } from '../utils/formatters';
 import type { Invoice } from "../api/types/invoice";
 import type { Category } from "../api/types/category";
 import type { User } from "../api/types/system";
@@ -220,6 +221,21 @@ export default function InvoicesPage() {
 
     const updateMutation = useMutation({
         mutationFn: ({ id, data }: { id: string, data: InvoiceUpdatePayload }) => invoiceService.update(id, data),
+        onMutate: async ({ id, data }) => {
+            await qc.cancelQueries({ queryKey: ['invoices'] });
+            const previousInvoices = qc.getQueryData<Invoice[]>(['invoices', appliedFilters.source]);
+            if (previousInvoices) {
+                qc.setQueryData(['invoices', appliedFilters.source], previousInvoices.map(inv => 
+                    inv.id === id ? { ...inv, ...data } : inv
+                ));
+            }
+            return { previousInvoices };
+        },
+        onError: (_err, _vars, context) => {
+            if (context?.previousInvoices) {
+                qc.setQueryData(['invoices', appliedFilters.source], context.previousInvoices);
+            }
+        },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['invoices'] });
             setEditingInvoice(null);
@@ -229,8 +245,23 @@ export default function InvoicesPage() {
     });
 
     const batchCatMutation = useMutation({
-        mutationFn: async ({ ids, categoryId }: { ids: string[]; categoryId: string }) => {
-            await Promise.all(ids.map(id => invoiceService.update(id, { category_id: categoryId || null })));
+        mutationFn: ({ ids, categoryId }: { ids: string[]; categoryId: string | null }) => 
+            invoiceService.updateCategoryBulk(ids, categoryId),
+        onMutate: async ({ ids, categoryId }) => {
+            await qc.cancelQueries({ queryKey: ['invoices'] });
+            const previousInvoices = qc.getQueryData<Invoice[]>(['invoices', appliedFilters.source]);
+            if (previousInvoices) {
+                const idSet = new Set(ids);
+                qc.setQueryData(['invoices', appliedFilters.source], previousInvoices.map(inv => 
+                    idSet.has(inv.id) ? { ...inv, category_id: categoryId } : inv
+                ));
+            }
+            return { previousInvoices };
+        },
+        onError: (_err, _vars, context) => {
+            if (context?.previousInvoices) {
+                qc.setQueryData(['invoices', appliedFilters.source], context.previousInvoices);
+            }
         },
         onSuccess: () => {
             qc.invalidateQueries({ queryKey: ['invoices'] });
@@ -352,17 +383,35 @@ export default function InvoicesPage() {
         return rows;
     }, [invoices, appliedFilters, sortKey, sortDir, categories, me?.id]);
 
-    const toggleSelect = (id: string) => {
-        const next = new Set(selectedIds);
-        if (next.has(id)) next.delete(id);
-        else next.add(id);
-        setSelectedIds(next);
-    };
+    const toggleSelect = React.useCallback((id: string) => {
+        setSelectedIds(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    }, []);
 
-    const toggleSelectAll = () => {
-        if (selectedIds.size === filtered.length && filtered.length > 0) setSelectedIds(new Set());
-        else setSelectedIds(new Set(filtered.map((i: Invoice) => i.id)));
-    };
+    const toggleSelectAll = React.useCallback(() => {
+        setSelectedIds(prev => {
+            if (prev.size === filtered.length && filtered.length > 0) return new Set();
+            return new Set(filtered.map((i: Invoice) => i.id));
+        });
+    }, [filtered]);
+
+    const handleCategoryChange = React.useCallback((id: string, categoryId: string | null) => {
+        updateMutation.mutate({ id, data: { category_id: categoryId } });
+    }, [updateMutation]);
+
+    const handleDownload = React.useCallback((id: string, vendorName?: string) => {
+        invoiceService.downloadFile(id, vendorName);
+    }, []);
+
+    const handleDelete = React.useCallback((id: string) => {
+        if (confirm(t('common.deleteConfirm', 'Are you sure you want to delete this?'))) {
+            deleteMutation.mutate(id);
+        }
+    }, [deleteMutation, t]);
 
     const isDraftDirty = JSON.stringify(draftFilters) !== JSON.stringify(appliedFilters);
     const hasAppliedFilters = JSON.stringify(appliedFilters) !== JSON.stringify(initialFilters);
@@ -408,11 +457,8 @@ export default function InvoicesPage() {
         };
     }, [filtered, categories]);
 
-    const renderSortIcon = (k: SortKey) =>
-        sortKey === k ? (sortDir === 'asc' ? <ChevronUp size={12} /> : <ChevronDown size={12} />) : null;
-
     return (
-        <div className="max-w-7xl mx-auto space-y-6 pb-28 animate-in fade-in duration-300">
+        <div className="space-y-6 pb-28 animate-in fade-in duration-300">
             {/* Header */}
             <div className="flex items-center justify-between">
                 <div>
@@ -691,151 +737,25 @@ export default function InvoicesPage() {
 
             {/* Data Table */}
             {!isLoading && filtered.length > 0 && (
-                <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden relative">
-                    <div className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-700">
-                        <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-800 text-sm">
-                            <thead className="bg-gray-50 dark:bg-gray-800/50 text-xs uppercase text-gray-400 dark:text-gray-500 tracking-wide">
-                            <tr>
-                                <th className="px-4 py-3 text-left w-10">
-                                    <button
-                                        type="button"
-                                        onClick={toggleSelectAll}
-                                        className={`transition-colors ${selectedIds.size === filtered.length && filtered.length > 0 ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400 dark:hover:text-gray-400'}`}
-                                    >
-                                        {selectedIds.size === filtered.length && filtered.length > 0 ? <CheckSquare size={16}/> : <Square size={16}/>}
-                                    </button>
-                                </th>
-                                <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none whitespace-nowrap" onClick={() => toggleSort('issued_at')}>
-                                    <span className="inline-flex items-center gap-1">{t('invoices.date')} {renderSortIcon('issued_at')}</span>
-                                </th>
-                                <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none whitespace-nowrap" onClick={() => toggleSort('vendor')}>
-                                    <span className="inline-flex items-center gap-1">{t('invoices.vendor')} {renderSortIcon('vendor')}</span>
-                                </th>
-                                <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none whitespace-nowrap" onClick={() => toggleSort('category')}>
-                                    <span className="inline-flex items-center gap-1">{t('invoices.category')} {renderSortIcon('category')}</span>
-                                </th>
-                                <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none" onClick={() => toggleSort('description')}>
-                                    <span className="inline-flex items-center gap-1">{t('invoices.description')} {renderSortIcon('description')}</span>
-                                </th>
-                                <th className="px-4 py-3 text-right cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none whitespace-nowrap" onClick={() => toggleSort('amount')}>
-                                    <span className="inline-flex items-center gap-1 justify-end">{t('invoices.amount')} {renderSortIcon('amount')}</span>
-                                </th>
-                                <th className="px-4 py-3 text-right">{t('common.actions')}</th>
-                            </tr>
-                            </thead>
-                            <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
-                            {filtered.map((inv: Invoice) => {
-                                const currentCat = categories.find((c) => c.id === inv.category_id);
-                                const isSelected = selectedIds.has(inv.id);
-                                const hasSplits = inv.splits && inv.splits.length > 0;
-
-                                return (
-                                    <tr key={inv.id} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''}`}>
-                                        <td className="px-4 py-3">
-                                            <button
-                                                type="button"
-                                                onClick={() => toggleSelect(inv.id)}
-                                                className={`transition-colors ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400 dark:hover:text-gray-400'}`}
-                                            >
-                                                {isSelected ? <CheckSquare size={16}/> : <Square size={16}/>}
-                                            </button>
-                                        </td>
-                                        <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap">
-                                            {fmtDate(inv.issued_at, 'short')}
-                                        </td>
-                                        <td className="px-4 py-3 text-gray-800 dark:text-gray-200 font-medium whitespace-nowrap">
-                                            <div className="flex items-center gap-2">
-                                                {inv.user_id !== me?.id && (
-                                                    <span title={t('transactions.table.shared')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 uppercase tracking-tighter">
-                                                        <Users size={9} /> {t('transactions.table.shared')}
-                                                    </span>
-                                                )}
-                                                {inv.vendor?.name || t('invoices.unknownVendor')}
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3">
-                                            {hasSplits ? (
-                                                <span className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-indigo-50 dark:bg-indigo-900/20 text-indigo-600 dark:text-indigo-400 text-xs font-bold border border-indigo-100 dark:border-indigo-800/50 uppercase tracking-wider">
-                                                    <Layers size={10} /> {t('invoices.split', 'Split')}
-                                                </span>
-                                            ) : (
-                                                <select
-                                                    value={currentCat?.id ?? ''}
-                                                    onChange={(e) => updateMutation.mutate({ id: inv.id, data: { category_id: e.target.value || null }})}
-                                                    className="text-xs rounded-lg border border-gray-200 dark:border-gray-700 px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500 max-w-[11rem] truncate transition-colors hover:border-indigo-300 dark:hover:border-indigo-500"
-                                                    style={currentCat ? { color: currentCat.color, borderColor: currentCat.color + '55' } : undefined}
-                                                >
-                                                    <option value="">{t('transactions.table.unset')}</option>
-                                                    {categories.filter(c => !c.deleted_at || c.id === currentCat?.id).map((c) => (
-                                                        <option key={c.id} value={c.id}>{c.name}</option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                        </td>
-                                        <td className="px-4 py-3 text-gray-600 dark:text-gray-400 max-w-[12rem] sm:max-w-xs truncate" title={inv.description}>
-                                            {inv.description || t('invoices.emptyDescription')}
-                                        </td>
-                                        <td className="px-4 py-3 text-right font-mono font-medium text-gray-900 dark:text-gray-100 whitespace-nowrap">
-                                            <div className="flex flex-col items-end">
-                                                <span>{fmtCurrency(inv.amount, inv.currency)}</span>
-                                                {inv.base_currency && inv.base_currency !== inv.currency && inv.base_amount !== 0 && (
-                                                    <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal">
-                                                        {fmtCurrency(inv.base_amount, inv.base_currency)}
-                                                    </span>
-                                                )}
-                                            </div>
-                                        </td>
-                                        <td className="px-4 py-3 text-right">
-                                            <div className="flex justify-end space-x-1">
-                                                <button
-                                                    onClick={() => handlePreview(inv)}
-                                                    disabled={isPreviewLoading === inv.id}
-                                                    title={t('invoices.preview')}
-                                                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-fuchsia-600 dark:hover:text-fuchsia-400 hover:bg-fuchsia-50 dark:hover:bg-fuchsia-900/20 rounded-lg transition-colors disabled:opacity-50"
-                                                >
-                                                    {isPreviewLoading === inv.id ? <Loader2 size={16} className="animate-spin" /> : <Eye size={16} />}
-                                                </button>
-                                                <button
-                                                    onClick={() => invoiceService.downloadFile(inv.id, inv.vendor?.name)}
-                                                    title={t('invoices.download')}
-                                                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                >
-                                                    <Download size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => setSharingInvoice(inv)}
-                                                    title={t('common.share')}
-                                                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                >
-                                                    <Share2 size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => setEditingInvoice(inv)}
-                                                    title={t('invoices.edit')}
-                                                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                >
-                                                    <Edit2 size={16} />
-                                                </button>
-                                                <button
-                                                    onClick={() => deleteMutation.mutate(inv.id)}
-                                                    disabled={deleteMutation.isPending}
-                                                    title={t('common.delete')}
-                                                    className="p-1.5 text-gray-400 dark:text-gray-500 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors disabled:opacity-50"
-                                                >
-                                                    <Trash2 size={16} />
-                                                </button>
-                                            </div>
-                                        </td>
-                                    </tr>
-                                );
-                            })}
-                            </tbody>
-                        </table>
-                    </div>
-                    <div className="px-4 py-3 border-t border-gray-100 dark:border-gray-800 text-xs text-gray-400 dark:text-gray-500 text-right">
-                        {t('transactions.table.showing', { count: filtered.length })}
-                    </div>
-                </div>
+                <InvoiceTable
+                    invoices={filtered}
+                    categories={categories}
+                    currentUserId={me?.id}
+                    selectedIds={selectedIds}
+                    onToggleSelect={toggleSelect}
+                    onToggleSelectAll={toggleSelectAll}
+                    sortKey={sortKey}
+                    sortDir={sortDir}
+                    onSort={toggleSort}
+                    onCategoryChange={handleCategoryChange}
+                    onPreview={handlePreview}
+                    onDownload={handleDownload}
+                    onShare={setSharingInvoice}
+                    onEdit={setEditingInvoice}
+                    onDelete={handleDelete}
+                    isPreviewLoading={isPreviewLoading}
+                    isDeleting={deleteMutation.isPending}
+                />
             )}
 
             {/* Batch Action Floating Bar */}
@@ -858,7 +778,7 @@ export default function InvoicesPage() {
 
                                     batchCatMutation.mutate({
                                         ids: Array.from(selectedIds),
-                                        categoryId: val === 'unset' ? '' : val
+                                        categoryId: val === 'unset' ? null : val
                                     });
                                     e.target.value = 'placeholder';
                                 }}

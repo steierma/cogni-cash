@@ -113,13 +113,13 @@ backend/.env:
 up: backend/.env
 	@mkdir -p tmp
 	@echo ">>> Starting containers..."
-	docker compose up -d 2>&1 | tee $(ERR_LOG)
+	@set -o pipefail; docker compose up -d 2>&1 | tee $(ERR_LOG)
 	@echo ">>> Up finished."
 
 build-up:
 	@mkdir -p tmp
 	@echo ">>> Running build and up with live progress logging to $(ERR_LOG)..."
-	@if ! ($(MAKE) build && $(MAKE) up) 2>&1 | tee $(ERR_LOG); then \
+	@set -o pipefail; if ! ($(MAKE) build && $(MAKE) up) 2>&1 | tee $(ERR_LOG); then \
 		echo ">>> ❌ ERROR: Process halted due to an error. Check $(ERR_LOG) for details."; \
 		exit 1; \
 	fi
@@ -154,13 +154,13 @@ build: build-backend build-frontend
 build-backend:
 	@echo ">>> Building backend image: $(BACKEND_IMAGE)"
 	@mkdir -p tmp
-	docker build -t $(BACKEND_IMAGE) $(BACKEND_DIR) 2>&1 | tee $(ERR_LOG)
+	@set -o pipefail; docker build -t $(BACKEND_IMAGE) $(BACKEND_DIR) 2>&1 | tee $(ERR_LOG)
 	@echo ">>> Done: $(BACKEND_IMAGE)"
 
 build-frontend:
 	@echo ">>> Building frontend image: $(FRONTEND_IMAGE)"
 	@mkdir -p tmp
-	docker build --build-arg VITE_ENABLE_SANDBOX=true -t $(FRONTEND_IMAGE) $(FRONTEND_DIR) 2>&1 | tee $(ERR_LOG)
+	@set -o pipefail; docker build --build-arg VITE_ENABLE_SANDBOX=true -t $(FRONTEND_IMAGE) $(FRONTEND_DIR) 2>&1 | tee $(ERR_LOG)
 	@echo ">>> Done: $(FRONTEND_IMAGE)"
 
 # ── Manual Deploy ─────────────────────────────────────────────────────────────

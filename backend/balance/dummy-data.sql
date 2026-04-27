@@ -95,7 +95,7 @@ BEGIN
     ON CONFLICT (key, user_id) DO NOTHING;
 
     INSERT INTO settings (key, user_id, value, is_sensitive)
-    VALUES ('llm_profiles', admin_id, '[{"id":"def-gemini","name":"Global Gemini","type":"gemini","url":"https://generativelanguage.googleapis.com","token":"","model":"gemini-1.5-flash","isActive":true}]', false)
+    VALUES ('llm_profiles', admin_id, '[{"id":"def-gemini","name":"Global Gemini","type":"gemini","url":"https://generativelanguage.googleapis.com","token":"","model":"gemini-1.5-flash","is_active":true}]', false)
     ON CONFLICT (key, user_id) DO NOTHING;
 
     -- 3. Loop month by month for 10 years

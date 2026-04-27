@@ -9,6 +9,8 @@ import {
 } from 'lucide-react';
 import {settingsService} from '../api/services/settingsService';
 import {authService} from '../api/services/authService';
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
+import { getNamespacedKey } from '../api/utils/settingsHelper';
 import type { User, SystemInfo } from "../api/types/system";
 
 interface NavItem {
@@ -67,10 +69,7 @@ export default function Layout({children}: { children?: React.ReactNode }) {
     const navigate = useNavigate();
     const queryClient = useQueryClient();
 
-    const {data: settings} = useQuery<Record<string, string>>({
-        queryKey: ['settings'],
-        queryFn: settingsService.fetchSettings,
-    });
+    const {data: settings} = useEffectiveSettings();
 
     const {data: currentUser} = useQuery<User>({
         queryKey: ['currentUser'],
@@ -111,10 +110,13 @@ export default function Layout({children}: { children?: React.ReactNode }) {
     const settingsMut = useMutation({
         mutationFn: (newSettings: Record<string, string>) => settingsService.updateSettings(newSettings),
         // Optimistic UI Update: Apply changes instantly to the UI before the server responds
-        onMutate: async (newSettings) => {
+        onMutate: async (partialSettings) => {
             await queryClient.cancelQueries({ queryKey: ['settings'] });
-            const previousSettings = queryClient.getQueryData(['settings']);
-            queryClient.setQueryData(['settings'], newSettings);
+            const previousSettings = queryClient.getQueryData<Record<string, string>>(['settings']);
+            queryClient.setQueryData(['settings'], {
+                ...previousSettings,
+                ...partialSettings
+            });
             return { previousSettings };
         },
         // TS6133 behoben: _err und _newSettings mit Unterstrich markieren
@@ -129,12 +131,13 @@ export default function Layout({children}: { children?: React.ReactNode }) {
 
     const cycleTheme = () => {
         const nextTheme = theme === 'light' ? 'dark' : theme === 'dark' ? 'system' : 'light';
-        settingsMut.mutate({...(settings || {}), theme: nextTheme});
+        settingsMut.mutate({ theme: nextTheme });
     };
 
     const toggleSidebar = () => {
         const nextState = !isDesktopExpanded;
-        settingsMut.mutate({...(settings || {}), sidebar_expanded: String(nextState)});
+        const key = getNamespacedKey('sidebar_expanded', true);
+        settingsMut.mutate({ [key]: String(nextState) });
     };
 
     const handleLogout = async () => {

@@ -45,7 +45,9 @@ See the [Installation Guide](./INSTALL.md#option-d--standalone-docker-quickest) 
 <summary><h2>🔍 Dive Deeper: All Features & Capabilities (Click to expand)</h2></summary>
 
 * **🧠 Local-First AI Intelligence:** Leverage local LLMs to automatically parse and categorize **Invoices, Payslips, and Bank Statements**. Supports **Multi-LLM Profiles** (Gemini, Ollama, OpenAI/Groq) with per-user overrides and global admin enforcement settings. Features **Split Categorization** for invoices, allowing for granular tracking (e.g., splitting a supermarket receipt into multiple categories). Supports PDF and image formats via multimodal Gemini or AI-fallback paths. Includes a **Hybrid Matcher** checking for high-confidence (65%+) historical matches before calling the AI.
-* **📊 Global Multi-Currency Support:** Master your international finances with a robust, snapshot-based multi-currency system. Ensures 100% accuracy in analytics and forecasting across different regions and currencies.
+* **⚡ High-Performance Management:** Handle tens of thousands of transactions with ease. Features **Frontend Row Virtualization** for buttery-smooth scrolling and **Atomic Bulk Updates** to process hundreds of changes in a single network request. Includes **Optimistic UI Updates** for instantaneous feedback.
+* **📊 Global Multi-Currency Support:**
+ Master your international finances with a robust, snapshot-based multi-currency system. Ensures 100% accuracy in analytics and forecasting across different regions and currencies.
 * **🔮 Predictive Intelligence:** Look into your financial future with the **Forecasting Engine**. Automatically detects recurring patterns from your subscription history and manually planned transactions. Includes **Forecast Fine-Tuning** to mute or exclude specific projections.
 * **🛡️ Privacy-First Integrity:** We maintain a strictly **personal-data-free codebase**. Our automated "deep-scrubbing" policy ensures all test data, logs, and documentation examples are completely anonymized or synthetic.
 * **📜 Professional Payslip Management:** Master your HR documents with a dedicated **Payslip Engine**. Automatically extract Gross, Net, Payout, and Bonuses. Includes a **Split-View Preview** to compare the original PDF with the extracted data.
@@ -73,8 +75,11 @@ Manage your finances on the go with the **CogniCash Mobile App**. Built with Flu
 ### ✨ Key Mobile Features
 
 * **🤖 Local-First AI Recognition:** Snap a photo or upload a PDF of your payslips, bank statements, or invoices. The app uses local AI logic via your self-hosted backend.
+* **🚀 Guided Onboarding:** A welcoming, multi-step flow to get you started, including feature highlights and a robust backend connection tester.
 * **📜 Payslip Master View:** Detailed management of your salary history, bonuses, and tax classes with high-fidelity charts.
 * **🏦 ING DIBA & More:** Native support for the **ING DIBA offline parser**.
+* **👥 Sharing Dashboard:** Collaborative balance tracking ("Who Paid What") and shared categories list with visual indicators.
+* **📸 Multi-Page Document Scanning:** Capture multiple pages, auto-convert them to PDF, and upload directly to your Document Vault on the go.
 * **Offline-First:** View and manage your data even without an internet connection.
 * **Native Performance:** Smooth 60fps animations and transitions.
 * **🔁 Subscription Discovery & Management:** Track recurring costs and review AI-suggested subscriptions in the **Discovery Inbox** on the go.
@@ -116,7 +121,8 @@ To keep this repository easy to navigate, detailed documentation has been split 
 * **[Windows Installation Guide](WINDOWS_INSTALL.md):** Simplified, step-by-step guide for Windows users.
 * **[Deployment & Setup Guide](docs/DEPLOYMENT.md):** Advanced deployment, Environment Variables, and Make commands.
 * **[User Guide & UI Configuration](docs/USER_GUIDE.md):** Frontend capabilities, System Config, and i18n details.
-* **[Architecture & Roadmap](docs/ARCHITECTURE.md):** Hexagonal design details, Tech Stack, and Project Roadmap.
-* **[API Reference](docs/API_REFERENCE.md):** Overview of the RESTful API endpoints.
+* [Architecture & Roadmap](docs/ARCHITECTURE.md): Hexagonal design details, Tech Stack, and Project Roadmap.
+* [AI-Driven Setup Blueprint](docs/concepts/AI_DRIVEN_PROJECT_SETUP.md): Blueprint for bootstrapping other projects with this AI-driven setup.
+* [API Reference](docs/API_REFERENCE.md): Overview of the RESTful API endpoints.
 * **[Database Schema](docs/DATABASE_SCHEMA.md):** Comprehensive ERD, table definitions, and migration strategies.
 ```

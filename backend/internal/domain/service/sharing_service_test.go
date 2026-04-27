@@ -107,6 +107,9 @@ func (m *mockInvoiceRepoForSharing) FindAll(ctx context.Context, filter entity.I
 	args := m.Called(ctx, filter)
 	return args.Get(0).([]entity.Invoice), args.Error(1)
 }
+func (m *mockInvoiceRepoForSharing) UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return m.Called(ctx, ids, categoryID, userID).Error(0)
+}
 func (m *mockInvoiceRepoForSharing) FindByID(ctx context.Context, id uuid.UUID, userID uuid.UUID) (entity.Invoice, error) { 
 	args := m.Called(ctx, id, userID)
 	return args.Get(0).(entity.Invoice), args.Error(1)
@@ -182,6 +185,9 @@ func (m *mockBankStmtRepoForSharing) UpdateTransactionBaseAmount(ctx context.Con
 	return nil
 }
 func (m *mockBankStmtRepoForSharing) UpdateTransactionCategory(ctx context.Context, txnHash string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return nil
+}
+func (m *mockBankStmtRepoForSharing) UpdateTransactionCategoriesBulk(ctx context.Context, txnHashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	return nil
 }
 func (m *mockBankStmtRepoForSharing) UpdateTransactionSubscription(ctx context.Context, txnHash string, subscriptionID *uuid.UUID, userID uuid.UUID) error {

@@ -48,6 +48,10 @@ func (s *TransactionService) UpdateCategory(ctx context.Context, hash string, ca
 	return s.repo.UpdateTransactionCategory(ctx, hash, categoryID, userID)
 }
 
+func (s *TransactionService) UpdateCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return s.repo.UpdateTransactionCategoriesBulk(ctx, hashes, categoryID, userID)
+}
+
 func (s *TransactionService) MarkAsReviewed(ctx context.Context, hash string, userID uuid.UUID) error {
 	return s.repo.MarkTransactionReviewed(ctx, hash, userID)
 }
@@ -354,6 +358,10 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 				hashToDedupKey[tx.Hash] = tx.Description + "|" + tx.CounterpartyName
 			}
 
+			// Group successful categorizations by category ID for bulk update
+			catToHashes := make(map[uuid.UUID][]string)
+			dedupKeyToCatName := make(map[string]string)
+
 			for _, res := range results {
 				var validCategoryID *uuid.UUID
 				for _, knownCat := range categories {
@@ -366,26 +374,41 @@ func (s *TransactionService) runCategorizeLoop(ctx context.Context, userID uuid.
 				if validCategoryID != nil {
 					dedupKey := hashToDedupKey[res.Hash]
 					hashesToUpdate := descToHashes[dedupKey]
+					catToHashes[*validCategoryID] = append(catToHashes[*validCategoryID], hashesToUpdate...)
+					dedupKeyToCatName[dedupKey] = res.Category
 
 					// Add successful categorization to examples to improve LLM accuracy for subsequent batches
 					if len(examples) < 50 && len(hashesToUpdate) > 0 {
 						txRef := uniqueForLLM[dedupKey]
 						examples = append(examples, entity.CategorizationExample{
-							Description:         txRef.Description,
-							CounterpartyName:    txRef.CounterpartyName,
-							Category:            res.Category,
+							Description:      txRef.Description,
+							CounterpartyName: txRef.CounterpartyName,
+							Category:         res.Category,
 						})
 					}
+				}
+			}
 
-					for _, h := range hashesToUpdate {
-						if err := s.repo.UpdateTransactionCategory(ctx, h, validCategoryID, userID); err != nil {
-							s.Logger.Error("Failed to update transaction category", "hash", h, "error", err)
-						} else {
-							successfulResults = append(successfulResults, port.CategorizedTransaction{
-								Hash:     h,
-								Category: res.Category,
-							})
+			// Perform bulk updates per category
+			for catID, hashes := range catToHashes {
+				id := catID
+				if err := s.repo.UpdateTransactionCategoriesBulk(ctx, hashes, &id, userID); err != nil {
+					s.Logger.Error("Failed to update transaction categories bulk", "error", err)
+				} else {
+					// We need to find the category name for these hashes
+					catName := ""
+					for _, knownCat := range categories {
+						if knownCat.ID == catID {
+							catName = knownCat.Name
+							break
 						}
+					}
+
+					for _, h := range hashes {
+						successfulResults = append(successfulResults, port.CategorizedTransaction{
+							Hash:     h,
+							Category: catName,
+						})
 					}
 				}
 			}

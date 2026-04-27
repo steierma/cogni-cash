@@ -41,6 +41,7 @@ func (m *minimalMockBankStmtRepo) SearchTransactions(_ context.Context, _ entity
 func (m *minimalMockBankStmtRepo) GetCategorizationExamples(_ context.Context, _ uuid.UUID, _ int) ([]entity.CategorizationExample, error) { return nil, nil }
 func (m *minimalMockBankStmtRepo) FindMatchingCategory(_ context.Context, _ uuid.UUID, _ port.TransactionToCategorize) (*uuid.UUID, error) { return nil, nil }
 func (m *minimalMockBankStmtRepo) UpdateTransactionCategory(_ context.Context, _ string, _ *uuid.UUID, _ uuid.UUID) error { return nil }
+func (m *minimalMockBankStmtRepo) UpdateTransactionCategoriesBulk(_ context.Context, _ []string, _ *uuid.UUID, _ uuid.UUID) error { return nil }
 func (m *minimalMockBankStmtRepo) UpdateTransactionSubscription(_ context.Context, _ string, _ *uuid.UUID, _ uuid.UUID) error { return nil }
 func (m *minimalMockBankStmtRepo) MarkTransactionReconciled(_ context.Context, _ string, _ uuid.UUID, _ uuid.UUID) error { return nil }
 func (m *minimalMockBankStmtRepo) MarkTransactionReviewed(_ context.Context, _ string, _ uuid.UUID) error { return nil }

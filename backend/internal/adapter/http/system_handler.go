@@ -175,6 +175,19 @@ func (h *SystemHandler) sendTestEmail(w http.ResponseWriter, r *http.Request) {
 		writeError(w, http.StatusUnauthorized, "unauthorized")
 		return
 	}
+
+	// Fetch user to check role
+	user, err := h.userSvc.GetUser(r.Context(), userID.String())
+	if err != nil {
+		writeError(w, http.StatusInternalServerError, "failed to verify permissions")
+		return
+	}
+
+	if user.Role != "admin" {
+		writeError(w, http.StatusForbidden, "forbidden: admin role required")
+		return
+	}
+
 	if err := h.notificationSvc.SendTestEmail(r.Context(), payload.To, userID); err != nil {
 		h.Logger.Error("Test email failed", "to", payload.To, "error", err)
 		writeError(w, http.StatusInternalServerError, "failed to send test email: "+err.Error())

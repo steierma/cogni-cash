@@ -216,7 +216,8 @@ func main() {
 	invoiceFileParser := invoiceparser.NewParser()
 
 	// Inject the text extractor into the LLM adapter so it can handle the fallback internally
-	llmClient := llmadapter.NewAdapter(settingsRepo, userRepo, invoiceFileParser, logger)
+	llmAdapterBase := llmadapter.NewAdapter(settingsRepo, userRepo, invoiceFileParser, logger)
+	llmClient := service.NewLLMNotifierDecorator(llmAdapterBase, notificationSvc, logger)
 
 	invoiceSvc := service.NewInvoiceService(invoiceRepo, llmClient, invoiceFileParser, categoryRepo, sharingRepo, logger)
 
@@ -370,6 +371,51 @@ func main() {
 			select {
 			case <-appCtx.Done():
 				logger.Info("Background worker: Payslip JSON import shutting down")
+				return
+			case <-time.After(interval):
+			}
+		}
+	}()
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		logger.Info("Background worker: Bank Expiry Notifier started")
+		for {
+			// Check once per day (or every 4 hours to be robust, but logic handles daily check)
+			interval := 4 * time.Hour
+
+			logger.Info("Checking for expiring bank connections...")
+			
+			// We warn 7 days before expiry
+			const warningDays = 7
+			conns, err := bankRepo.GetExpiringConnections(appCtx, warningDays)
+			if err != nil {
+				logger.Error("Bank Expiry Notifier: failed to fetch expiring connections", "error", err)
+			} else if len(conns) > 0 {
+				logger.Info("Found expiring connections", "count", len(conns))
+				for _, conn := range conns {
+					user, err := userRepo.FindByID(appCtx, conn.UserID)
+					if err != nil {
+						logger.Error("Bank Expiry Notifier: failed to fetch user", "user_id", conn.UserID, "error", err)
+						continue
+					}
+					
+					if err := notificationSvc.SendBankExpiryWarning(appCtx, user, conn, warningDays); err != nil {
+						logger.Error("Bank Expiry Notifier: failed to send warning", "connection_id", conn.ID, "user_id", conn.UserID, "error", err)
+						continue
+					}
+
+					now := time.Now()
+					if err := bankRepo.UpdateExpiryNotifiedAt(appCtx, conn.ID, &now); err != nil {
+						logger.Error("Bank Expiry Notifier: failed to mark notified", "connection_id", conn.ID, "error", err)
+					}
+				}
+			}
+
+			select {
+			case <-appCtx.Done():
+				logger.Info("Background worker: Bank Expiry Notifier shutting down")
 				return
 			case <-time.After(interval):
 			}

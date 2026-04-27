@@ -24,6 +24,7 @@ type mockTxnSvcBankStatementRepo struct {
 	FindTransactionsFunc          func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
 	SearchTransactionsFunc        func(ctx context.Context, filter entity.TransactionFilter) ([]entity.Transaction, error)
 	UpdateTransactionCategoryFunc func(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error
+	UpdateTransactionCategoriesBulkFunc func(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error
 	MarkTransactionReviewedFunc   func(ctx context.Context, hash string, userID uuid.UUID) error
 	MarkTransactionsReviewedBulkFunc func(ctx context.Context, hashes []string, userID uuid.UUID) error
 	FindMatchingCategoryFunc      func(ctx context.Context, userID uuid.UUID, tx port.TransactionToCategorize) (*uuid.UUID, error)
@@ -45,6 +46,12 @@ func (m *mockTxnSvcBankStatementRepo) SearchTransactions(ctx context.Context, fi
 func (m *mockTxnSvcBankStatementRepo) UpdateTransactionCategory(ctx context.Context, hash string, categoryID *uuid.UUID, userID uuid.UUID) error {
 	if m.UpdateTransactionCategoryFunc != nil {
 		return m.UpdateTransactionCategoryFunc(ctx, hash, categoryID, userID)
+	}
+	return nil
+}
+func (m *mockTxnSvcBankStatementRepo) UpdateTransactionCategoriesBulk(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+	if m.UpdateTransactionCategoriesBulkFunc != nil {
+		return m.UpdateTransactionCategoriesBulkFunc(ctx, hashes, categoryID, userID)
 	}
 	return nil
 }
@@ -140,6 +147,26 @@ func TestTransactionService_SimpleOperations(t *testing.T) {
 		svc := service.NewTransactionService(repo, nil, nil, nil, logger)
 
 		err := svc.UpdateCategory(ctx, hash, &catID, userID)
+		require.NoError(t, err)
+		assert.True(t, called)
+	})
+
+	t.Run("UpdateCategoriesBulk", func(t *testing.T) {
+		catID := uuid.New()
+		hashes := []string{"h1", "h2", "h3"}
+		called := false
+		repo := &mockTxnSvcBankStatementRepo{
+			UpdateTransactionCategoriesBulkFunc: func(ctx context.Context, h []string, cID *uuid.UUID, uID uuid.UUID) error {
+				assert.Equal(t, hashes, h)
+				assert.Equal(t, catID, *cID)
+				assert.Equal(t, userID, uID)
+				called = true
+				return nil
+			},
+		}
+		svc := service.NewTransactionService(repo, nil, nil, nil, logger)
+
+		err := svc.UpdateCategoriesBulk(ctx, hashes, &catID, userID)
 		require.NoError(t, err)
 		assert.True(t, called)
 	})
@@ -242,6 +269,12 @@ func TestTransactionService_AutoCategorize_HybridMatching(t *testing.T) {
 		},
 		UpdateTransactionCategoryFunc: func(ctx context.Context, hash string, cID *uuid.UUID, uID uuid.UUID) error {
 			updatedCategories[hash] = cID
+			return nil
+		},
+		UpdateTransactionCategoriesBulkFunc: func(ctx context.Context, hashes []string, categoryID *uuid.UUID, userID uuid.UUID) error {
+			for _, h := range hashes {
+				updatedCategories[h] = categoryID
+			}
 			return nil
 		},
 	}

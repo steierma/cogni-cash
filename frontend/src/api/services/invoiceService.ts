@@ -72,7 +72,11 @@ export const invoiceService = {
     delete: (id: string): Promise<void> =>
         api.delete(`invoices/${id}/`).then(() => undefined),
 
-    downloadFile: async (id: string, vendorName?: string): Promise<void> => {
+    updateCategoryBulk: (ids: string[], categoryId: string | null): Promise<void> =>
+        api.patch('invoices/bulk-category/', { ids, category_id: categoryId }).then(() => undefined),
+
+    downloadFile: async (id: string, vendorName?: string): Promise<void> =>
+ {
         const response = await api.get<Blob>(`invoices/${id}/download/`, {
             responseType: 'blob',
         });

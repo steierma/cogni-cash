@@ -73,6 +73,28 @@ func (s *BankService) CreateConnection(ctx context.Context, userID uuid.UUID, in
 	return conn, nil
 }
 
+func (s *BankService) RefreshConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID, redirectURL string, isSandbox bool, ip string, userAgent string) (*entity.BankConnection, error) {
+	s.logger.Info("Refreshing bank connection", "id", id, "user_id", userID)
+
+	// 1. Get existing connection
+	conn, err := s.repo.GetConnection(ctx, id, userID)
+	if err != nil {
+		return nil, err
+	}
+	if conn == nil {
+		return nil, fmt.Errorf("connection not found")
+	}
+
+	// 2. Generate new re-auth link using the existing reference ID
+	authLink, _, err := s.provider.GenerateReauthLink(ctx, userID, conn.InstitutionID, "DE", redirectURL, conn.ReferenceID, isSandbox, ip, userAgent)
+	if err != nil {
+		return nil, fmt.Errorf("provider failed to generate reauth link: %w", err)
+	}
+
+	conn.AuthLink = authLink
+	return conn, nil
+}
+
 func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, requisitionID string, code string) error {
 	s.logger.Info("Finishing bank connection", "requisition_id", requisitionID, "user_id", userID)
 	conn, err := s.repo.GetConnectionByRequisition(ctx, requisitionID, userID)
@@ -105,6 +127,11 @@ func (s *BankService) FinishConnection(ctx context.Context, userID uuid.UUID, re
 			return fmt.Errorf("failed to update session id: %w", err)
 		}
 		requisitionID = sessionID
+	}
+
+	// Reset notification status as we now have a fresh (90-day) connection
+	if err := s.repo.UpdateExpiryNotifiedAt(ctx, conn.ID, nil); err != nil {
+		s.logger.Warn("failed to reset expiry notification status", "connection_id", conn.ID, "error", err)
 	}
 
 	// Enable Banking uses standard OAuth; exchanging the code guarantees authorization.

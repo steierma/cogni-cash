@@ -277,3 +277,42 @@ func TestUserService_DeleteUser_NotFound(t *testing.T) {
 		t.Error("expected error for non-existent user")
 	}
 }
+
+func TestUserService_GetAdminID_Success(t *testing.T) {
+	repo := newMockUserRepoForUserSvc()
+	adminID := uuid.New()
+	repo.addUser(entity.User{ID: adminID, Username: "admin", Role: "admin"})
+
+	svc := service.NewUserService(repo, nil)
+	id, err := svc.GetAdminID(context.Background())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if id != adminID {
+		t.Errorf("expected admin ID %v, got %v", adminID, id)
+	}
+}
+
+func TestUserService_GetAdminID_NotFound(t *testing.T) {
+	repo := newMockUserRepoForUserSvc()
+	svc := service.NewUserService(repo, nil)
+	_, err := svc.GetAdminID(context.Background())
+	if err == nil {
+		t.Error("expected error when admin not found")
+	}
+}
+
+func TestUserService_CreateUser_RepoError(t *testing.T) {
+	repo := newMockUserRepoForUserSvc()
+	// Add a user to cause a duplicate username error
+	repo.addUser(entity.User{ID: uuid.New(), Username: "duplicate"})
+
+	svc := service.NewUserService(repo, nil)
+	_, err := svc.CreateUser(context.Background(), entity.User{
+		Username: "duplicate",
+	}, "password123")
+
+	if err == nil {
+		t.Error("expected error from repository")
+	}
+}

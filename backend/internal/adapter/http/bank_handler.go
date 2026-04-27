@@ -195,6 +195,42 @@ func (h *BankHandler) deleteBankConnection(w http.ResponseWriter, r *http.Reques
 	w.WriteHeader(http.StatusNoContent)
 }
 
+func (h *BankHandler) refreshBankConnection(w http.ResponseWriter, r *http.Request) {
+	idStr := chi.URLParam(r, "id")
+	id, err := uuid.Parse(idStr)
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid connection id")
+		return
+	}
+
+	var req struct {
+		RedirectURL string `json:"redirect_url"`
+		Sandbox     bool   `json:"sandbox"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+
+	userID := GetUserID(r.Context())
+	if userID == uuid.Nil {
+		writeError(w, http.StatusUnauthorized, "unauthorized")
+		return
+	}
+
+	ip := getClientIP(r)
+	ua := r.Header.Get("User-Agent")
+
+	conn, err := h.bankSvc.RefreshConnection(r.Context(), id, userID, req.RedirectURL, req.Sandbox, ip, ua)
+	if err != nil {
+		h.Logger.Error("failed to refresh bank connection", "error", err)
+		writeError(w, http.StatusInternalServerError, "failed to initiate bank refresh")
+		return
+	}
+
+	writeJSON(w, http.StatusOK, conn)
+}
+
 func (h *BankHandler) syncAllBankAccounts(w http.ResponseWriter, r *http.Request) {
 	userID := GetUserID(r.Context())
 	if userID == uuid.Nil {

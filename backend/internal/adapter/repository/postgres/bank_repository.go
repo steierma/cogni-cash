@@ -35,9 +35,9 @@ func (r *BankRepository) CreateConnection(ctx context.Context, conn *entity.Bank
 	}
 
 	_, err := r.pool.Exec(ctx, `
-		INSERT INTO bank_connections (id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
-	`, conn.ID, conn.UserID, conn.Provider, conn.InstitutionID, conn.InstitutionName, conn.RequisitionID, conn.ReferenceID, string(conn.Status), conn.CreatedAt, conn.ExpiresAt)
+		INSERT INTO bank_connections (id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at, expiry_notified_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+	`, conn.ID, conn.UserID, conn.Provider, conn.InstitutionID, conn.InstitutionName, conn.RequisitionID, conn.ReferenceID, string(conn.Status), conn.CreatedAt, conn.ExpiresAt, conn.ExpiryNotifiedAt)
 
 	if err != nil {
 		return fmt.Errorf("bank repo: create connection: %w", err)
@@ -47,13 +47,13 @@ func (r *BankRepository) CreateConnection(ctx context.Context, conn *entity.Bank
 
 func (r *BankRepository) GetConnection(ctx context.Context, id uuid.UUID, userID uuid.UUID) (*entity.BankConnection, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at
+		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at, expiry_notified_at
 		FROM bank_connections WHERE id = $1 AND user_id = $2
 	`, id, userID)
 
 	var conn entity.BankConnection
 	var status string
-	err := row.Scan(&conn.ID, &conn.UserID, &conn.Provider, &conn.InstitutionID, &conn.InstitutionName, &conn.RequisitionID, &conn.ReferenceID, &status, &conn.CreatedAt, &conn.ExpiresAt)
+	err := row.Scan(&conn.ID, &conn.UserID, &conn.Provider, &conn.InstitutionID, &conn.InstitutionName, &conn.RequisitionID, &conn.ReferenceID, &status, &conn.CreatedAt, &conn.ExpiresAt, &conn.ExpiryNotifiedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -66,13 +66,13 @@ func (r *BankRepository) GetConnection(ctx context.Context, id uuid.UUID, userID
 
 func (r *BankRepository) GetConnectionByRequisition(ctx context.Context, requisitionID string, userID uuid.UUID) (*entity.BankConnection, error) {
 	row := r.pool.QueryRow(ctx, `
-		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at
+		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at, expiry_notified_at
 		FROM bank_connections WHERE requisition_id = $1 AND user_id = $2
 	`, requisitionID, userID)
 
 	var conn entity.BankConnection
 	var status string
-	err := row.Scan(&conn.ID, &conn.UserID, &conn.Provider, &conn.InstitutionID, &conn.InstitutionName, &conn.RequisitionID, &conn.ReferenceID, &status, &conn.CreatedAt, &conn.ExpiresAt)
+	err := row.Scan(&conn.ID, &conn.UserID, &conn.Provider, &conn.InstitutionID, &conn.InstitutionName, &conn.RequisitionID, &conn.ReferenceID, &status, &conn.CreatedAt, &conn.ExpiresAt, &conn.ExpiryNotifiedAt)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil, nil
@@ -85,7 +85,7 @@ func (r *BankRepository) GetConnectionByRequisition(ctx context.Context, requisi
 
 func (r *BankRepository) GetConnectionsByUserID(ctx context.Context, userID uuid.UUID) ([]entity.BankConnection, error) {
 	rows, err := r.pool.Query(ctx, `
-		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at
+		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at, expiry_notified_at
 		FROM bank_connections WHERE user_id = $1
 		ORDER BY created_at DESC
 	`, userID)
@@ -98,7 +98,7 @@ func (r *BankRepository) GetConnectionsByUserID(ctx context.Context, userID uuid
 	for rows.Next() {
 		var conn entity.BankConnection
 		var status string
-		if err := rows.Scan(&conn.ID, &conn.UserID, &conn.Provider, &conn.InstitutionID, &conn.InstitutionName, &conn.RequisitionID, &conn.ReferenceID, &status, &conn.CreatedAt, &conn.ExpiresAt); err != nil {
+		if err := rows.Scan(&conn.ID, &conn.UserID, &conn.Provider, &conn.InstitutionID, &conn.InstitutionName, &conn.RequisitionID, &conn.ReferenceID, &status, &conn.CreatedAt, &conn.ExpiresAt, &conn.ExpiryNotifiedAt); err != nil {
 			return nil, fmt.Errorf("bank repo: scan connection: %w", err)
 		}
 		conn.Status = entity.ConnectionStatus(status)
@@ -129,6 +129,43 @@ func (r *BankRepository) DeleteConnection(ctx context.Context, id uuid.UUID, use
 		return fmt.Errorf("bank repo: delete connection: %w", err)
 	}
 	return nil
+}
+
+func (r *BankRepository) UpdateExpiryNotifiedAt(ctx context.Context, id uuid.UUID, notifiedAt *time.Time) error {
+	_, err := r.pool.Exec(ctx, "UPDATE bank_connections SET expiry_notified_at = $1 WHERE id = $2", notifiedAt, id)
+	if err != nil {
+		return fmt.Errorf("bank repo: update expiry notified at: %w", err)
+	}
+	return nil
+}
+
+func (r *BankRepository) GetExpiringConnections(ctx context.Context, days int) ([]entity.BankConnection, error) {
+	// Find connections expiring in exactly X days that haven't been notified yet
+	// Using interval logic for PostgreSQL
+	query := `
+		SELECT id, user_id, provider, institution_id, institution_name, requisition_id, reference_id, status, created_at, expires_at, expiry_notified_at
+		FROM bank_connections
+		WHERE expires_at IS NOT NULL
+		  AND expiry_notified_at IS NULL
+		  AND expires_at::date = (CURRENT_DATE + ($1 || ' days')::interval)::date
+	`
+	rows, err := r.pool.Query(ctx, query, days)
+	if err != nil {
+		return nil, fmt.Errorf("bank repo: get expiring connections: %w", err)
+	}
+	defer rows.Close()
+
+	var conns []entity.BankConnection
+	for rows.Next() {
+		var conn entity.BankConnection
+		var status string
+		if err := rows.Scan(&conn.ID, &conn.UserID, &conn.Provider, &conn.InstitutionID, &conn.InstitutionName, &conn.RequisitionID, &conn.ReferenceID, &status, &conn.CreatedAt, &conn.ExpiresAt, &conn.ExpiryNotifiedAt); err != nil {
+			return nil, fmt.Errorf("bank repo: scan expiring connection: %w", err)
+		}
+		conn.Status = entity.ConnectionStatus(status)
+		conns = append(conns, conn)
+	}
+	return conns, nil
 }
 
 // Accounts

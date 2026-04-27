@@ -212,6 +212,10 @@ func (m *mockNotificationSvc) SendPasswordResetEmail(_ context.Context, _ entity
 func (m *mockNotificationSvc) SendTestEmail(_ context.Context, _ string, _ uuid.UUID) error {
 	return nil
 }
+func (m *mockNotificationSvc) SendAdminAlert(_ context.Context, _, _ string) error { return nil }
+func (m *mockNotificationSvc) SendBankExpiryWarning(_ context.Context, _ entity.User, _ entity.BankConnection, _ int) error {
+	return nil
+}
 
 // --- Mock Settings Repository ---
 

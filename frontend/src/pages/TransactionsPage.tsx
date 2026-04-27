@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import axios from 'axios';
 import {
     BarChart3, Database, Layers, Loader2, Search, MapPin,
-    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Columns, Check, Zap, Link2, RefreshCcw, Link as LinkIcon
+    Sparkles, TrendingDown, TrendingUp, Trophy, Unlink, X, ArrowLeftRight, Check, Zap, Link2, RefreshCcw, Link as LinkIcon
 } from 'lucide-react';
 
 import { authService } from '../api/services/authService';
@@ -23,6 +23,9 @@ import { fmtCurrency, fmtDate } from '../utils/formatters';
 
 import TransactionFilters, { type FilterState } from '../components/transactions/TransactionFilters';
 import TransactionTable, { type TxColKey, type SortKey, type SortDir } from '../components/transactions/TransactionTable';
+
+import { useEffectiveSettings } from '../hooks/useEffectiveSettings';
+import { getNamespacedKey } from '../api/utils/settingsHelper';
 
 function formatChartMonth(yyyyMM: string, locale: string) {
     try {
@@ -134,10 +137,7 @@ export default function TransactionsPage() {
         staleTime: 5 * 60 * 1000,
     });
 
-    const { data: settings } = useQuery({
-        queryKey: ['settings'],
-        queryFn: () => settingsService.fetchSettings()
-    });
+    const { data: settings } = useEffectiveSettings();
 
     const { data: jobStatus, refetch: refetchJobStatus } = useQuery<JobState>({
         queryKey: ['auto-categorize-status'],
@@ -172,7 +172,25 @@ export default function TransactionsPage() {
 
     const markReviewedMutation = useMutation({
         mutationFn: (hash: string) => transactionService.markReviewed(hash),
-        onSuccess: () => {
+        onMutate: async (hash) => {
+            await qc.cancelQueries({ queryKey: ['transactions'] });
+            const previousQueries = qc.getQueriesData<Transaction[]>({ queryKey: ['transactions'] });
+
+            qc.setQueriesData<Transaction[]>({ queryKey: ['transactions'] }, (old) => {
+                if (!old) return old;
+                return old.map(t => t.content_hash === hash ? { ...t, reviewed: true } : t);
+            });
+
+            return { previousQueries };
+        },
+        onError: (_err, _hash, context) => {
+            if (context?.previousQueries) {
+                context.previousQueries.forEach(([queryKey, data]) => {
+                    qc.setQueryData(queryKey, data);
+                });
+            }
+        },
+        onSettled: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['analytics'] });
         },
@@ -181,7 +199,26 @@ export default function TransactionsPage() {
 
     const batchMarkReviewedMutation = useMutation({
         mutationFn: (hashes: string[]) => transactionService.markReviewedBulk(hashes),
-        onSuccess: () => {
+        onMutate: async (hashes) => {
+            await qc.cancelQueries({ queryKey: ['transactions'] });
+            const previousQueries = qc.getQueriesData<Transaction[]>({ queryKey: ['transactions'] });
+            const hashSet = new Set(hashes);
+
+            qc.setQueriesData<Transaction[]>({ queryKey: ['transactions'] }, (old) => {
+                if (!old) return old;
+                return old.map(t => hashSet.has(t.content_hash) ? { ...t, reviewed: true } : t);
+            });
+
+            return { previousQueries };
+        },
+        onError: (_err, _hashes, context) => {
+            if (context?.previousQueries) {
+                context.previousQueries.forEach(([queryKey, data]) => {
+                    qc.setQueryData(queryKey, data);
+                });
+            }
+        },
+        onSettled: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['analytics'] });
             setSelectedHashes(new Set());
@@ -224,7 +261,8 @@ export default function TransactionsPage() {
     const toggleColumn = (col: TxColKey) => {
         setVisibleCols(prev => {
             const next = { ...prev, [col]: !prev[col] };
-            updateSettingsMut.mutate({ transactions_visible_cols: JSON.stringify(next) });
+            const key = getNamespacedKey('transactions_visible_cols', true);
+            updateSettingsMut.mutate({ [key]: JSON.stringify(next) });
             return next;
         });
     };
@@ -425,7 +463,25 @@ export default function TransactionsPage() {
 
     const catMutation = useMutation({
         mutationFn: ({ hash, categoryId }: { hash: string; categoryId: string }) => transactionService.updateCategory(hash, categoryId),
-        onSuccess: () => {
+        onMutate: async ({ hash, categoryId }) => {
+            await qc.cancelQueries({ queryKey: ['transactions'] });
+            const previousQueries = qc.getQueriesData<Transaction[]>({ queryKey: ['transactions'] });
+
+            qc.setQueriesData<Transaction[]>({ queryKey: ['transactions'] }, (old) => {
+                if (!old) return old;
+                return old.map(t => t.content_hash === hash ? { ...t, category_id: categoryId || null, reviewed: true } : t);
+            });
+
+            return { previousQueries };
+        },
+        onError: (_err, _vars, context) => {
+            if (context?.previousQueries) {
+                context.previousQueries.forEach(([queryKey, data]) => {
+                    qc.setQueryData(queryKey, data);
+                });
+            }
+        },
+        onSettled: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['bank-statements'] });
             qc.invalidateQueries({ queryKey: ['analytics'] });
@@ -433,10 +489,27 @@ export default function TransactionsPage() {
     });
 
     const batchCatMutation = useMutation({
-        mutationFn: async ({ hashes, categoryId }: { hashes: string[]; categoryId: string }) => {
-            await Promise.all(hashes.map(hash => transactionService.updateCategory(hash, categoryId)));
+        mutationFn: ({ hashes, categoryId }: { hashes: string[]; categoryId: string }) => transactionService.updateCategoryBulk(hashes, categoryId),
+        onMutate: async ({ hashes, categoryId }) => {
+            await qc.cancelQueries({ queryKey: ['transactions'] });
+            const previousQueries = qc.getQueriesData<Transaction[]>({ queryKey: ['transactions'] });
+            const hashSet = new Set(hashes);
+
+            qc.setQueriesData<Transaction[]>({ queryKey: ['transactions'] }, (old) => {
+                if (!old) return old;
+                return old.map(t => hashSet.has(t.content_hash) ? { ...t, category_id: categoryId || null, reviewed: true } : t);
+            });
+
+            return { previousQueries };
         },
-        onSuccess: () => {
+        onError: (_err, _vars, context) => {
+            if (context?.previousQueries) {
+                context.previousQueries.forEach(([queryKey, data]) => {
+                    qc.setQueryData(queryKey, data);
+                });
+            }
+        },
+        onSettled: () => {
             qc.invalidateQueries({ queryKey: ['transactions'] });
             qc.invalidateQueries({ queryKey: ['bank-statements'] });
             qc.invalidateQueries({ queryKey: ['analytics'] });
@@ -444,29 +517,60 @@ export default function TransactionsPage() {
         },
     });
 
-    const toggleSelect = (hash: string) => {
-        const next = new Set(selectedHashes);
-        if (next.has(hash)) next.delete(hash);
-        else next.add(hash);
-        setSelectedHashes(next);
-    };
+    const toggleSelect = React.useCallback((hash: string) => {
+        setSelectedHashes(prev => {
+            const next = new Set(prev);
+            if (next.has(hash)) next.delete(hash);
+            else next.add(hash);
+            return next;
+        });
+    }, []);
 
-    const toggleSelectAll = () => {
-        if (selectedHashes.size === filtered.length && filtered.length > 0) setSelectedHashes(new Set());
-        else setSelectedHashes(new Set(filtered.map(t => t.content_hash)));
-    };
+    const toggleSelectAll = React.useCallback(() => {
+        setSelectedHashes(prev => {
+            if (prev.size === filtered.length && filtered.length > 0) return new Set();
+            return new Set(filtered.map(t => t.content_hash));
+        });
+    }, [filtered]);
 
-    const handleReviewAll = () => {
+    const handleReviewAll = React.useCallback(() => {
         const unreviewedHashes = filtered.filter(t => !t.reviewed).map(t => t.content_hash);
         if (unreviewedHashes.length > 0) {
             batchMarkReviewedMutation.mutate(unreviewedHashes);
         }
-    };
+    }, [filtered, batchMarkReviewedMutation]);
 
     const unreviewedCount = React.useMemo(() => filtered.filter(t => !t.reviewed).length, [filtered]);
 
+    const handleCategoryChange = React.useCallback((hash: string, categoryId: string) => {
+        catMutation.mutate({ hash, categoryId });
+    }, [catMutation]);
+
+    const handleMarkReviewed = React.useCallback((hash: string) => {
+        markReviewedMutation.mutate(hash);
+    }, [markReviewedMutation]);
+
+    const handleCreateSubscription = React.useCallback((tx: Transaction) => {
+        setSubModalTx(tx);
+    }, []);
+
+    const handleLinkSubscription = React.useCallback((tx: Transaction) => {
+        setLinkModalTx(tx);
+    }, []);
+
+    const handleUnlinkSubscription = React.useCallback((tx: Transaction) => {
+        const sub = subscriptions.find(s => s.id === tx.subscription_id);
+        if (window.confirm(t('subscriptions.unlinkConfirm', { merchant: sub?.merchant_name }))) {
+            unlinkMutation.mutate(tx);
+        }
+    }, [t, subscriptions, unlinkMutation]);
+
+    const handleSearchSimilar = React.useCallback((tx: Transaction) => {
+        setSearchSimilarTx(tx);
+    }, []);
+
     return (
-        <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
+        <div className="space-y-6 pb-20 animate-in fade-in duration-300">
             <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
@@ -528,35 +632,6 @@ export default function TransactionsPage() {
             <div className="flex items-center justify-end gap-2 flex-wrap">
                 {hasAppliedOnce && filtered.length > 0 && (
                     <>
-                        <div className="relative">
-                            <button
-                                onClick={() => setShowColMenu(!showColMenu)}
-                                className="flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50"
-                            >
-                                <Columns size={14} /> {t('transactions.columns', 'Columns')}
-                            </button>
-                            {showColMenu && (
-                                <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700 rounded-xl shadow-lg z-10 overflow-hidden p-2 space-y-1">
-                                    {[
-                                        { key: 'date', label: t('transactions.cols.date', 'Date') },
-                                        { key: 'description', label: t('transactions.cols.description', 'Description') },
-                                        { key: 'location', label: t('transactions.cols.location', 'Location') },
-                                        { key: 'reference', label: t('transactions.cols.reference', 'Reference') },
-                                        { key: 'category', label: t('transactions.cols.category', 'Category') },
-                                        { key: 'amount', label: t('transactions.cols.amount', 'Amount') },
-                                    ].map(({ key, label }) => (
-                                        <button
-                                            key={key}
-                                            onClick={() => toggleColumn(key as TxColKey)}
-                                            className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-colors"
-                                        >
-                                            {label} {visibleCols[key as TxColKey] && <Check size={16} className="text-indigo-600 dark:text-indigo-400" />}
-                                        </button>
-                                    ))}
-                                </div>
-                            )}
-                        </div>
-
                         <button
                             onClick={() => setShowVisuals(!showVisuals)}
                             className={`flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-lg border transition-colors ${showVisuals
@@ -854,17 +929,16 @@ export default function TransactionsPage() {
                     sortKey={sortKey}
                     sortDir={sortDir}
                     onSort={toggleSort}
-                    onCategoryChange={(hash, categoryId) => catMutation.mutate({ hash, categoryId })}
-                    onMarkReviewed={(hash) => markReviewedMutation.mutate(hash)}
-                    onCreateSubscription={(tx: Transaction) => setSubModalTx(tx)}
-                    onLinkSubscription={(tx: Transaction) => setLinkModalTx(tx)}
-                    onUnlinkSubscription={(tx: Transaction) => {
-                        if (window.confirm(t('subscriptions.unlinkConfirm', { merchant: subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name }))) {
-                            unlinkMutation.mutate(tx);
-                        }
-                    }}
-                    onSearchSimilar={(tx: Transaction) => setSearchSimilarTx(tx)}
+                    onCategoryChange={handleCategoryChange}
+                    onMarkReviewed={handleMarkReviewed}
+                    onCreateSubscription={handleCreateSubscription}
+                    onLinkSubscription={handleLinkSubscription}
+                    onUnlinkSubscription={handleUnlinkSubscription}
+                    onSearchSimilar={handleSearchSimilar}
                     visibleCols={visibleCols}
+                    showColMenu={showColMenu}
+                    onToggleColMenu={() => setShowColMenu(!showColMenu)}
+                    onToggleColumn={toggleColumn}
                 />
             )}
 

@@ -223,6 +223,10 @@ func (m *mockBankStmtRepo) UpdateTransactionCategory(_ context.Context, hash str
 	return nil
 }
 
+func (m *mockBankStmtRepo) UpdateTransactionCategoriesBulk(_ context.Context, _ []string, _ *uuid.UUID, _ uuid.UUID) error {
+	return nil
+}
+
 func (m *mockBankStmtRepo) UpdateTransactionSubscription(_ context.Context, contentHash string, subscriptionID *uuid.UUID, _ uuid.UUID) error {
 	return nil
 }

@@ -82,6 +82,10 @@ func (s *InvoiceService) Update(ctx context.Context, invoice entity.Invoice) (en
 	return s.invoiceRepo.FindByID(ctx, invoice.ID, invoice.UserID)
 }
 
+func (s *InvoiceService) UpdateCategoriesBulk(ctx context.Context, ids []uuid.UUID, categoryID *uuid.UUID, userID uuid.UUID) error {
+	return s.invoiceRepo.UpdateCategoriesBulk(ctx, ids, categoryID, userID)
+}
+
 func (s *InvoiceService) Delete(ctx context.Context, id uuid.UUID, userID uuid.UUID) error {
 	return s.invoiceRepo.Delete(ctx, id, userID)
 }

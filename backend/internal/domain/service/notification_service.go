@@ -80,3 +80,44 @@ func (s *NotificationService) SendTestEmail(ctx context.Context, to string, user
 
 	return nil
 }
+
+func (s *NotificationService) SendAdminAlert(ctx context.Context, subject, message string) error {
+	admin, err := s.userRepo.FindByUsername(ctx, "admin")
+	if err != nil {
+		s.logger.Error("Failed to find admin user for system alert", "error", err)
+		return err
+	}
+
+	if admin.Email == "" {
+		s.logger.Warn("Cannot send admin alert: admin user has no email address")
+		return nil
+	}
+
+	body := fmt.Sprintf("System Alert\n\n%s\n\nBest regards,\nThe Cogni-Cash System", message)
+
+	if err := s.emailProvider.Send(ctx, admin.ID, admin.Email, subject, body); err != nil {
+		s.logger.Error("Failed to send admin alert email", "error", err)
+		return err
+	}
+
+	return nil
+}
+
+func (s *NotificationService) SendBankExpiryWarning(ctx context.Context, user entity.User, connection entity.BankConnection, daysRemaining int) error {
+	if user.Email == "" {
+		s.logger.Warn("Cannot send bank expiry warning: user has no email address", "user_id", user.ID)
+		return nil
+	}
+
+	adminID := s.getAdminID(ctx)
+	subject := fmt.Sprintf("Action Required: Bank Connection Expiry (%s)", connection.InstitutionName)
+	body := fmt.Sprintf("Hello %s,\n\nYour connection to %s is about to expire in %d days.\n\nTo ensure your financial data continues to sync automatically, please log in to Cogni-Cash and refresh the connection in the Settings > Bank Connections area.\n\nBest regards,\nThe Cogni-Cash Team", user.FullName, connection.InstitutionName, daysRemaining)
+
+	if err := s.emailProvider.Send(ctx, adminID, user.Email, subject, body); err != nil {
+		s.logger.Error("Failed to send bank expiry warning", "user_id", user.ID, "connection_id", connection.ID, "error", err)
+		return err
+	}
+
+	return nil
+}
+

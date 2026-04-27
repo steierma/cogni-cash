@@ -1,5 +1,7 @@
+import * as React from 'react';
 import { useTranslation } from 'react-i18next';
-import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, Users, RefreshCcw, Search } from 'lucide-react';
+import { useVirtualizer } from '@tanstack/react-virtual';
+import { CheckSquare, ChevronDown, ChevronUp, Copy, Square, TrendingDown, TrendingUp, Unlink, MapPin, User, Zap, Users, RefreshCcw, Search, Columns, Check } from 'lucide-react';
 import type { Category } from "../../api/types/category";
 import type { Transaction } from "../../api/types/transaction";
 import type { Subscription } from "../../api/types/subscription";
@@ -27,7 +29,228 @@ interface TransactionTableProps {
     onUnlinkSubscription?: (tx: Transaction) => void;
     onSearchSimilar?: (tx: Transaction) => void;
     visibleCols: Record<TxColKey, boolean>;
+    showColMenu: boolean;
+    onToggleColMenu: () => void;
+    onToggleColumn: (key: TxColKey) => void;
 }
+
+const TransactionRow = React.memo(({
+    tx,
+    categories,
+    subscriptions,
+    currentUserId,
+    isSelected,
+    onToggleSelect,
+    onCategoryChange,
+    onMarkReviewed,
+    onCreateSubscription,
+    onLinkSubscription,
+    onUnlinkSubscription,
+    onSearchSimilar,
+    visibleCols,
+    t
+}: {
+    tx: Transaction;
+    categories: Category[];
+    subscriptions: Subscription[];
+    currentUserId?: string;
+    isSelected: boolean;
+    onToggleSelect: (hash: string) => void;
+    onCategoryChange: (hash: string, categoryId: string) => void;
+    onMarkReviewed?: (hash: string) => void;
+    onCreateSubscription?: (tx: Transaction) => void;
+    onLinkSubscription?: (tx: Transaction) => void;
+    onUnlinkSubscription?: (tx: Transaction) => void;
+    onSearchSimilar?: (tx: Transaction) => void;
+    visibleCols: Record<TxColKey, boolean>;
+    t: any;
+}) => {
+    const currentCat = categories.find((c) => c.id === tx.category_id);
+
+    return (
+        <tr className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''} ${tx.is_reconciled ? 'opacity-60' : ''} ${tx.is_prediction ? 'bg-indigo-50/10 dark:bg-indigo-900/5 border-l-2 border-l-indigo-500 dark:border-l-indigo-400' : ''}`}>
+            <td className="px-4 py-3 align-top pt-4">
+                <button
+                    type="button"
+                    onClick={() => onToggleSelect(tx.content_hash)}
+                    className={`transition-colors ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400 dark:hover:text-gray-400'}`}
+                >
+                    {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
+                </button>
+            </td>
+
+            {visibleCols.date && (
+                <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap align-top pt-4">
+                    <span>{fmtDate(tx.booking_date)}</span>
+                </td>
+            )}
+
+            {visibleCols.description && (
+                <td className="px-4 py-3 align-top pt-3.5 max-w-xs">
+                    <div className="flex flex-col gap-1">
+                        <span className={`flex items-center gap-1.5 text-gray-800 dark:text-gray-200 truncate`} title={tx.description}>
+                            {(tx.is_shared || (currentUserId && tx.user_id !== currentUserId)) && (
+                                <span title={t('transactions.table.shared')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 uppercase tracking-tighter">
+                                    <Users size={9} /> {t('transactions.table.shared')}
+                                </span>
+                            )}
+                            {tx.is_prediction && (
+                                <span title={t('forecasting.isPrediction')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0 uppercase tracking-tighter">
+                                    <Zap size={9} /> {t('forecasting.isPrediction')}
+                                </span>
+                            )}
+                            {tx.is_prediction && tx.description.startsWith('Variable Budget:') && (
+                                <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 shrink-0 uppercase tracking-tighter">
+                                    {t('forecasting.variableBudget', 'Burn Rate')}
+                                </span>
+                            )}
+                            {!tx.reviewed && !tx.is_prediction && (
+                                <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 animate-pulse" title={t('transactions.table.unreviewed', 'New / Unreviewed')} />
+                            )}
+                            {tx.is_reconciled && (
+                                <span title={t('transactions.table.reconciled')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 shrink-0">
+                                    <Unlink size={9} /> {t('transactions.table.reconciled')}
+                                </span>
+                            )}
+                            {tx.subscription_id && (
+                                <span 
+                                    title={subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name ?? t('subscriptions.title')} 
+                                    className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800/50 shrink-0 uppercase tracking-tighter"
+                                >
+                                    <RefreshCcw size={9} /> {subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name ?? t('subscriptions.title')}
+                                </span>
+                            )}
+                            <span className="truncate">{tx.description}</span>
+                            {onSearchSimilar && (
+                                <button 
+                                    type="button" 
+                                    onClick={(e) => { e.stopPropagation(); onSearchSimilar(tx); }}
+                                    className="text-gray-300 dark:text-gray-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0 ml-1"
+                                    title={t('transactions.searchSimilar')}
+                                >
+                                    <Search size={12} />
+                                </button>
+                            )}
+                        </span>
+                        <span className="text-gray-500 dark:text-gray-400 text-xs truncate max-w-[12rem]"
+                              title={[tx.counterparty_name, tx.counterparty_iban, tx.bank_transaction_code].filter(Boolean).join(' · ')}>
+                            {tx.counterparty_name ? (
+                                <span className="flex items-center gap-1">
+                                    <User size={12} className="opacity-70 shrink-0" />
+                                    <span className="truncate">{tx.counterparty_name}</span>
+                                </span>
+                            ) : tx.bank_transaction_code ? (
+                                <span className="opacity-60 italic">{tx.bank_transaction_code}</span>
+                            ) : (
+                                <span className="opacity-50">—</span>
+                            )}
+                        </span>
+                    </div>
+                </td>
+            )}
+
+            {visibleCols.location && (
+                <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs max-w-[10rem] truncate align-top pt-4" title={tx.location}>
+                    {tx.location ? (
+                        <span className="flex items-center gap-1">
+                                <MapPin size={12} className="opacity-70" /> {tx.location}
+                            </span>
+                    ) : (
+                        <span className="opacity-50">—</span>
+                    )}
+                </td>
+            )}
+
+            {visibleCols.reference && (
+                <td className="px-4 py-3 text-gray-400 dark:text-gray-500 text-xs max-w-[10rem] truncate align-top pt-4" title={tx.reference}>
+                    <div className="flex items-center justify-between gap-2">
+                        <span className="truncate">{tx.reference || '—'}</span>
+                        <button type="button" onClick={() => navigator.clipboard.writeText(tx.content_hash)} className="text-gray-300 dark:text-gray-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0">
+                            <Copy size={12} />
+                        </button>
+                    </div>
+                </td>
+            )}
+
+            {visibleCols.category && (
+                <td className="px-4 py-3 align-top pt-3.5">
+                    <select
+                        value={currentCat?.id ?? ''}
+                        onChange={(e) => onCategoryChange(tx.content_hash, e.target.value)}
+                        className="text-xs rounded-lg border border-gray-200 dark:border-gray-700 px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500 max-w-[13rem] truncate transition-colors hover:border-indigo-300 dark:hover:border-indigo-500"
+                        style={currentCat ? { color: currentCat.color, borderColor: currentCat.color + '55' } : undefined}
+                    >
+                        <option value="">{t('transactions.table.unset')}</option>
+                        {categories.filter(c => !c.deleted_at || c.id === currentCat?.id).map((c) => (
+                            <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                    </select>
+                </td>
+            )}
+
+            {visibleCols.amount && (
+                <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
+                        <span className="flex flex-col items-end">
+                            <span className="inline-flex items-center gap-1 justify-end w-full">
+                                {tx.amount >= 0 ? <TrendingUp size={11} className="text-green-500 dark:text-green-400" /> : <TrendingDown size={11} className="text-red-400 dark:text-red-500" />}
+                                {fmtCurrency(tx.amount, tx.currency)}
+                            </span>
+                            {tx.base_currency && tx.base_currency !== tx.currency && tx.base_amount !== 0 && (
+                                <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal">
+                                    {fmtCurrency(tx.base_amount, tx.base_currency)}
+                                </span>
+                            )}
+                        </span>
+                </td>
+            )}
+            <td className="px-4 py-3 text-right align-top pt-3.5 whitespace-nowrap">
+                <div className="flex items-center justify-end gap-1">
+
+                    {!tx.reviewed && !tx.is_prediction && (
+                        <button
+                            onClick={() => onMarkReviewed?.(tx.content_hash)}
+                            className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                            title={t('transactions.markAsReviewed', 'Mark as Reviewed')}
+                        >
+                            <CheckSquare size={16} />
+                        </button>
+                    )}
+
+                    {tx.amount < 0 && !tx.is_prediction && (
+                        <>
+                            {!tx.subscription_id ? (
+                                <>
+                                    <button
+                                        onClick={() => onCreateSubscription?.(tx)}
+                                        className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                        title={t('transactions.createSubscription', 'Create Subscription')}
+                                    >
+                                        <RefreshCcw size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => onLinkSubscription?.(tx)}
+                                        className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
+                                        title={t('subscriptions.linkManually', 'Link to existing Subscription')}
+                                    >
+                                        <Copy size={16} />
+                                    </button>
+                                </>
+                            ) : (
+                                <button
+                                    onClick={() => onUnlinkSubscription?.(tx)}
+                                    className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
+                                    title={t('subscriptions.unlinkManually', 'Unlink from Subscription')}
+                                >
+                                    <Unlink size={16} />
+                                </button>
+                            )}
+                        </>
+                    )}
+                </div>
+            </td>
+        </tr>
+    );
+});
 
 export default function TransactionTable({
                                              transactions,
@@ -46,8 +269,25 @@ export default function TransactionTable({
                                              onLinkSubscription,
                                              onUnlinkSubscription,
                                              onSearchSimilar,
-                                             visibleCols
+                                             visibleCols,
+                                             showColMenu,
+                                             onToggleColMenu,
+                                             onToggleColumn
                                              }: TransactionTableProps) {    const { t } = useTranslation();
+    const parentRef = React.useRef<HTMLDivElement>(null);
+
+    const rowVirtualizer = useVirtualizer({
+        count: transactions.length,
+        getScrollElement: () => parentRef.current,
+        estimateSize: () => 70,
+        overscan: 10,
+    });
+
+    const virtualRows = rowVirtualizer.getVirtualItems();
+    const totalSize = rowVirtualizer.getTotalSize();
+
+    const paddingTop = virtualRows.length > 0 ? virtualRows[0].start : 0;
+    const paddingBottom = virtualRows.length > 0 ? totalSize - virtualRows[virtualRows.length - 1].end : 0;
 
 
     const renderSortIcon = (k: SortKey) => {
@@ -57,11 +297,14 @@ export default function TransactionTable({
 
     return (
         <div className="bg-white dark:bg-gray-900 rounded-2xl border border-gray-200 dark:border-gray-800 shadow-sm overflow-hidden relative">
-            <div className="overflow-x-auto [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-700">
-                <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-800 text-sm">
-                    <thead className="bg-gray-50 dark:bg-gray-800/50 text-xs uppercase text-gray-400 dark:text-gray-500 tracking-wide">
+            <div 
+                ref={parentRef}
+                className="overflow-x-auto overflow-y-auto max-h-[calc(100vh-320px)] [&::-webkit-scrollbar]:h-2 [&::-webkit-scrollbar]:w-2 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:rounded-full [&::-webkit-scrollbar-thumb]:bg-gray-300 dark:[&::-webkit-scrollbar-thumb]:bg-gray-700"
+            >
+                <table className="min-w-full divide-y divide-gray-100 dark:divide-gray-800 text-sm border-separate border-spacing-0">
+                    <thead className="bg-gray-50 dark:bg-gray-800/90 backdrop-blur-sm text-xs uppercase text-gray-400 dark:text-gray-500 tracking-wide sticky top-0 z-10 shadow-sm">
                     <tr>
-                        <th className="px-4 py-3 text-left w-10">
+                        <th className="px-4 py-3 text-left w-10 bg-inherit border-b border-gray-100 dark:border-gray-800">
                             <button
                                 type="button"
                                 onClick={onToggleSelectAll}
@@ -72,13 +315,13 @@ export default function TransactionTable({
                         </th>
 
                         {visibleCols.date && (
-                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none whitespace-nowrap" onClick={() => onSort('booking_date')}>
+                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none whitespace-nowrap bg-inherit border-b border-gray-100 dark:border-gray-800" onClick={() => onSort('booking_date')}>
                                 <span className="inline-flex items-center gap-1">{t('transactions.table.date', 'Date')} {renderSortIcon('booking_date')}</span>
                             </th>
                         )}
 
                         {(visibleCols.description || visibleCols.counterparty) && (
-                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none align-top"
+                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none align-top bg-inherit border-b border-gray-100 dark:border-gray-800"
                                 onClick={() => onSort('description')}
                             >
                                 <div className="flex flex-col gap-0.5">
@@ -96,217 +339,99 @@ export default function TransactionTable({
                         )}
 
                         {visibleCols.location && (
-                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none" onClick={() => onSort('location')}>
+                            <th className="px-4 py-3 text-left cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none bg-inherit border-b border-gray-100 dark:border-gray-800" onClick={() => onSort('location')}>
                                 <span className="inline-flex items-center gap-1">{t('transactions.table.location', 'Location')} {renderSortIcon('location')}</span>
                             </th>
                         )}
 
                         {visibleCols.reference && (
-                            <th className="px-4 py-3 text-left">{t('transactions.table.reference', 'Reference')}</th>
+                            <th className="px-4 py-3 text-left bg-inherit border-b border-gray-100 dark:border-gray-800">{t('transactions.table.reference', 'Reference')}</th>
                         )}
 
                         {visibleCols.category && (
-                            <th className="px-4 py-3 text-left">{t('transactions.table.category', 'Category')}</th>
+                            <th className="px-4 py-3 text-left bg-inherit border-b border-gray-100 dark:border-gray-800">{t('transactions.table.category', 'Category')}</th>
                         )}
 
                         {visibleCols.amount && (
-                            <th className="px-4 py-3 text-right cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none" onClick={() => onSort('amount')}>
+                            <th className="px-4 py-3 text-right cursor-pointer hover:text-gray-700 dark:hover:text-gray-300 select-none bg-inherit border-b border-gray-100 dark:border-gray-800" onClick={() => onSort('amount')}>
                                 <span className="inline-flex items-center gap-1 justify-end">{t('transactions.table.amount', 'Amount')} {renderSortIcon('amount')}</span>
                             </th>
                         )}
-                        <th className="px-4 py-3 text-right w-24">{t('common.actions', 'Actions')}</th>
+                        <th className="px-4 py-3 text-right w-24 bg-inherit border-b border-gray-100 dark:border-gray-800">
+                            <div className="flex items-center justify-end gap-2">
+                                <span>{t('common.actions', 'Actions')}</span>
+                                <div className="relative normal-case tracking-normal font-medium">
+                                    <button
+                                        onClick={onToggleColMenu}
+                                        className={`p-1 rounded-lg border transition-all ${showColMenu
+                                            ? 'bg-indigo-50 dark:bg-indigo-900/30 border-indigo-200 dark:border-indigo-800 text-indigo-600 dark:text-indigo-400'
+                                            : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800 text-gray-600 dark:text-gray-400 hover:bg-gray-50 dark:hover:bg-gray-800/50'}`}
+                                        title={t('transactions.columns', 'Columns')}
+                                    >
+                                        <Columns size={12} />
+                                    </button>
+
+                                    {showColMenu && (
+                                        <>
+                                            <div className="fixed inset-0 z-10" onClick={onToggleColMenu} />
+                                            <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-xl shadow-xl border border-gray-200 dark:border-gray-700 p-2 z-20 animate-in fade-in zoom-in duration-150 origin-top-right">
+                                                {[
+                                                    { key: 'date', label: t('transactions.cols.date', 'Date') },
+                                                    { key: 'description', label: t('transactions.cols.description', 'Description') },
+                                                    { key: 'location', label: t('transactions.cols.location', 'Location') },
+                                                    { key: 'reference', label: t('transactions.cols.reference', 'Reference') },
+                                                    { key: 'category', label: t('transactions.cols.category', 'Category') },
+                                                    { key: 'amount', label: t('transactions.cols.amount', 'Amount') },
+                                                ].map(({ key, label }) => (
+                                                    <button
+                                                        key={key}
+                                                        onClick={() => onToggleColumn(key as TxColKey)}
+                                                        className="w-full flex items-center justify-between px-3 py-2 text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700/50 rounded-lg transition-colors text-left"
+                                                    >
+                                                        {label} {visibleCols[key as TxColKey] && <Check size={16} className="text-indigo-600 dark:text-indigo-400" />}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </>
+                                    )}
+                                </div>
+                            </div>
+                        </th>
                     </tr>
                     </thead>
                     <tbody className="divide-y divide-gray-50 dark:divide-gray-800/50">
-                    {transactions.map((tx) => {
-                        const isSelected = selectedHashes.has(tx.content_hash);
-                        const currentCat = categories.find((c) => c.id === tx.category_id);
+                    {paddingTop > 0 && (
+                        <tr>
+                            <td style={{ height: `${paddingTop}px` }} colSpan={10} />
+                        </tr>
+                    )}
+                    {virtualRows.map((virtualRow) => {
+                        const tx = transactions[virtualRow.index];
                         return (
-                            <tr key={tx.content_hash} className={`hover:bg-gray-50 dark:hover:bg-gray-800/50 transition-colors ${isSelected ? 'bg-indigo-50/30 dark:bg-indigo-900/20' : ''} ${tx.is_reconciled ? 'opacity-60' : ''} ${tx.is_prediction ? 'bg-indigo-50/10 dark:bg-indigo-900/5 border-l-2 border-l-indigo-500 dark:border-l-indigo-400' : ''}`}>
-                                <td className="px-4 py-3 align-top pt-4">
-                                    <button
-                                        type="button"
-                                        onClick={() => onToggleSelect(tx.content_hash)}
-                                        className={`transition-colors ${isSelected ? 'text-indigo-600 dark:text-indigo-400' : 'text-gray-300 dark:text-gray-600 hover:text-gray-400 dark:hover:text-gray-400'}`}
-                                    >
-                                        {isSelected ? <CheckSquare size={16} /> : <Square size={16} />}
-                                    </button>
-                                </td>
-
-                                {visibleCols.date && (
-                                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 whitespace-nowrap align-top pt-4">
-                                        <span>{fmtDate(tx.booking_date)}</span>
-                                    </td>
-                                )}
-
-                                {visibleCols.description  && (
-                                    <td className="px-4 py-3 align-top pt-3.5 max-w-xs">
-                                        <div className="flex flex-col gap-1">
-                                            {visibleCols.description && (
-                                                <span className={`flex items-center gap-1.5 text-gray-800 dark:text-gray-200 truncate`} title={tx.description}>
-                                                    {(tx.is_shared || (currentUserId && tx.user_id !== currentUserId)) && (
-                                                        <span title={t('transactions.table.shared')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 border border-green-200 dark:border-green-800/50 shrink-0 uppercase tracking-tighter">
-                                                            <Users size={9} /> {t('transactions.table.shared')}
-                                                        </span>
-                                                    )}
-                                                    {tx.is_prediction && (
-                                                        <span title={t('forecasting.isPrediction')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 border border-indigo-200 dark:border-indigo-800/50 shrink-0 uppercase tracking-tighter">
-                                                            <Zap size={9} /> {t('forecasting.isPrediction')}
-                                                        </span>
-                                                    )}
-                                                    {tx.is_prediction && tx.description.startsWith('Variable Budget:') && (
-                                                        <span className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-amber-50 dark:bg-amber-900/30 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 shrink-0 uppercase tracking-tighter">
-                                                            {t('forecasting.variableBudget', 'Burn Rate')}
-                                                        </span>
-                                                    )}
-                                                    {!tx.reviewed && !tx.is_prediction && (
-                                                        <div className="w-2 h-2 rounded-full bg-indigo-500 shrink-0 animate-pulse" title={t('transactions.table.unreviewed', 'New / Unreviewed')} />
-                                                    )}
-                                                    {tx.is_reconciled && (
-                                                        <span title={t('transactions.table.reconciled')} className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-amber-50 dark:bg-amber-900/20 text-amber-600 dark:text-amber-400 border border-amber-200 dark:border-amber-800/50 shrink-0">
-                                                            <Unlink size={9} /> {t('transactions.table.reconciled')}
-                                                        </span>
-                                                    )}
-                                                    {tx.subscription_id && (
-                                                        <span 
-                                                            title={subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name ?? t('subscriptions.title')} 
-                                                            className="inline-flex items-center gap-0.5 px-1.5 py-0.5 rounded text-[10px] font-bold bg-purple-50 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 border border-purple-200 dark:border-purple-800/50 shrink-0 uppercase tracking-tighter"
-                                                        >
-                                                            <RefreshCcw size={9} /> {subscriptions.find(s => s.id === tx.subscription_id)?.merchant_name ?? t('subscriptions.title')}
-                                                        </span>
-                                                    )}
-                                                    <span className="truncate">{tx.description}</span>
-                                                    {onSearchSimilar && (
-                                                        <button 
-                                                            type="button" 
-                                                            onClick={(e) => { e.stopPropagation(); onSearchSimilar(tx); }}
-                                                            className="text-gray-300 dark:text-gray-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0 ml-1"
-                                                            title={t('transactions.searchSimilar')}
-                                                        >
-                                                            <Search size={12} />
-                                                        </button>
-                                                    )}
-                                                </span>
-                                            )}
-                                            <span className="text-gray-500 dark:text-gray-400 text-xs truncate max-w-[12rem]"
-                                                  title={[tx.counterparty_name, tx.counterparty_iban, tx.bank_transaction_code].filter(Boolean).join(' · ')}>
-                                                {tx.counterparty_name ? (
-                                                    <span className="flex items-center gap-1">
-                                                        <User size={12} className="opacity-70 shrink-0" />
-                                                        <span className="truncate">{tx.counterparty_name}</span>
-                                                    </span>
-                                                ) : tx.bank_transaction_code ? (
-                                                    <span className="opacity-60 italic">{tx.bank_transaction_code}</span>
-                                                ) : (
-                                                    <span className="opacity-50">—</span>
-                                                )}
-                                            </span>
-                                        </div>
-                                    </td>
-                                )}
-
-                                {visibleCols.location && (
-                                    <td className="px-4 py-3 text-gray-500 dark:text-gray-400 text-xs max-w-[10rem] truncate align-top pt-4" title={tx.location}>
-                                        {tx.location ? (
-                                            <span className="flex items-center gap-1">
-                                                    <MapPin size={12} className="opacity-70" /> {tx.location}
-                                                </span>
-                                        ) : (
-                                            <span className="opacity-50">—</span>
-                                        )}
-                                    </td>
-                                )}
-
-                                {visibleCols.reference && (
-                                    <td className="px-4 py-3 text-gray-400 dark:text-gray-500 text-xs max-w-[10rem] truncate align-top pt-4" title={tx.reference}>
-                                        <div className="flex items-center justify-between gap-2">
-                                            <span className="truncate">{tx.reference || '—'}</span>
-                                            <button type="button" onClick={() => navigator.clipboard.writeText(tx.content_hash)} className="text-gray-300 dark:text-gray-600 hover:text-indigo-500 dark:hover:text-indigo-400 transition-colors shrink-0">
-                                                <Copy size={12} />
-                                            </button>
-                                        </div>
-                                    </td>
-                                )}
-
-                                {visibleCols.category && (
-                                    <td className="px-4 py-3 align-top pt-3.5">
-                                        <select
-                                            value={currentCat?.id ?? ''}
-                                            onChange={(e) => onCategoryChange(tx.content_hash, e.target.value)}
-                                            className="text-xs rounded-lg border border-gray-200 dark:border-gray-700 px-2 py-1 bg-white dark:bg-gray-800 text-gray-700 dark:text-gray-300 focus:outline-none focus:ring-2 focus:ring-indigo-300 dark:focus:ring-indigo-500 max-w-[13rem] truncate transition-colors hover:border-indigo-300 dark:hover:border-indigo-500"
-                                            style={currentCat ? { color: currentCat.color, borderColor: currentCat.color + '55' } : undefined}
-                                        >
-                                            <option value="">{t('transactions.table.unset')}</option>
-                                            {categories.filter(c => !c.deleted_at || c.id === currentCat?.id).map((c) => (
-                                                <option key={c.id} value={c.id}>{c.name}</option>
-                                            ))}
-                                        </select>
-                                    </td>
-                                )}
-
-                                {visibleCols.amount && (
-                                    <td className={`px-4 py-3 text-right font-mono font-medium whitespace-nowrap align-top pt-4 ${tx.amount >= 0 ? 'text-green-600 dark:text-green-400' : 'text-red-500 dark:text-red-400'}`}>
-                                            <span className="flex flex-col items-end">
-                                                <span className="inline-flex items-center gap-1 justify-end w-full">
-                                                    {tx.amount >= 0 ? <TrendingUp size={11} className="text-green-500 dark:text-green-400" /> : <TrendingDown size={11} className="text-red-400 dark:text-red-500" />}
-                                                    {fmtCurrency(tx.amount, tx.currency)}
-                                                </span>
-                                                {tx.base_currency && tx.base_currency !== tx.currency && tx.base_amount !== 0 && (
-                                                    <span className="text-[10px] text-gray-400 dark:text-gray-500 font-normal">
-                                                        {fmtCurrency(tx.base_amount, tx.base_currency)}
-                                                    </span>
-                                                )}
-                                            </span>
-                                    </td>
-                                )}
-                                <td className="px-4 py-3 text-right align-top pt-3.5 whitespace-nowrap">
-                                    <div className="flex items-center justify-end gap-1">
-
-                                        {!tx.reviewed && !tx.is_prediction && (
-                                            <button
-                                                onClick={() => onMarkReviewed?.(tx.content_hash)}
-                                                className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                title={t('transactions.markAsReviewed', 'Mark as Reviewed')}
-                                            >
-                                                <CheckSquare size={16} />
-                                            </button>
-                                        )}
-
-                                        {tx.amount < 0 && !tx.is_prediction && (
-                                            <>
-                                                {!tx.subscription_id ? (
-                                                    <>
-                                                        <button
-                                                            onClick={() => onCreateSubscription?.(tx)}
-                                                            className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                            title={t('transactions.createSubscription', 'Create Subscription')}
-                                                        >
-                                                            <RefreshCcw size={16} />
-                                                        </button>
-                                                        <button
-                                                            onClick={() => onLinkSubscription?.(tx)}
-                                                            className="p-1.5 text-gray-400 hover:text-indigo-600 dark:hover:text-indigo-400 hover:bg-indigo-50 dark:hover:bg-indigo-900/20 rounded-lg transition-colors"
-                                                            title={t('subscriptions.linkManually', 'Link to existing Subscription')}
-                                                        >
-                                                            <Copy size={16} />
-                                                        </button>
-                                                    </>
-                                                ) : (
-                                                    <button
-                                                        onClick={() => onUnlinkSubscription?.(tx)}
-                                                        className="p-1.5 text-gray-400 hover:text-red-600 dark:hover:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded-lg transition-colors"
-                                                        title={t('subscriptions.unlinkManually', 'Unlink from Subscription')}
-                                                    >
-                                                        <Unlink size={16} />
-                                                    </button>
-                                                )}
-                                            </>
-                                        )}
-                                    </div>
-                                </td>
-                            </tr>
+                            <TransactionRow
+                                key={tx.content_hash}
+                                tx={tx}
+                                categories={categories}
+                                subscriptions={subscriptions}
+                                currentUserId={currentUserId}
+                                isSelected={selectedHashes.has(tx.content_hash)}
+                                onToggleSelect={onToggleSelect}
+                                onCategoryChange={onCategoryChange}
+                                onMarkReviewed={onMarkReviewed}
+                                onCreateSubscription={onCreateSubscription}
+                                onLinkSubscription={onLinkSubscription}
+                                onUnlinkSubscription={onUnlinkSubscription}
+                                onSearchSimilar={onSearchSimilar}
+                                visibleCols={visibleCols}
+                                t={t}
+                            />
                         );
                     })}
+                    {paddingBottom > 0 && (
+                        <tr>
+                            <td style={{ height: `${paddingBottom}px` }} colSpan={10} />
+                        </tr>
+                    )}
                     </tbody>
                 </table>
             </div>

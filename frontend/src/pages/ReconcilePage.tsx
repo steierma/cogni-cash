@@ -293,7 +293,7 @@ export default function ReconcilePage() {
     };
 
     return (
-        <div className="max-w-7xl mx-auto space-y-6 pb-20 animate-in fade-in duration-300">
+        <div className="space-y-6 pb-20 animate-in fade-in duration-300">
             <div className="flex flex-col md:flex-row md:items-start justify-between gap-4">
                 <div>
                     <h1 className="text-2xl font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">

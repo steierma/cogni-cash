@@ -27,6 +27,7 @@ type BankConnection struct {
 	AuthLink        string           `json:"auth_link,omitempty"`
 	CreatedAt       time.Time        `json:"created_at"`
 	ExpiresAt       *time.Time       `json:"expires_at,omitempty"`
+	ExpiryNotifiedAt *time.Time      `json:"expiry_notified_at,omitempty"`
 	Accounts        []BankAccount    `json:"accounts,omitempty"`
 }
 

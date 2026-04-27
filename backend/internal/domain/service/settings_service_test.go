@@ -248,7 +248,7 @@ func TestSettingsService_UpdateMultiple_Error(t *testing.T) {
 
 func TestSettingsService_LLMProfiles_MaskingAndMerging(t *testing.T) {
 	repo := newMockSimpleSettingsRepo()
-	originalProfiles := `[{"id":"1","name":"Profile 1","token":"secret-1"},{"id":"2","name":"Profile 2","token":"secret-2"}]`
+	originalProfiles := `[{"id":"1","name":"Profile 1","token":"secret-1","is_active":true},{"id":"2","name":"Profile 2","token":"secret-2","is_active":false}]`
 	repo.data["llm_profiles"] = originalProfiles
 
 	svc := service.NewSettingsService(repo, setupLogger())
@@ -267,10 +267,13 @@ func TestSettingsService_LLMProfiles_MaskingAndMerging(t *testing.T) {
 		if strings.Contains(val, "secret-1") {
 			t.Errorf("expected secret-1 to be hidden, got %s", val)
 		}
+		if !strings.Contains(val, `"is_active":true`) {
+			t.Errorf("expected is_active:true to be preserved, got %s", val)
+		}
 	})
 
 	t.Run("Merges tokens in UpdateMultiple", func(t *testing.T) {
-		newProfiles := `[{"id":"1","name":"Profile 1 Updated","token":"********"},{"id":"2","name":"Profile 2","token":"new-secret-2"},{"id":"3","name":"New Profile","token":"secret-3"}]`
+		newProfiles := `[{"id":"1","name":"Profile 1 Updated","token":"********","is_active":false},{"id":"2","name":"Profile 2","token":"new-secret-2","is_active":true},{"id":"3","name":"New Profile","token":"secret-3","is_active":false}]`
 		
 		err := svc.UpdateMultiple(context.Background(), map[string]string{
 			"llm_profiles": newProfiles,
@@ -291,6 +294,9 @@ func TestSettingsService_LLMProfiles_MaskingAndMerging(t *testing.T) {
 		}
 		if strings.Contains(savedJSON, "********") {
 			t.Errorf("saved JSON should not contain asterisks, got %s", savedJSON)
+		}
+		if !strings.Contains(savedJSON, `"is_active":true`) {
+			t.Errorf("expected is_active:true to be preserved after merge, got %s", savedJSON)
 		}
 	})
 }
